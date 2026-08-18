@@ -6,11 +6,23 @@ description: |
   条目落盘 agent-registry/registry/agents/<id>.yaml。
   约束：所有引用一律用注册表 id（model 用 alias），禁止内联实现细节与密钥。
 type: object
-required: [id, version, role, model, capabilities, permissions]
+required: [id, version, role, archetype, model, capabilities, permissions]
 properties:
   id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$", description: "引用形式 agent:<id>"}
   version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
   status: {enum: [proposed, approved, deprecated, rejected]}
+  archetype:
+    enum: [builder, checker, orchestrator, curator, interface, observer, operator]
+    description: |
+      原型（信任边界分类，AR-8）。分类决定默认权限基线/凭据策略/审计强度：
+        builder      生产者：写代码/文档/artifacts；产出必须被独立 checker 验收
+        checker      检查者：只读为主，输出=判决(pass/fail+理由)；强制 private workspace
+        orchestrator 编排者：任务分解/分配/汇总，不直接产 artifacts；高审计
+        curator      保管者：治理仓/registry 维护、归档审核（persistent 团队主力）
+        interface    接口者：对外通道接收需求/汇报；低权限转发+翻译
+        observer     观测者：只读采集度量/事件分析；只写数据层
+        operator     运维者：部署/回滚；strict 模式，生产动作全 ask+人工审批(RL-1)
+      约束：同一声明单 archetype；builder 与 checker 不得同一声明（利益分离）
   role: {type: string, description: "一句话职责；决定团队装配"}
   identity:
     type: object
@@ -57,6 +69,30 @@ properties:
     properties:
       types: {type: array, items: {enum: [user_profile, episodic, semantic]}, description: "记忆类别；敏感信息过滤默认开启"}
       retention: {type: string, description: "如 30d；episodic 默认随 ephemeral team 归档"}
+  guardrails:
+    type: object
+    description: "输出侧硬约束（AR-9 第一层）：交付前置条件，由编排框架在产出提交前强制"
+    properties:
+      output_schema_strict:
+        type: boolean
+        description: "输出必须通过 io_contract 的 schema 校验才可提交"
+      must_run:
+        type: array
+        items: {type: string}
+        description: "交付前必须全部退出码 0 的命令（如 make check / scripts/validate.py）"
+      forbidden:
+        type: array
+        items: {enum: [no-self-test, no-force-push, no-secret-output, no-bypass-gate]}
+        description: |
+          禁则（防同义反复/越权）：
+            no-self-test   同一 run 内不得既写实现又写其验收测试（fake_tests 风险，测试须来自 checker 或既有 golden）
+            no-force-push  不得改写已推送历史
+            no-secret-output 输出/artifacts 不得含密钥
+            no-bypass-gate 不得跳过或降级 gate 检查
+      post_conditions:
+        type: array
+        items: {type: string}
+        description: "交付后置断言（机器可判定优先，标注 [ci]/[llm]）"
   io_contract:
     type: object
     description: "被作为 tool / A2A 调用时必需；未声明则不可被 expose"

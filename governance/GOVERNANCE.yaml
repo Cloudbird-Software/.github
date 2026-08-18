@@ -23,7 +23,7 @@ domains:
         strength: enforced
         platform: {github: {mechanism: org-ruleset, name: main-protection, definition: rulesets/main-protection.json}}
         verify: {method: drift-check, frequency: weekly}
-        exception: [AI_Web_School, .github]
+        exception: [AI_Web_School]
       - id: BP-2
         intent: "合并前置：唯一 required check = gate（聚合检查）"
         strength: enforced
@@ -119,8 +119,9 @@ domains:
         platform: {github: {mechanism: workflow, file: .github/workflows/governance-drift.yml, cron: "Mon 03:00 UTC"}}
         verify: {method: self, state: expected-state.json}
       - id: GM-2
-        intent: "配置变更走 PR→合并→apply.sh（禁止网页手改）"
-        strength: advisory
+        intent: "治理仓变更一律走 flows.governance_change 分级流程（C1 附 ADR / C2 过 validate / C3 走 PR）；破玻璃=直推后 24h 内回填；owner 与 AI 同受约束"
+        strength: enforced
+        verify: {method: drift-check, part: section-8, frequency: weekly}
       - id: GM-3
         intent: "政策文件机器可判定（本目录）；agent 按需读取，不常驻上下文"
         strength: advisory
@@ -174,8 +175,34 @@ domains:
         intent: "过程数据三分离：声明/决策→git(registry/ADR)；事件→数据层(JSONL 起步)；原始轨迹→对象存储滚动30天；项目仓仅 AGENTS.md+team 引用行"
         strength: enforced
         schema: standards/agent/event.schema.yaml
+      - id: AR-8
+        intent: "agent 必须声明 archetype（builder/checker/orchestrator/curator/interface/observer/operator）；同一声明不得兼任 builder 与 checker；checker 强制 private workspace；分类决定权限基线与审计强度"
+        strength: enforced
+        validate: agent-registry/scripts/validate.py
+      - id: AR-9
+        intent: "可信交付=失败可见：agent 内 guardrails（输出校验+必跑命令+禁自证）→ team 内独立 checker 验收（不同声明/不同模型别名）→ persistent 团队外部审计（governance-core 周期）→ 平台防线兜底；builder 永不自我信任"
+        strength: enforced
+        validate: agent-registry/scripts/validate.py
 
 flows:
+  governance_change:
+    # 治理仓（.github governance|standards、agent-registry、CI-Workflows workflows/）内容变更的唯一合法路径
+    # 授权凭证 = ADR + PR 记录；破玻璃保留但被监控
+    classes:
+      - id: C1
+        scope: [GOVERNANCE.yaml, rulesets/, expected-state.json, standards/, models.yaml, decisions/]
+        requires: [PR, "ADR（新建或引用编号）", "drift-check 本地预检", owner-merge]
+        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并"
+      - id: C2
+        scope: [agent-registry/registry/, 业务仓 AGENTS.md/CODEOWNERS]
+        requires: [PR, "validate.py 通过"]
+      - id: C3
+        scope: [文档/注释/README/模板]
+        requires: [PR]
+    break_glass:
+      rule: "紧急回滚允许 admin 直推（ruleset bypass），24h 内必须补：回填 PR + ADR + 在漂移 issue 说明原因"
+      detection: "drift-check §8：策略生效日之后默认分支的非 PR commit = 漂移"
+    policy_effective: "2026-08-19T00:00:00Z"
   new_repo:
     steps:
       - {cmd: "gh repo create <org>/<name> --template <org>/template-service --public --clone"}

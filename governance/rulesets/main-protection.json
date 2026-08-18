@@ -4,7 +4,7 @@
   "enforcement": "active",
   "conditions": {
     "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] },
-    "repository_name": { "include": ["~ALL"], "exclude": ["AI_Web_School", ".github"] }
+    "repository_name": { "include": ["~ALL"], "exclude": ["AI_Web_School"] }
   },
   "bypass_actors": [
     { "actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always" }
