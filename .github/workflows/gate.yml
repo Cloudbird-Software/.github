@@ -50,7 +50,11 @@ jobs:
       # C1 路径（governance/ standards/ scripts/ .github/ CODEOWNERS）变更的 PR，
       # title/body 必须引用 ADR-NNNN——GOVERNANCE flows.governance_change "无 ADR 不合并"
       # 的机器执行。本仓不落盘 ADR（L1 决策记录在 agent-registry/decisions/，
-      # 见 REPOS.yaml role），故此处只验引用存在；agent-registry 侧另有文件级校验。
+      # 见 REPOS.yaml role）。被引 ADR 的**存在性**校验不在本步骤做：agent-registry 是
+      # 私有仓，PR 上下文的 GITHUB_TOKEN 无跨仓读权，而把 org secret（如
+      # GOVERNANCE_TOKEN）注入 PR 触发的 workflow = 向 PR 控制的代码暴露凭据
+      # （zizmor secret-exposure 模型）——存在性由 drift-check.sh §10 后验（每日，
+      # 可信 main 上下文），owner-only review 仍是 C1 的权威人类门禁。
       - name: adr-required（C1 变更须引用 ADR）
         if: github.event_name == 'pull_request'
         env:
@@ -58,14 +62,16 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          FILES=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100" --jq '.[].filename')
+          # --paginate（评审项）：>100 文件的 PR 首页截断会把 C1 变更漏检成非 C1
+          FILES=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100" --jq '.[].filename')
           if ! echo "$FILES" | grep -qE '^(governance/|standards/|scripts/|\.github/|CODEOWNERS|profile/)'; then
             echo "非 C1 路径变更，跳过 adr-required"
             exit 0
           fi
-          ADR_RE='ADR-[0-9]{4}'
+          # 词边界（评审项）：NOTADR-0013junk 之类子串不得满足 ADR 引用要求
+          ADR_RE='\bADR-[0-9]{4}\b'
           if { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -qE "$ADR_RE"; then
-            echo "OK adr-required: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')"
+            echo "OK adr-required: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')（存在性后验：drift-check §10）"
           else
             echo "::error::C1 路径变更（governance/standards/scripts/.github/CODEOWNERS）但 PR 未引用任何 ADR-NNNN（GOVERNANCE flows.governance_change C1：无 ADR 不合并）"
             exit 1

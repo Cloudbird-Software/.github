@@ -43,6 +43,13 @@ expect_ok() { # $1=描述 $2=http_code
 
 echo "==> 1/5 Rulesets（存在则更新，不存在则创建）"
 EXISTING=$(api "https://api.github.com/orgs/$ORG/rulesets?per_page=100")
+# 前置 GET 参与失败计数（评审项）：清单拉取失败时 EXISTING 为空会静默走
+# "创建"分支或全部跳过——违反 loud-failure 契约，此处显式计 FAIL 并跳过本节
+if ! jq -e 'type == "array"' <<<"$EXISTING" >/dev/null 2>&1; then
+  echo "  FAIL：ruleset 清单拉取失败（$(jq -r '.message // "非数组"' <<<"$EXISTING" 2>/dev/null || echo 传输失败)），跳过 §1" >&2
+  FAILS=$((FAILS+1))
+  EXISTING='[]'
+fi
 for f in "$DIR"/rulesets/*.json; do
   name=$(jq -r .name "$f")
   rid=$(jq -r --arg n "$name" '.[] | select(.name == $n) | .id' <<<"$EXISTING" | head -1)
@@ -76,6 +83,11 @@ expect_ok "default workflow permissions" "$code"
 
 echo "==> 4/5 Code Security 默认应用到新仓库"
 CS=$(api "https://api.github.com/orgs/$ORG/code-security/configurations")
+if ! jq -e 'type == "array"' <<<"$CS" >/dev/null 2>&1; then
+  echo "  FAIL：code security 配置清单拉取失败（$(jq -r '.message // "非数组"' <<<"$CS" 2>/dev/null || echo 传输失败)），跳过 §4" >&2
+  FAILS=$((FAILS+1))
+  CS='[]'
+fi
 CSID=$(jq -r --arg n "$(jq -r .code_security.configuration_name "$EXPECTED")" \
   '.[] | select(.name == $n) | .id' <<<"$CS" | head -1)
 if [[ -n "$CSID" && "$CSID" != "null" ]]; then
@@ -90,7 +102,15 @@ fi
 
 echo "==> 5/5 仓库基线（squash-only / 删分支）"
 EXCLUDES=$(jq -c '.repo_baseline.exclude_repos // []' "$EXPECTED")
-REPOS=$(api "https://api.github.com/orgs/$ORG/repos?per_page=100" | jq -r '.[].name')
+REPOS_RAW=$(api "https://api.github.com/orgs/$ORG/repos?per_page=100")
+# 前置 GET 参与失败计数（评审项）：清单失败时 REPOS 为空 → 循环体全跳过 →
+# apply.sh 假装成功退出 0，基线实际一项未应用——违反 loud-failure 契约
+if ! jq -e 'type == "array" and length > 0' <<<"$REPOS_RAW" >/dev/null 2>&1; then
+  echo "  FAIL：org 仓库清单拉取失败（$(jq -r '.message // "空/非数组"' <<<"$REPOS_RAW" 2>/dev/null || echo 传输失败)），仓库基线未应用" >&2
+  FAILS=$((FAILS+1))
+  REPOS=""
+fi
+REPOS=$(jq -r '.[].name' <<<"$REPOS_RAW" 2>/dev/null)
 for r in $REPOS; do
   jq -e --arg r "$r" 'index($r) != null' <<<"$EXCLUDES" >/dev/null && { echo "  $r: 跳过（exclude）"; continue; }
   code=$(api -o /dev/null -w '%{http_code}' -X PATCH "https://api.github.com/repos/$ORG/$r" \

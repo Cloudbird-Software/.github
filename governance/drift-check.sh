@@ -78,7 +78,14 @@ fi
 
 # ---------- 4. 仓库基线（squash-only / 删分支）----------
 EXCLUDES=$(jq -c '.repo_baseline.exclude_repos // []' "$EXPECTED")
-REPOS=$(api "https://api.github.com/orgs/$ORG/repos?per_page=100" | jq -r '.[].name')
+REPOS_RAW=$(api "https://api.github.com/orgs/$ORG/repos?per_page=100")
+# fail-closed（评审项）：清单拉取失败/非数组时 REPOS 为空会让后续全部循环静默跳过、
+# 检测整体假绿——此处显式报漂移中止，检测器失明不得伪装成无漂移
+if ! jq -e 'type == "array" and length > 0' <<<"$REPOS_RAW" >/dev/null 2>&1; then
+  echo "FATAL: org 仓库清单拉取失败（$(jq -r '.message // "空/非数组"' <<<"$REPOS_RAW" 2>/dev/null || echo 传输失败)），无法检测" >&2
+  exit 2
+fi
+REPOS=$(jq -r '.[].name' <<<"$REPOS_RAW")
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
   RR=$(api "https://api.github.com/repos/$ORG/$r")
@@ -138,11 +145,13 @@ fi
 
 # ---------- 8. 直推检测（GM-2 破玻璃监控）----------
 # flows.governance_change.policy_effective 之后，受治仓默认分支上的非 PR commit = 漂移。
-# 两级判据（红队 #17-I 重写：消息后缀可伪造/可漏报）：
-#   1) 快速筛：commit 消息不以 "(#N)" 结尾 → 候选直推
-#   2) 复核：对候选调 List pull requests associated with commit——
-#      真有关联 PR（rebase 合并/自定义消息等合法形态）则放行，
-#      直推（无关联 PR）才判漂移。候选通常为 0，复核调用量可控。
+# 唯一权威判据 = List pull requests associated with commit API（红队 #17-I + PR 评审项）：
+#   不做消息后缀预筛——"(#N)" 后缀可伪造，直推挂个假后缀即可绕过预筛被报 clean；
+#   窗口内每个 commit 都经关联 PR API 复核（真有关联 PR=合法形态放行，无=直推）。
+# fail-closed（评审项）：关联 PR 查询本身失败（限流/权限/传输）= 无法验证 = 判漂移报错，
+#   绝不静默放行——检测器失明比误报危险。
+# 分页（评审项）：commit 列表全分页拉取，第 100 条之后的直推不可漏检；
+#   超 MAX_COMMITS 上限时显式报漂移（fail loudly），不静默截断。
 # 回填时限：commit 距今 >24h 且仍在直推状态 = 已超破玻璃回填时限（P0 级标记）。
 SINCE=$(python3 - <<'EOF'
 from datetime import datetime, timezone, timedelta
@@ -152,29 +161,59 @@ print(max(eff, lo).strftime("%Y-%m-%dT%H:%M:%SZ"))
 EOF
 )
 NOW_EPOCH=$(date +%s)
+MAX_COMMITS=300   # 窗口内单仓 commit 上限：治理仓日常量级为个位数；超限=异常，人工核查
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
-  CANDIDATES=$(api "https://api.github.com/repos/$ORG/$r/commits?sha=main&since=$SINCE&per_page=100" \
-    | jq -r '[.[] | select(.commit.message | test("[(]#[0-9]+[)]$") | not) | .sha[0:8] + "\t" + (.commit.committer.date | sub("\\.[0-9]+Z$"; "Z"))] | .[]')
-  DIRECT_FOUND=0
-  if [[ -n "$CANDIDATES" ]]; then
-    while IFS=$'\t' read -r sha cdate; do
-      [[ -n "$sha" ]] || continue
-      PRS=$(api -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/$ORG/$r/commits/$sha/pulls?per_page=5" \
-        | jq -r 'if length > 0 then "has-pr" else "none" end')
-      if [[ "$PRS" == "none" ]]; then
-        AGE=$(( NOW_EPOCH - $(date -u -d "$cdate" +%s) ))
-        if [[ $AGE -gt 86400 ]]; then
-          drift "repo '$r' 存在非 PR 直推 commit: $sha（已超 24h 回填时限=${AGE}s——P0：立即回填 ADR+PR，见 flows.governance_change）"
-        else
-          drift "repo '$r' 存在非 PR 直推 commit: $sha（破玻璃须 24h 内回填 ADR+PR，见 flows.governance_change）"
-        fi
-        DIRECT_FOUND=1
-      fi
-    done <<<"$CANDIDATES"
+  # 全分页拉取窗口内 commit（评审项：首页之后不可漏检）
+  COMMITS_TMP=$(mktemp)
+  TOTAL=0
+  PAGE=1
+  FETCH_ERR=0
+  while :; do
+    CHUNK=$(api "https://api.github.com/repos/$ORG/$r/commits?sha=main&since=$SINCE&per_page=100&page=$PAGE")
+    if ! jq -e 'type == "array"' <<<"$CHUNK" >/dev/null 2>&1; then
+      drift "repo '$r' commit 列表拉取失败，直推检测无法执行（fail-closed）: $(jq -r '.message // "非 JSON 响应"' <<<"$CHUNK" 2>/dev/null || echo 传输失败)"
+      FETCH_ERR=1
+      break
+    fi
+    N=$(jq 'length' <<<"$CHUNK")
+    [[ "$N" -eq 0 ]] && break
+    jq -c '.[] | {sha: .sha, date: (.commit.committer.date | sub("\\.[0-9]+Z$"; "Z"))}' <<<"$CHUNK" >>"$COMMITS_TMP"
+    TOTAL=$((TOTAL+N))
+    [[ "$N" -lt 100 ]] && break
+    PAGE=$((PAGE+1))
+  done
+  if [[ $FETCH_ERR -eq 1 ]]; then rm -f "$COMMITS_TMP"; continue; fi
+  if [[ $TOTAL -gt $MAX_COMMITS ]]; then
+    drift "repo '$r' 窗口内 commit 数=$TOTAL 超上限 $MAX_COMMITS——为防静默截断漏检，须人工核查直推或调窗口"
+    rm -f "$COMMITS_TMP"
+    continue
   fi
-  [[ $DIRECT_FOUND -eq 0 ]] && ok "no-direct-push '$r' (since $SINCE)"
+  DIRECT_FOUND=0
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    sha=$(jq -r .sha <<<"$row")
+    cdate=$(jq -r .date <<<"$row")
+    # 关联 PR 复核（全 SHA；响应须为数组——error 对象/传输失败均为无法验证）
+    PRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$sha/pulls?per_page=5" \
+      | jq -r 'if type == "array" then (if length > 0 then "has-pr" else "none" end) else "error" end' 2>/dev/null || echo error)
+    if [[ "$PRS" == "error" ]]; then
+      drift "repo '$r' commit $sha 的关联 PR 查询失败，无法验证直推（fail-closed：限流/权限/传输故障不得静默放行）"
+      DIRECT_FOUND=1
+      continue
+    fi
+    if [[ "$PRS" == "none" ]]; then
+      AGE=$(( NOW_EPOCH - $(date -u -d "$cdate" +%s) ))
+      if [[ $AGE -gt 86400 ]]; then
+        drift "repo '$r' 存在非 PR 直推 commit: ${sha:0:8}（已超 24h 回填时限=${AGE}s——P0：立即回填 ADR+PR，见 flows.governance_change）"
+      else
+        drift "repo '$r' 存在非 PR 直推 commit: ${sha:0:8}（破玻璃须 24h 内回填 ADR+PR，见 flows.governance_change）"
+      fi
+      DIRECT_FOUND=1
+    fi
+  done <"$COMMITS_TMP"
+  rm -f "$COMMITS_TMP"
+  [[ $DIRECT_FOUND -eq 0 ]] && ok "no-direct-push '$r' (since $SINCE, $TOTAL commits)"
 done
 
 # ---------- 9. vcs_admin 唯一性（ADR-0010：admin 全系统唯 owner）----------
@@ -205,6 +244,45 @@ for r in $REPOS; do
     ok "vcs-admin-unique '$r'"
   fi
 done
+
+# ---------- 10. ADR 引用存在性后验（adr-required 的补充防线，评审项）----------
+# gate.yml 的 adr-required 在 PR 上下文只能做语法检查：agent-registry 是私有仓，
+# PR 上下文的 GITHUB_TOKEN 无跨仓读权，注入 org secret 又会向 PR 控制的代码暴露
+# 凭据。存在性在本节后验：窗口内合并 PR 的 ADR-NNNN 引用必须真实存在于
+# agent-registry/decisions/——伪造/幽灵 ADR 最长 24h 内被检出（与 §8 直推检测
+# 同为 post-hoc 防线；C1 的权威人类门禁仍是 owner-only review）。
+ADR_RE='ADR-[0-9]{4}'
+# 独立 7 天窗口（不用 §8 的 SINCE——那是 policy_effective 起算的直推检测窗口，
+# 而 ADR 引用后验须覆盖 policy 生效前已合并、引用了伪造 ADR 的 PR）
+ADR_SINCE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+ADR_DIR_LISTING=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/decisions")
+if ! jq -e 'type == "array"' <<<"$ADR_DIR_LISTING" >/dev/null 2>&1; then
+  drift "ADR 真源 agent-registry/decisions 读取失败，引用存在性无法后验（fail-closed）: $(jq -r '.message // "非数组"' <<<"$ADR_DIR_LISTING" 2>/dev/null || echo 传输失败)"
+else
+  ADR_FILES=$(jq -r '.[].name' <<<"$ADR_DIR_LISTING")
+  GHOST=0
+  for r in $REPOS; do
+    jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
+    PRSLIST=$(api "https://api.github.com/repos/$ORG/$r/pulls?state=closed&sort=updated&direction=desc&per_page=30")
+    if ! jq -e 'type == "array"' <<<"$PRSLIST" >/dev/null 2>&1; then
+      drift "repo '$r' PR 列表拉取失败，ADR 引用后验跳过（fail-closed）"
+      GHOST=1
+      continue
+    fi
+    while IFS=$'\t' read -r pnum title body; do
+      [[ -n "$pnum" ]] || continue
+      for ref in $(printf '%s\n%s\n' "$title" "$body" | grep -oE "$ADR_RE" | sort -u); do
+        num="${ref#ADR-}"
+        if ! grep -q "^ADR-${num}-" <<<"$ADR_FILES"; then
+          drift "repo '$r' PR#$pnum 引用幽灵 ADR ${ref}（agent-registry/decisions/ 无 ADR-${num}-*.md——C1 变更的决策背书不成立）"
+          GHOST=1
+        fi
+      done
+    done < <(jq -r --arg since "$ADR_SINCE" \
+      '.[] | select(.merged_at != null and .merged_at >= $since) | [(.number|tostring), (.title // ""), (.body // "")] | @tsv' <<<"$PRSLIST")
+  done
+  [[ $GHOST -eq 0 ]] && ok "adr-reference-existence（窗口内合并 PR 的 ADR 引用全部真实）"
+fi
 
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
