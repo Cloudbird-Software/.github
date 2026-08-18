@@ -1,0 +1,10 @@
+# CODEOWNERS（ADR-0010 批次4：治理之治理 owner-only）
+# ruleset 开启 require code-owner review → 以下路径的 PR 必须由 owner(randypanding) 批准。
+# 本仓是跨平台治理总声明所在——治理之治理路径 owner-only 是 v3 平台锁的核心（CT-CUR-002）。
+*                       @randypanding
+/governance/**         @randypanding
+/standards/**          @randypanding
+/scripts/**            @randypanding
+/profile/**            @randypanding
+/CODEOWNERS            @randypanding
+/.github/**            @randypanding

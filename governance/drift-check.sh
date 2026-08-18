@@ -158,6 +158,24 @@ for r in $REPOS; do
   fi
 done
 
+# ---------- 9. vcs_admin 唯一性（ADR-0010：admin 全系统唯 owner）----------
+# org 全部受治仓的 admin 数量必须 == 1 且为 owner；任何多出的 admin = P0 漂移
+OWNER_LOGIN="${OWNER_LOGIN:-randypanding}"
+for r in $REPOS; do
+  jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
+  ADMINS=$(api "https://api.github.com/repos/$ORG/$r/collaborators?permission=admin&per_page=100" \
+    | jq -r '[.[] | select(.permissions.admin == true) | .login] | join(",")')
+  COUNT=$(api "https://api.github.com/repos/$ORG/$r/collaborators?permission=admin&per_page=100" \
+    | jq '[.[] | select(.permissions.admin == true)] | length')
+  if [[ "$COUNT" != "1" ]]; then
+    drift "repo '$r' admin 数量=$COUNT ($ADMINS)，必须唯一且为 $OWNER_LOGIN（ADR-0010 owner 伪原型不变量）"
+  elif [[ "$ADMINS" != "$OWNER_LOGIN" ]]; then
+    drift "repo '$r' admin=$ADMINS 非 owner $OWNER_LOGIN（ADR-0010）"
+  else
+    ok "vcs-admin-unique '$r'"
+  fi
+done
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"
