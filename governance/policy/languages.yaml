@@ -44,6 +44,8 @@ rules:
 
 dependency_policy:
   approval_required: true
+  approver: "owner（randypanding）——CODEOWNERS owner-only 路径；owner 缺席 7 天由 stewardship curator 在周报升级（无静默挂起）"
+  response_sla: "提案 PR 开出后 7 天内必须批/驳（超时=依赖审批债，进 curator 债清单）"
   proposal_format: [name, purpose, license, stdlib_alternative]
   forbidden_licenses: [AGPL-3.0, GPL-3.0, SSPL]
   enforcement: review

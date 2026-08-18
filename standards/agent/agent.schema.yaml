@@ -22,7 +22,8 @@ properties:
     description: |
       LLM 原型（ADR-0010，九分类）。机制原型（verifier/integrator/scheduler/evidence-pack/
       interface-gateway/metrics-aggregator）不实例化为 agent——它们是 CI/服务，声明于
-      standards/archetype-profiles.yaml mechanism 段。owner 为伪原型（信任根，非 agent）。
+      agent-registry 仓 standards/archetype-profiles.yaml 的 mechanism 段（本仓不放
+      profiles，单一真源在 agent-registry——REPOS.yaml L1 role）。owner 为伪原型（信任根，非 agent）。
         builder      生产者：写实现+tests/unit/**（设计工具）；tests/acceptance/** 只读；交付由 verifier 机制判卷
         planner      计划者：意图→owner 已批验收示例→波次计划+工作卡+测试规格；只写 plans|cards|specs/
         test-author  出题者：规格→acceptance 测试；实现前冻结测试树；不判卷（判卷=verifier 机制）；族≠builder
@@ -90,7 +91,7 @@ properties:
     additionalProperties: false
     description: "凭据引用：只写 env 变量名，绝不写值（AR-4 最小权限）；锁死字段防内联凭据（CodeRabbit #13）"
     properties:
-      github_app: {type: string, description: "如 cloudbird-agent；作用域见 GOVERNANCE AG-1"}
+      github_app: {type: string, description: "如 cloudbrid-agent（线上真实 slug，expected-state.json#github_app）；作用域见 GOVERNANCE AG-1"}
       secrets: {type: array, items: {type: string, pattern: "^[A-Z_]+$", description: "运行时注入的 env 名"}}
   memory:
     type: object

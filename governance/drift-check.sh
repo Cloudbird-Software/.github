@@ -137,7 +137,13 @@ else
 fi
 
 # ---------- 8. 直推检测（GM-2 破玻璃监控）----------
-# flows.governance_change.policy_effective 之后，受治仓默认分支上的非 PR commit = 漂移
+# flows.governance_change.policy_effective 之后，受治仓默认分支上的非 PR commit = 漂移。
+# 两级判据（红队 #17-I 重写：消息后缀可伪造/可漏报）：
+#   1) 快速筛：commit 消息不以 "(#N)" 结尾 → 候选直推
+#   2) 复核：对候选调 List pull requests associated with commit——
+#      真有关联 PR（rebase 合并/自定义消息等合法形态）则放行，
+#      直推（无关联 PR）才判漂移。候选通常为 0，复核调用量可控。
+# 回填时限：commit 距今 >24h 且仍在直推状态 = 已超破玻璃回填时限（P0 级标记）。
 SINCE=$(python3 - <<'EOF'
 from datetime import datetime, timezone, timedelta
 eff = datetime(2026, 8, 19, tzinfo=timezone.utc)          # policy_effective
@@ -145,17 +151,30 @@ lo = datetime.now(timezone.utc) - timedelta(days=7)        # 检测窗口
 print(max(eff, lo).strftime("%Y-%m-%dT%H:%M:%SZ"))
 EOF
 )
+NOW_EPOCH=$(date +%s)
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
-  DIRECT=$(api "https://api.github.com/repos/$ORG/$r/commits?sha=main&since=$SINCE&per_page=100" \
-    | jq -r '[.[] | select(.commit.message | test("[(]#[0-9]+[)]$") | not) | .sha[0:8] + " " + (.commit.message | split("\n")[0])] | .[]')
-  if [[ -n "$DIRECT" ]]; then
-    while IFS= read -r line; do
-      drift "repo '$r' 存在非 PR 直推 commit: $line（破玻璃须 24h 内回填 ADR+PR，见 flows.governance_change）"
-    done <<<"$DIRECT"
-  else
-    ok "no-direct-push '$r' (since $SINCE)"
+  CANDIDATES=$(api "https://api.github.com/repos/$ORG/$r/commits?sha=main&since=$SINCE&per_page=100" \
+    | jq -r '[.[] | select(.commit.message | test("[(]#[0-9]+[)]$") | not) | .sha[0:8] + "\t" + (.commit.committer.date | sub("\\.[0-9]+Z$"; "Z"))] | .[]')
+  DIRECT_FOUND=0
+  if [[ -n "$CANDIDATES" ]]; then
+    while IFS=$'\t' read -r sha cdate; do
+      [[ -n "$sha" ]] || continue
+      PRS=$(api -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/$ORG/$r/commits/$sha/pulls?per_page=5" \
+        | jq -r 'if length > 0 then "has-pr" else "none" end')
+      if [[ "$PRS" == "none" ]]; then
+        AGE=$(( NOW_EPOCH - $(date -u -d "$cdate" +%s) ))
+        if [[ $AGE -gt 86400 ]]; then
+          drift "repo '$r' 存在非 PR 直推 commit: $sha（已超 24h 回填时限=${AGE}s——P0：立即回填 ADR+PR，见 flows.governance_change）"
+        else
+          drift "repo '$r' 存在非 PR 直推 commit: $sha（破玻璃须 24h 内回填 ADR+PR，见 flows.governance_change）"
+        fi
+        DIRECT_FOUND=1
+      fi
+    done <<<"$CANDIDATES"
   fi
+  [[ $DIRECT_FOUND -eq 0 ]] && ok "no-direct-push '$r' (since $SINCE)"
 done
 
 # ---------- 9. vcs_admin 唯一性（ADR-0010：admin 全系统唯 owner）----------

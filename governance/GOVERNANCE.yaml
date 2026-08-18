@@ -22,7 +22,7 @@ domains:
         intent: "默认分支仅经 PR+squash 进入；禁删/force-push；线性历史"
         strength: enforced
         platform: {github: {mechanism: org-ruleset, name: main-protection, definition: rulesets/main-protection.json}}
-        verify: {method: drift-check, frequency: weekly}
+        verify: {method: drift-check, frequency: daily}
         exception: [AI_Web_School]
       - id: BP-2
         intent: "合并前置：唯一 required check = gate（聚合检查）"
@@ -33,12 +33,12 @@ domains:
         intent: "发布标签 v* 不可删除/覆盖"
         strength: enforced
         platform: {github: {mechanism: org-ruleset, name: release-tags, definition: rulesets/release-tags.json}}
-        verify: {method: drift-check, frequency: weekly}
+        verify: {method: drift-check, frequency: daily}
       - id: BP-4
         intent: "仓库基线：squash-only、合并删分支、auto-merge 开、wiki/projects 关"
         strength: enforced
         platform: {github: {mechanism: repo-settings, apply: apply.sh#step5}}
-        verify: {method: drift-check, frequency: weekly}
+        verify: {method: drift-check, frequency: daily}
       - id: BP-5
         intent: "成员不可建仓；成员默认权限 read"
         strength: enforced
@@ -54,7 +54,7 @@ domains:
         intent: "Actions 仅允许：github 官方+已验证+白名单（zizmor/astral-sh/dependabot/docker/softprops/org 自有）"
         strength: enforced
         platform: {github: {mechanism: actions-permissions, state: expected-state.json#actions_policy}}
-        verify: {method: drift-check, frequency: weekly}
+        verify: {method: drift-check, frequency: daily}
       - id: CI-3
         intent: "GITHUB_TOKEN 默认只读；不允许 Actions 批准 PR"
         strength: enforced
@@ -90,7 +90,7 @@ domains:
         intent: "agent 写仓库唯一身份 = App(cloudbrid-agent)；权限 contents/issues/PRs:write，无 workflows/administration"
         strength: enforced
         platform: {github: {mechanism: github-app, id: 4632704, state: expected-state.json#github_app}}
-        verify: {method: drift-check, frequency: weekly}
+        verify: {method: drift-check, frequency: daily}
       - id: AG-2
         intent: "App 令牌：单仓库作用域、1h 过期、磁盘不落长期凭据"
         strength: enforced
@@ -114,14 +114,14 @@ domains:
   governance_meta:
     measures:
       - id: GM-1
-        intent: "期望状态落盘；周漂移检测；漂移自动开 issue"
+        intent: "期望状态落盘；每日漂移检测（红队修复：周检盲区最长 7 天→1 天）；漂移自动开 issue；漂移消除自动关闭 issue（防陈旧报告累积噪音）"
         strength: monitored
-        platform: {github: {mechanism: workflow, file: .github/workflows/governance-drift.yml, cron: "Mon 03:00 UTC"}}
+        platform: {github: {mechanism: workflow, file: .github/workflows/governance-drift.yml, cron: "daily 03:00 UTC"}}
         verify: {method: self, state: expected-state.json}
       - id: GM-2
         intent: "治理仓变更一律走 flows.governance_change 分级流程（C1 附 ADR / C2 过 validate / C3 走 PR）；破玻璃=直推后 24h 内回填；owner 与 AI 同受约束"
         strength: enforced
-        verify: {method: drift-check, part: section-8, frequency: weekly}
+        verify: {method: drift-check, part: section-8, frequency: daily}
       - id: GM-3
         intent: "政策文件机器可判定（本目录）；agent 按需读取，不常驻上下文"
         strength: advisory
@@ -130,7 +130,7 @@ domains:
         intent: "组织地图 REPOS.yaml 声明全部仓（层级/角色/可见性/状态）：结构层导航的唯一入口；线上未申报仓=漂移；active 仓存在性与 visibility 周检；新仓初始化后必须申报入图（见 flows.new_repo）"
         strength: enforced
         files: [REPOS.yaml]
-        verify: {method: drift-check, part: section-7, frequency: weekly}
+        verify: {method: drift-check, part: section-7, frequency: daily}
 
   context_governance:
     measures:
@@ -168,7 +168,7 @@ domains:
         intent: "双层控制：软引导（AGENTS.md/identity/skill 正文）+ 硬边界（工具面裁剪→权限引擎→凭据→平台防线）；冲突时硬控制优先；拦截记录进事件流"
         strength: enforced
       - id: AR-6
-        intent: "团队必须声明 lifecycle；ephemeral 团队 archive_to+handoff 全部完成才允许销毁；persistent 团队（governance-core）对治理资产持续负责"
+        intent: "团队必须声明 lifecycle；ephemeral 团队 archive_to+handoff 全部完成才允许销毁；persistent 团队（team:stewardship——ADR-0004 规划名 governance-core 的落地形态）对治理资产持续负责"
         strength: enforced
         platform: {github: {mechanism: script, entry: agent-registry/scripts/validate.py, check: lifecycle}}
       - id: AR-7
@@ -190,9 +190,9 @@ flows:
     # 授权凭证 = ADR + PR 记录；破玻璃保留但被监控
     classes:
       - id: C1
-        scope: [GOVERNANCE.yaml, rulesets/, expected-state.json, standards/, models.yaml, decisions/]
+        scope: [GOVERNANCE.yaml, rulesets/, expected-state.json, standards/, models.yaml, decisions/, "template-service（整仓——供应链入口：模板被污染=全部新仓继承后门，红队修复 P0）"]
         requires: [PR, "ADR（新建或引用编号）", "drift-check 本地预检", owner-merge]
-        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并"
+        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并。template-service 是新仓派生源头，视同治理意图变更（gate adr-required 机器检查 + owner-only review）"
       - id: C2
         scope: [agent-registry/registry/, 业务仓 AGENTS.md/CODEOWNERS]
         requires: [PR, "validate.py 通过"]
@@ -223,7 +223,7 @@ flows:
       - {step: 1, action: "从 agent-registry 声明实例化 team（引用 id@version）", gate: AR-1}
       - {step: 2, action: "运行期事件按 event.schema 追加到数据层；拦截记录 tool_called.denied_by", policies: [AR-5, AR-7]}
       - {step: 3, action: "ephemeral 完成→执行 handoff：artifacts 走 PR、经验提炼 skill、关键决策升 ADR、轨迹归档", policy: AR-6}
-      - {step: 4, action: "persistent 团队（governance-core）审核归档资产入库；handoff_done 审计", policy: AR-6}
+      - {step: 4, action: "persistent 团队（team:stewardship）审核归档资产入库；handoff_done 审计", policy: AR-6}
 
 portability:
   neutral: [intent, strength, verify, risk_posture, flows]  # 平台无关，直接搬运

@@ -4,11 +4,12 @@ on:
   push:
     branches: [main]
 
-permissions: {contents: read}
+permissions: {contents: read, pull-requests: read}
 
 jobs:
   gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # testing.yaml T-01 "gate<5min" 原则的硬上限（红队 #18 P2：无 timeout 的 job 失控可挂 6h）
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -26,10 +27,12 @@ jobs:
           for f in files:
               yaml.safe_load(open(f, encoding="utf-8")); print("OK", f)
           EOF
-      - name: ruleset JSON 解析
+      # JSON 全量校验（红队 #17-B）：expected-state.json 与 rulesets 同为 drift-check/apply 的
+      # 期望状态真源——此前 gate 只验 rulesets/*.json，expected-state.json 畸形可静默合入
+      - name: JSON 校验（rulesets + expected-state）
         run: |
           sudo apt-get -qq update && sudo apt-get -qq install -y jq >/dev/null
-          for f in governance/rulesets/*.json; do jq -e . "$f" >/dev/null || exit 1; echo "OK $f"; done
+          for f in governance/rulesets/*.json governance/expected-state.json; do jq -e . "$f" >/dev/null || exit 1; echo "OK $f"; done
       - name: 脚本语法检查
         run: |
           bash -n governance/apply.sh && bash -n governance/drift-check.sh && bash -n scripts/new-repo-init.sh && bash -n scripts/gh-app-token.sh
@@ -43,3 +46,27 @@ jobs:
           assert len(names) == len(set(names)), 'REPOS.yaml 有重名仓'
           print('OK REPOS.yaml', len(names), 'repos')
           EOF
+      # adr-required（红队 #17-B/D、#18-P0 部分；对齐 agent-registry ADR-0013 同名 check）：
+      # C1 路径（governance/ standards/ scripts/ .github/ CODEOWNERS）变更的 PR，
+      # title/body 必须引用 ADR-NNNN——GOVERNANCE flows.governance_change "无 ADR 不合并"
+      # 的机器执行。本仓不落盘 ADR（L1 决策记录在 agent-registry/decisions/，
+      # 见 REPOS.yaml role），故此处只验引用存在；agent-registry 侧另有文件级校验。
+      - name: adr-required（C1 变更须引用 ADR）
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          FILES=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100" --jq '.[].filename')
+          if ! echo "$FILES" | grep -qE '^(governance/|standards/|scripts/|\.github/|CODEOWNERS|profile/)'; then
+            echo "非 C1 路径变更，跳过 adr-required"
+            exit 0
+          fi
+          ADR_RE='ADR-[0-9]{4}'
+          if { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -qE "$ADR_RE"; then
+            echo "OK adr-required: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')"
+          else
+            echo "::error::C1 路径变更（governance/standards/scripts/.github/CODEOWNERS）但 PR 未引用任何 ADR-NNNN（GOVERNANCE flows.governance_change C1：无 ADR 不合并）"
+            exit 1
+          fi
