@@ -176,7 +176,7 @@ domains:
         strength: enforced
         schema: standards/agent/event.schema.yaml
       - id: AR-8
-        intent: "agent 必须声明 archetype（builder/checker/orchestrator/curator/interface/observer/operator）；同一声明不得兼任 builder 与 checker；checker 强制 private workspace；分类决定权限基线与审计强度"
+        intent: "agent 必须声明 archetype（十原型封顶：builder/planner/checker/judge/orchestrator/curator/interface/observer/researcher/operator，ADR-0008）；builder↔checker、planner↔builder 不得同一声明；checker 强制 private workspace；judge 模型别名须异于争议双方；新增第 11 原型须 ADR 论证"
         strength: enforced
         validate: agent-registry/scripts/validate.py
       - id: AR-9

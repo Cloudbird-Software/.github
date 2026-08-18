@@ -25,7 +25,7 @@
     "delete_branch_on_merge": true,
     "exclude_repos": ["AI_Web_School"]
   },
-  "org_secrets_required": ["CB_APP_ID", "CB_APP_KEY"],
+  "org_secrets_required": ["CB_APP_ID", "AGENT_APP_SECRET"],
   "github_app": {
     "name": "cloudbrid-agent",
     "id": 4632704,

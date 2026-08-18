@@ -12,17 +12,25 @@ properties:
   version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
   status: {enum: [proposed, approved, deprecated, rejected]}
   archetype:
-    enum: [builder, checker, orchestrator, curator, interface, observer, operator]
+    enum: [builder, planner, checker, judge, orchestrator, curator, interface, observer, researcher, operator]
     description: |
-      原型（信任边界分类，AR-8）。分类决定默认权限基线/凭据策略/审计强度：
-        builder      生产者：写代码/文档/artifacts；产出必须被独立 checker 验收
-        checker      检查者：只读为主，输出=判决(pass/fail+理由)；强制 private workspace
-        orchestrator 编排者：任务分解/分配/汇总，不直接产 artifacts；高审计
+      原型（信任边界分类，AR-8 v2，ADR-0008）。分类决定默认权限基线/凭据策略/审计强度：
+        builder      生产者：写实现代码/产品文档；产出必须被独立 checker 验收；永不写自身验收测试
+        planner      计划者（设计时）：意图→波次计划+工作卡+测试规格；只写计划产物不写实现；
+                     下游毒化风险高→高审计；计划须过 checker 评审方可执行
+        checker      检查者：验收判决(pass/fail+理由)+测试作者权（从 planner 规格转译为测试代码，
+                     只可写 tests/** 不可写实现）；强制 private workspace + strict
+        judge        仲裁者：域内分歧裁决（测试抖动/评审分歧/规格歧义）；管辖权由团队声明授权，
+                     越域必上升人类；模型别名须与争议双方(builder/checker)均不同；判决可被 owner 推翻
+        orchestrator 编排者（运行时）：分配/监控/汇总，不产 artifacts；高审计
         curator      保管者：治理仓/registry 维护、归档审核（persistent 团队主力）
         interface    接口者：对外通道接收需求/汇报；低权限转发+翻译
         observer     观测者：只读采集度量/事件分析；只写数据层
+        researcher   检索者：读外部网络/代码库/文档，产出结构化引用报告；常以 as_tool 被 worker
+                     调用实现上下文经济（全文留在 researcher，worker 只收结论+引用）；不写仓库不碰生产
         operator     运维者：部署/回滚；strict 模式，生产动作全 ask+人工审批(RL-1)
-      约束：同一声明单 archetype；builder 与 checker 不得同一声明（利益分离）
+      约束：同一声明单 archetype；builder 与 checker 不得同一声明（利益分离）；
+            planner 与 builder 不得同一声明（标准制定者不可施工）
   role: {type: string, description: "一句话职责；决定团队装配"}
   identity:
     type: object
