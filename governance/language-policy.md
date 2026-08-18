@@ -23,6 +23,22 @@
 5. **Terraform/Compose**：`plan`/`config -q` 进 CI；禁止 `local` 值参与资源命名。
 6. **验证层**：对外接口必须有 property-based test；`.dependency-cruiser.cjs` 的 TODO 边界规则在模块落地当周补全。
 
+## 测试深度分级（何时上重武器）
+
+原则：**gate 快（PR 反馈 <5 分钟），重的放周跑**。三级测试按项目阶段递进：
+
+| 级别 | 工具/手法 | 放哪 | 什么时候上 |
+|---|---|---|---|
+| 基础：单测+属性测试+golden | vitest/fast-check（TS）、go test（Go） | gate（每个 PR） | 一律必须 |
+| **差分测试**：旧实现 vs 新实现，同输入比输出 | golden fixtures + 双实现回放 harness | gate（重写项目专用 job） | **重写/替换现有系统时必须**；LLM 输出对比版本升级时同法 |
+| **mutation 测试**：注入变异看测试能否杀死 | Stryker（TS）/ go-mutesting（Go） | 每周定时 job，不进 gate | agent 写了大量测试后必上——AI 写的测试容易同义反复（断言"代码做了什么"而非"应该做什么"），mutation score 是唯一照妖镜。score 低于 60% 的模块 = 测试在演戏 |
+| 金丝雀发布：小流量灰度 | 需要流量切分+指标+回滚的在线基建 | 不适用 | **不上**：产品是客户本地部署（Release 附件交付），没有可切流量。替代：release 后跑 smoke test（下载附件验证可运行） |
+
+判定规则：
+- 重写项目：差分测试是 gate 的一部分（不是可选项）
+- 任何项目：mutation 每周跑，score 趋势入周报；比单次绝对值重要
+- 金丝雀：等有托管服务再说，现阶段用 release smoke 替代
+
 ## 新仓库初始化（agent 必须遵循）
 
 ```
