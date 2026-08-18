@@ -12,8 +12,12 @@
 
 ## 仓库
 
-| 仓库 | 用途 |
-|---|---|
-| [CI-Workflows](https://github.com/Cloudbird-Software/CI-Workflows) | 可复用工作流（唯一真相源） |
-| [template-service](https://github.com/Cloudbird-Software/template-service) | 新项目模板 |
-| [AI_Web_School](https://github.com/Cloudbird-Software/AI_Web_School) | 产品仓库 |
+组织地图（结构层导航的唯一真源）：[governance/REPOS.yaml](../governance/REPOS.yaml)
+
+| 仓库 | 层 | 用途 |
+|---|---|---|
+| [.github](https://github.com/Cloudbird-Software/.github) | L0 | 治理总仓：GOVERNANCE / 标准 schema / 漂移检测 |
+| [CI-Workflows](https://github.com/Cloudbird-Software/CI-Workflows) | L0 | 可复用工作流（唯一真相源） |
+| [agent-registry](https://github.com/Cloudbird-Software/agent-registry) | L1 | agent/skill/tool/team 声明 + 模型注册表 + ADR（私有） |
+| [template-service](https://github.com/Cloudbird-Software/template-service) | L2 | 新项目模板 |
+| [AI_Web_School](https://github.com/Cloudbird-Software/AI_Web_School) | L2 | 产品仓库 |
