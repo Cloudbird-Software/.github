@@ -46,12 +46,6 @@ repos:
     role: 项目模板仓——新仓由此派生，自动继承 gate/护栏/AGENTS.md 骨架
     key_paths: [AGENTS.md, .github/workflows/ci.yml, docs/ARCHITECTURE.md]
 
-  - name: openjiuwen
-    layer: L2
-    visibility: private
-    status: planned
-    role: 编排框架私有仓（推入/维护）——多智能体运行时 + LLM Gateway 部署配置（deploy/llm-gateway）
-
   - name: agent-tools
     layer: L2
     visibility: private
@@ -63,3 +57,15 @@ repos:
     visibility: public
     status: exempt
     role: 历史产品仓——申报在册但豁免治理基线（repo_baseline.exclude_repos）
+
+# 上游依赖（不属于本组织；不 fork、不 submodule）
+# 治理方式：声明于此 + 部署渲染时 clone 并 pin tag（ADR-0002 rev1）
+external_upstreams:
+  - name: openjiuwen-runtime
+    repo: openJiuwen-ai/jiuwenswarm
+    role: 多智能体编排框架运行时（AgentServer/Gateway/Team/权限引擎/A2A）
+    consumed_by: [agent-registry 的声明渲染]
+  - name: openjiuwen-a2x
+    repo: openJiuwen-ai/agent-protocol
+    role: A2X 注册中心（分布式 Team 控制面）
+    consumed_by: [分布式 team 部署]
