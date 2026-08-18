@@ -1,36 +1,39 @@
 $schema: "https://json-schema.org/draft/2020-12/schema"
-$id: "cloudbird/agent-standard/agent@1"
-title: Agent Declaration
+$id: "cloudbird/agent-standard/agent@2"
+title: Agent Declaration (v2, ADR-0010)
 description: |
-  单智能体声明。Agent = Identity + Model + Capabilities + Permissions + Memory + Workspace + IO Contract。
+  单智能体声明。Agent = Identity + Model + Capabilities(白名单) + Isolation/Approval + Memory + Workspace + IO Contract。
   条目落盘 agent-registry/registry/agents/<id>.yaml。
+  v2 要点：只可实例化 LLM 原型（机制原型不实例化）；副作用白名单 fail-closed；
+  isolation 与 approval 拆分（v1 strict 双义废弃）；族级独立性。
   约束：所有引用一律用注册表 id（model 用 alias），禁止内联实现细节与密钥。
 type: object
-required: [id, version, role, archetype, model, capabilities, permissions]
+required: [id, version, role, archetype, trust_zone, model, capabilities, guardrails, isolation, approval]
+allOf:
+  - if: {properties: {archetype: {enum: [judge, adversary]}}}
+    then: {properties: {expose: {properties: {as_tool: {const: false}}}}}
+    description: "judge/adversary 不得作为工具被调用（独立性——CodeRabbit #13）"
 properties:
   id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$", description: "引用形式 agent:<id>"}
   version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
   status: {enum: [proposed, approved, deprecated, rejected]}
   archetype:
-    enum: [builder, planner, checker, judge, orchestrator, curator, interface, observer, researcher, operator]
+    enum: [builder, planner, test-author, judge, curator, adversary, researcher, deployer, responder]
     description: |
-      原型（信任边界分类，AR-8 v2，ADR-0008）。分类决定默认权限基线/凭据策略/审计强度：
-        builder      生产者：写实现代码/产品文档；产出必须被独立 checker 验收；永不写自身验收测试
-        planner      计划者（设计时）：意图→波次计划+工作卡+测试规格；只写计划产物不写实现；
-                     下游毒化风险高→高审计；计划须过 checker 评审方可执行
-        checker      检查者：验收判决(pass/fail+理由)+测试作者权（从 planner 规格转译为测试代码，
-                     只可写 tests/** 不可写实现）；强制 private workspace + strict
-        judge        仲裁者：域内分歧裁决（测试抖动/评审分歧/规格歧义）；管辖权由团队声明授权，
-                     越域必上升人类；模型别名须与争议双方(builder/checker)均不同；判决可被 owner 推翻
-        orchestrator 编排者（运行时）：分配/监控/汇总，不产 artifacts；高审计
-        curator      保管者：治理仓/registry 维护、归档审核（persistent 团队主力）
-        interface    接口者：对外通道接收需求/汇报；低权限转发+翻译
-        observer     观测者：只读采集度量/事件分析；只写数据层
-        researcher   检索者：读外部网络/代码库/文档，产出结构化引用报告；常以 as_tool 被 worker
-                     调用实现上下文经济（全文留在 researcher，worker 只收结论+引用）；不写仓库不碰生产
-        operator     运维者：部署/回滚；strict 模式，生产动作全 ask+人工审批(RL-1)
-      约束：同一声明单 archetype；builder 与 checker 不得同一声明（利益分离）；
-            planner 与 builder 不得同一声明（标准制定者不可施工）
+      LLM 原型（ADR-0010，九分类）。机制原型（verifier/integrator/scheduler/evidence-pack/
+      interface-gateway/metrics-aggregator）不实例化为 agent——它们是 CI/服务，声明于
+      standards/archetype-profiles.yaml mechanism 段。owner 为伪原型（信任根，非 agent）。
+        builder      生产者：写实现+tests/unit/**（设计工具）；tests/acceptance/** 只读；交付由 verifier 机制判卷
+        planner      计划者：意图→owner 已批验收示例→波次计划+工作卡+测试规格；只写 plans|cards|specs/
+        test-author  出题者：规格→acceptance 测试；实现前冻结测试树；不判卷（判卷=verifier 机制）；族≠builder
+        judge        仲裁者：域内分歧（机械可判不受理）；只读仓内固定材料+evidence-pack；判例非规范；族≠争议双方
+        curator      保管者：归档审核/漂移响应/ADR 提炼；对 standards/validator 只有提案权（owner-only 路径）
+        adversary    红队：执行 control-tests（期望越权失败）；premortem；findings 只进数据层
+        researcher   检索者：唯一 untrusted_ingest；findings 必须 schema+provenance+source_class；无写路径
+        deployer     前进变更：部署/迁移；逐动作人签；无回滚权（回滚属 responder）
+        responder    恢复者：预授权恢复动作（回滚/降级/开关）；先做后报全留痕；24h retro 债
+      约束：同一声明单 archetype；builder 与 test-author 不得同一声明；planner 与 builder 不得同一声明
+  trust_zone: {enum: [untrusted_ingest, trusted_control], description: "= profile（validate 强制）；untrusted_ingest 仅 researcher"}
   role: {type: string, description: "一句话职责；决定团队装配"}
   identity:
     type: object
@@ -42,22 +45,38 @@ properties:
     type: object
     required: [alias]
     properties:
-      alias: {type: string, description: "必须存在于 registry/models.yaml；运行时经 LLM Gateway 路由（AR-3）"}
+      alias: {type: string, description: "必须存在于 registry/models.yaml 且带 family；运行时经 LLM Gateway 路由（AR-3）"}
       temperature: {type: number, maximum: 1}
       reasoning_level: {enum: [off, low, medium, high]}
   capabilities:
     type: object
+    description: "白名单制（fail-closed，ADR-0010）：allow 外的副作用一律禁止；未列出的工具不可见"
     properties:
       skills: {type: array, items: {type: string, pattern: "^skill:"}, description: "引用 skill:<id>"}
-      tools: {type: array, items: {type: string, pattern: "^tool:"}, description: "工具面白名单；未列出=不可见（供给侧裁剪）"}
+      tools: {type: array, items: {type: string, pattern: "^tool:"}, description: "工具面；validate 强制其 side_effects ⊆ allow"}
+      allow:
+        type: array
+        description: "副作用白名单，取值域=side-effects.yaml v2 词表；必须 ⊆ profile.allow"
+        items: {type: string}
+      agent_tools:
+        type: object
+        description: "agent-as-tool 引用；受 profile {allow(原型白名单), max} 约束（v1 黑名单废弃）"
+        properties:
+          refs: {type: array, items: {type: string, pattern: "^agent:"}}
+  isolation: {enum: [private, hermetic, team], description: "工作区隔离：private 独立 / hermetic 密闭（连共享记忆也无）/ team 共享——= profile"}
+  approval: {enum: [auto, ask_risky, ask_per_action, async_notify], description: "审批模式（与 isolation 正交；v1 permissions.mode 双义拆分，ADR-0010）——= profile"}
+  independence:
+    type: object
+    description: "族级独立性（models.yaml family；别名级太弱——自偏好偏差同族同样存在）"
+    properties:
+      distinct_model_family_from: {type: array, items: {type: string}}
   permissions:
     type: object
+    description: "路径/参数级收窄（继承 openjiuwen tiered_policy）；宏观权限由 allow/isolation/approval 承担"
     properties:
       inherit: {type: string, description: "继承的策略基线（如 org-default）"}
-      mode: {enum: [normal, strict], description: "tiered_policy 模式；高危 agent 应为 strict"}
       overrides:
         type: array
-        description: "参数级规则；语义继承 openjiuwen tiered_policy（severity 或显式 action）"
         items:
           type: object
           required: [tools]
@@ -68,39 +87,33 @@ properties:
             action: {enum: [allow, ask, deny]}
   credential:
     type: object
-    description: "凭据引用：只写 env 变量名，绝不写值（AR-4 最小权限）"
+    additionalProperties: false
+    description: "凭据引用：只写 env 变量名，绝不写值（AR-4 最小权限）；锁死字段防内联凭据（CodeRabbit #13）"
     properties:
       github_app: {type: string, description: "如 cloudbird-agent；作用域见 GOVERNANCE AG-1"}
       secrets: {type: array, items: {type: string, pattern: "^[A-Z_]+$", description: "运行时注入的 env 名"}}
   memory:
     type: object
     properties:
-      types: {type: array, items: {enum: [user_profile, episodic, semantic]}, description: "记忆类别；敏感信息过滤默认开启"}
+      types: {type: array, items: {enum: [user_profile, episodic, semantic]}, description: "记忆类别；敏感信息过滤默认开启；记忆不是规范来源"}
       retention: {type: string, description: "如 30d；episodic 默认随 ephemeral team 归档"}
   guardrails:
     type: object
-    description: "输出侧硬约束（AR-9 第一层）：交付前置条件，由编排框架在产出提交前强制"
+    description: "输出侧硬约束（第一层）：交付前置条件，由编排框架在产出提交前强制"
     properties:
-      output_schema_strict:
-        type: boolean
-        description: "输出必须通过 io_contract 的 schema 校验才可提交"
-      must_run:
-        type: array
-        items: {type: string}
-        description: "交付前必须全部退出码 0 的命令（如 make check / scripts/validate.py）"
+      output_schema_strict: {type: boolean}
+      must_run: {type: array, items: {type: string}}
       forbidden:
         type: array
-        items: {enum: [no-self-test, no-force-push, no-secret-output, no-bypass-gate]}
+        items: {enum: [no-self-acceptance-test, no-force-push, no-secret-output, no-bypass-gate, no-test-weakening]}
         description: |
-          禁则（防同义反复/越权）：
-            no-self-test   同一 run 内不得既写实现又写其验收测试（fake_tests 风险，测试须来自 checker 或既有 golden）
-            no-force-push  不得改写已推送历史
-            no-secret-output 输出/artifacts 不得含密钥
-            no-bypass-gate 不得跳过或降级 gate 检查
-      post_conditions:
-        type: array
-        items: {type: string}
-        description: "交付后置断言（机器可判定优先，标注 [ci]/[llm]）"
+          禁则（v2）：
+            no-self-acceptance-test  不得写 tests/acceptance/**（v1 no-self-test 细化：unit 归 builder）
+            no-force-push            不得改写已推送历史
+            no-secret-output         输出/artifacts 不得含密钥
+            no-bypass-gate           不得跳过或降级 gate
+            no-test-weakening        减弱型测试变更须特权卡（新卡+owner 批+test_weakening 事件）
+      post_conditions: {type: array, items: {type: string}}
   io_contract:
     type: object
     description: "被作为 tool / A2A 调用时必需；未声明则不可被 expose"
@@ -109,8 +122,9 @@ properties:
       output: {type: object, required: [schema_ref], properties: {schema_ref: {type: string}}}
   expose:
     type: object
+    additionalProperties: false
     properties:
-      as_tool: {type: boolean, description: "agent-as-tool：被其他 agent 以 tool:<id> 调用"}
+      as_tool: {type: boolean, description: "agent-as-tool：被其他 agent 调用（judge/adversary 恒 false——独立性）"}
       a2a_card: {enum: [auto, none], description: "auto=对外发布 Agent Card"}
   workspace:
     type: object
