@@ -1,7 +1,7 @@
 name: governance-drift
 on:
   schedule:
-    - cron: "0 3 * * 1" # 每周一 03:00 UTC
+    - cron: "0 3 * * *" # 每日 03:00 UTC（红队 #18 P0-1：周检盲区最长 7 天 → 每日；轻量只读检测，成本可忽略）
   workflow_dispatch:
 
 permissions: {}
@@ -9,6 +9,7 @@ permissions: {}
 jobs:
   drift-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write
@@ -32,7 +33,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           TITLE="治理漂移检测：组织配置与 governance/ 落盘不一致"
-          EXISTING=$(gh issue list --repo "$REPO" --state open --search "in:title 治理漂移" --json number --jq 'length')
+          # 归属标记（评审项）：issue 归属判定用专属 label 而非标题搜索——
+          # 标题搜索会把人工/其他来源的同名 issue 误当作本检测器的报告去评论/关闭
+          LABEL="auto-drift-report"
+          gh label create "$LABEL" --repo "$REPO" --description "governance-drift 工作流自动报告（勿手工使用）" --color d73a4a >/dev/null 2>&1 || true
+          EXISTING=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq 'length')
           BODY="自动化检测发现以下漂移（运行 #${{ github.run_id }}）：
 
           $(cat drift-report.txt)
@@ -41,8 +46,27 @@ jobs:
 
           @randypanding"
           if [[ "$EXISTING" != "0" ]]; then
-            NUM=$(gh issue list --repo "$REPO" --state open --search "in:title 治理漂移" --json number --jq '.[0].number')
+            NUM=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq '.[0].number')
             gh issue comment "$NUM" --repo "$REPO" --body "$BODY"
           else
-            gh issue create --repo "$REPO" --title "$TITLE" --body "$BODY"
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$BODY" --label "$LABEL"
           fi
+      # 漂移消除自动关闭（红队 #17-G：漂移修复后 open issue 永不关闭=噪音累积，
+      # 真漂移会被淹没在陈旧报告里）。检测全绿即判定漂移已消除。
+      # 只关本检测器自己的报告（--label auto-drift-report，评审项）——
+      # 人工开的其他漂移类 issue 不在自动关闭范围，须人工确认后关闭。
+      - name: 漂移消除则关闭 issue
+        if: success() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          NUMS=$(gh issue list --repo "$REPO" --state open --label "auto-drift-report" --json number --jq '.[].number')
+          if [[ -z "$NUMS" ]]; then
+            echo "无本检测器的 open 漂移 issue"; exit 0
+          fi
+          for NUM in $NUMS; do
+            gh issue comment "$NUM" --repo "$REPO" --body "漂移已消除（运行 #${{ github.run_id }} 全绿）。自动关闭；如复现将重新开启新报告。"
+            gh issue close "$NUM" --repo "$REPO" --reason completed
+            echo "closed #$NUM"
+          done

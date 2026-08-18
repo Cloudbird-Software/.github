@@ -31,7 +31,8 @@
   },
   "org_secrets_required": [
     "CB_APP_ID",
-    "AGENT_APP_SECRET"
+    "AGENT_APP_SECRET",
+    "GOVERNANCE_TOKEN"
   ],
   "github_app": {
     "name": "cloudbrid-agent",
