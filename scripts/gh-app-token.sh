@@ -11,8 +11,8 @@
 #
 # 用法：
 #   export CB_APP_ID=123456                                # App 详情页的 App ID
-#   export CB_APP_KEY_FILE=~/.config/cloudbird/cloudbird-agent.pem
-#   # CI / secret 场景改用字面量： export CB_APP_KEY="<PEM 全文>"
+#   export AGENT_APP_SECRET_FILE=~/.config/cloudbird/cloudbird-agent.pem
+#   # CI / secret 场景改用字面量（org secret 同名注入）： export AGENT_APP_SECRET="<PEM 全文>"
 #
 #   GH_TOKEN=$(bash gh-app-token.sh)                        # 作用域=安装的全部仓库
 #   GH_TOKEN=$(REPO=template-service bash gh-app-token.sh)  # 作用域=单仓库（推荐）
@@ -24,12 +24,12 @@ ORG="${ORG:-Cloudbird-Software}"
 APP_ID="${CB_APP_ID:?需要环境变量 CB_APP_ID（GitHub App 设置页的 App ID）}"
 
 # 私钥：优先文件，其次字面量（CI secret 里通常存 PEM 全文）
-if [[ -n "${CB_APP_KEY_FILE:-}" && -f "$CB_APP_KEY_FILE" ]]; then
-  KEY=$(cat "$CB_APP_KEY_FILE")
-elif [[ -n "${CB_APP_KEY:-}" ]]; then
-  KEY="$CB_APP_KEY"
+if [[ -n "${AGENT_APP_SECRET_FILE:-}" && -f "$AGENT_APP_SECRET_FILE" ]]; then
+  KEY=$(cat "$AGENT_APP_SECRET_FILE")
+elif [[ -n "${AGENT_APP_SECRET:-}" ]]; then
+  KEY="$AGENT_APP_SECRET"
 else
-  echo "错误：需要 CB_APP_KEY_FILE（私钥文件路径）或 CB_APP_KEY（PEM 内容）" >&2
+  echo "错误：需要 AGENT_APP_SECRET_FILE（私钥文件路径）或 AGENT_APP_SECRET（PEM 内容）" >&2
   exit 1
 fi
 
