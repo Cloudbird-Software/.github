@@ -1,0 +1,166 @@
+version: 1
+org: Cloudbird-Software
+# ============================================================================
+# 组织治理总声明（single source of truth）
+# 读法（AI）: 本文件声明"治理什么"（intent）与"验证方式"（verify），
+#             platform 段声明"在某平台怎么实现"。迁移平台 = 改 platform 段，
+#             intent/verify 不动。所有字段机器可判定，无散文。
+# strength: enforced=平台强制 | monitored=自动检测漂移 | advisory=约定
+# ============================================================================
+risk_posture:  # 全部措施的优先级依据
+  - customer_upgrade_failure   # 客户本地部署，升级/回滚炸=收入损失
+  - llm_behavior_drift         # 产品核心是 LLM
+  - fake_tests                 # agent 生成测试的同义反复风险
+  - supply_chain               # 公开仓库，依赖即攻击面
+  - identity_scope            # agent 凭据过度授权
+
+domains:
+
+  source_control:
+    measures:
+      - id: BP-1
+        intent: "默认分支仅经 PR+squash 进入；禁删/force-push；线性历史"
+        strength: enforced
+        platform: {github: {mechanism: org-ruleset, name: main-protection, definition: rulesets/main-protection.json}}
+        verify: {method: drift-check, frequency: weekly}
+        exception: [AI_Web_School, .github]
+      - id: BP-2
+        intent: "合并前置：唯一 required check = gate（聚合检查）"
+        strength: enforced
+        platform: {github: {mechanism: ruleset-required-status, context: gate}}
+        verify: {method: negative-test, frequency: weekly, see: T-11}
+      - id: BP-3
+        intent: "发布标签 v* 不可删除/覆盖"
+        strength: enforced
+        platform: {github: {mechanism: org-ruleset, name: release-tags, definition: rulesets/release-tags.json}}
+        verify: {method: drift-check, frequency: weekly}
+      - id: BP-4
+        intent: "仓库基线：squash-only、合并删分支、auto-merge 开、wiki/projects 关"
+        strength: enforced
+        platform: {github: {mechanism: repo-settings, apply: apply.sh#step5}}
+        verify: {method: drift-check, frequency: weekly}
+      - id: BP-5
+        intent: "成员不可建仓；成员默认权限 read"
+        strength: enforced
+        platform: {github: {mechanism: org-settings, fields: [members_can_create_repositories=false, default_repository_permission=read]}}
+
+  ci_gate:
+    measures:
+      - id: CI-1
+        intent: "每 PR：lint+arch+test+hygiene+dep-review 聚合为 gate"
+        strength: enforced
+        platform: {github: {mechanism: reusable-workflows, repo: CI-Workflows, caller: template-service/.github/workflows/ci.yml}}
+      - id: CI-2
+        intent: "Actions 仅允许：github 官方+已验证+白名单（zizmor/astral-sh/dependabot/docker/softprops/org 自有）"
+        strength: enforced
+        platform: {github: {mechanism: actions-permissions, state: expected-state.json#actions_policy}}
+        verify: {method: drift-check, frequency: weekly}
+      - id: CI-3
+        intent: "GITHUB_TOKEN 默认只读；不允许 Actions 批准 PR"
+        strength: enforced
+        platform: {github: {mechanism: workflow-permissions, state: expected-state.json#actions_policy}}
+      - id: CI-4
+        intent: "工作流安全静态审计（zizmor medium+ 拦截）"
+        strength: enforced
+        platform: {github: {mechanism: hygiene-job, part_of: CI-1}}
+
+  supply_chain:
+    measures:
+      - id: SC-1
+        intent: "CodeQL 告警 medium+ 阻断合并"
+        strength: enforced
+        platform: {github: {mechanism: org-ruleset, name: codeql-gate, definition: rulesets/codeql-gate.json}}
+      - id: SC-2
+        intent: "安全配置(GitHub recommended)为全部新仓默认"
+        strength: enforced
+        platform: {github: {mechanism: code-security-default, config_id: 17, scope: all}}
+        verify: {method: apply-idempotent, note: "API 只写，读不到，由 apply.sh 每次强制"}
+      - id: SC-3
+        intent: "依赖周更；minor/patch 过 gate 自动合并；major 留人"
+        strength: enforced
+        platform: {github: {mechanism: dependabot+automerge, config: "template-service/.github/dependabot.yml + workflows/automerge.yml"}}
+      - id: SC-4
+        intent: "构建产物附 provenance attestation + SBOM"
+        strength: enforced
+        platform: {github: {mechanism: release-workflow, uses: actions/attest-build-provenance, sbom: policy/testing.yaml#T-07}}
+
+  agent_identity:
+    measures:
+      - id: AG-1
+        intent: "agent 写仓库唯一身份 = App(cloudbrid-agent)；权限 contents/issues/PRs:write，无 workflows/administration"
+        strength: enforced
+        platform: {github: {mechanism: github-app, id: 4632704, state: expected-state.json#github_app}}
+        verify: {method: drift-check, frequency: weekly}
+      - id: AG-2
+        intent: "App 令牌：单仓库作用域、1h 过期、磁盘不落长期凭据"
+        strength: enforced
+        platform: {github: {mechanism: script, entry: scripts/gh-app-token.sh}}
+      - id: AG-3
+        intent: "App 受全部 ruleset 约束（无 bypass）；CI 合并用 App 令牌（触发下游 workflow）"
+        strength: enforced
+        verify: {method: negative-test, frequency: weekly, see: T-11}
+      - id: AG-4
+        intent: "App 安装范围 selected；新仓初始化自动挂载"
+        strength: monitored
+        platform: {github: {mechanism: installation, add_repo: scripts/new-repo-init.sh#step3}}
+
+  release:
+    measures:
+      - id: RL-1
+        intent: "production 环境：人工审批 + 仅受保护分支可部署"
+        strength: enforced
+        platform: {github: {mechanism: environment, name: production, apply: new-repo-init.sh#step2}}
+
+  governance_meta:
+    measures:
+      - id: GM-1
+        intent: "期望状态落盘；周漂移检测；漂移自动开 issue"
+        strength: monitored
+        platform: {github: {mechanism: workflow, file: .github/workflows/governance-drift.yml, cron: "Mon 03:00 UTC"}}
+        verify: {method: self, state: expected-state.json}
+      - id: GM-2
+        intent: "配置变更走 PR→合并→apply.sh（禁止网页手改）"
+        strength: advisory
+      - id: GM-3
+        intent: "政策文件机器可判定（本目录）；agent 按需读取，不常驻上下文"
+        strength: advisory
+        files: [policy/languages.yaml, policy/testing.yaml]
+
+  context_governance:
+    measures:
+      - id: CG-1
+        intent: "AGENTS.md ≤30 行索引型：命令+硬规则+索引表；细节在按需读文件"
+        strength: advisory
+      - id: CG-2
+        intent: "基建路径（.github/ Makefile arch 配置）变更显式归属 owner"
+        strength: advisory
+        platform: {github: {mechanism: CODEOWNERS, file: .github/CODEOWNERS}}
+      - id: CG-3
+        intent: "agent 工具/技能定义放仓库不放本地（可审计防漂移）"
+        strength: advisory
+
+flows:
+  new_repo:
+    steps:
+      - {cmd: "gh repo create <org>/<name> --template <org>/template-service --public --clone"}
+      - {cmd: "bash new-repo-init.sh <name>", effects: [BP-4, RL-1, AG-4]}
+      - {pr: "首PR：按 policy/languages.yaml 选型 + dep-cruise 边界规则 + 模块 AGENTS.md"}
+  rewrite_project:  # 如 Go 重写
+    rules:
+      - {step: 1, action: "走 new_repo 流程建仓（不塞旧仓）"}
+      - {step: 2, action: "骨架 PR 先行：目录+边界 lint 规则+空实现", gate: CI-1}
+      - {step: 3, action: "模块逐 PR，各带契约测试", limit: "每 PR 单一模块"}
+      - {step: 4, action: "旧系统立即抓 golden fixtures（不可逆）", policy: R-06}
+      - {step: 5, action: "差分 job 进 gate", policy: T-09}
+      - {step: 6, action: "mutation 周跑盯 score", policy: T-10}
+      - {step: 7, action: "v2 发布走环境审批+升级/回滚测试", policies: [RL-1, R-01..R-05]}
+
+portability:
+  neutral: [intent, strength, verify, risk_posture, flows]  # 平台无关，直接搬运
+  platform_bound:  # 迁移时需重写映射的机制
+    org-ruleset:        {gitlab: protected-branches+push-rules, gitea: branch-protection}
+    code-security-default: {gitlab: dependency-scanning+sast-templates}
+    github-app:         {gitlab: project-access-token+deploy-tokens, generic: fine-grained-pat}
+    environment:        {gitlab: protected-environments}
+    reusable-workflows: {gitlab: includes, generic: shared-ci-scripts}
+  migration_rule: "换平台 = 重写 platform 段 + apply/drift 脚本；intent/verify/flows 原样保留"
