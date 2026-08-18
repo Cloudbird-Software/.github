@@ -8,7 +8,11 @@ description: |
   isolation 与 approval 拆分（v1 strict 双义废弃）；族级独立性。
   约束：所有引用一律用注册表 id（model 用 alias），禁止内联实现细节与密钥。
 type: object
-required: [id, version, role, archetype, trust_zone, model, capabilities, isolation, approval]
+required: [id, version, role, archetype, trust_zone, model, capabilities, guardrails, isolation, approval]
+allOf:
+  - if: {properties: {archetype: {enum: [judge, adversary]}}}
+    then: {properties: {expose: {properties: {as_tool: {const: false}}}}}
+    description: "judge/adversary 不得作为工具被调用（独立性——CodeRabbit #13）"
 properties:
   id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$", description: "引用形式 agent:<id>"}
   version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
@@ -83,7 +87,8 @@ properties:
             action: {enum: [allow, ask, deny]}
   credential:
     type: object
-    description: "凭据引用：只写 env 变量名，绝不写值（AR-4 最小权限）"
+    additionalProperties: false
+    description: "凭据引用：只写 env 变量名，绝不写值（AR-4 最小权限）；锁死字段防内联凭据（CodeRabbit #13）"
     properties:
       github_app: {type: string, description: "如 cloudbird-agent；作用域见 GOVERNANCE AG-1"}
       secrets: {type: array, items: {type: string, pattern: "^[A-Z_]+$", description: "运行时注入的 env 名"}}
@@ -117,6 +122,7 @@ properties:
       output: {type: object, required: [schema_ref], properties: {schema_ref: {type: string}}}
   expose:
     type: object
+    additionalProperties: false
     properties:
       as_tool: {type: boolean, description: "agent-as-tool：被其他 agent 调用（judge/adversary 恒 false——独立性）"}
       a2a_card: {enum: [auto, none], description: "auto=对外发布 Agent Card"}

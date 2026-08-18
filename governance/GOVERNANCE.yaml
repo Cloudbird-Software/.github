@@ -176,11 +176,11 @@ domains:
         strength: enforced
         schema: standards/agent/event.schema.yaml
       - id: AR-8
-        intent: "agent 必须声明 archetype（十原型封顶：builder/planner/checker/judge/orchestrator/curator/interface/observer/researcher/operator，ADR-0008）；builder↔checker、planner↔builder 不得同一声明；checker 强制 private workspace；judge 模型别名须异于争议双方；新增第 11 原型须 ADR 论证"
+        intent: "agent 必须声明 archetype（九 LLM 原型封顶：builder/planner/test-author/judge/curator/adversary/researcher/deployer/responder + 六机制原型不实例化，ADR-0010）；builder↔test-author、planner↔builder 不得同一声明；test-author/judge 族级独立（models.yaml family）；新增原型须 ADR 论证"
         strength: enforced
         validate: agent-registry/scripts/validate.py
       - id: AR-9
-        intent: "可信交付=失败可见：agent 内 guardrails（输出校验+必跑命令+禁自证）→ team 内独立 checker 验收（不同声明/不同模型别名）→ persistent 团队外部审计（governance-core 周期）→ 平台防线兜底；builder 永不自我信任"
+        intent: "可信交付=失败可见：agent 内 guardrails → test-author 出题（owner 已批验收示例→冻结测试树）→ verifier 机制判卷（required check）→ persistent 团队外部审计（escape review/控制测试）→ 平台防线兜底；builder 永不自我信任；意图保真靠 owner 批验收示例（intent ratification）"
         strength: enforced
         validate: agent-registry/scripts/validate.py
 
