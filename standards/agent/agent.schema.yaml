@@ -1,0 +1,75 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "cloudbird/agent-standard/agent@1"
+title: Agent Declaration
+description: |
+  单智能体声明。Agent = Identity + Model + Capabilities + Permissions + Memory + Workspace + IO Contract。
+  条目落盘 agent-registry/registry/agents/<id>.yaml。
+  约束：所有引用一律用注册表 id（model 用 alias），禁止内联实现细节与密钥。
+type: object
+required: [id, version, role, model, capabilities, permissions]
+properties:
+  id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$", description: "引用形式 agent:<id>"}
+  version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+  status: {enum: [proposed, approved, deprecated, rejected]}
+  role: {type: string, description: "一句话职责；决定团队装配"}
+  identity:
+    type: object
+    required: [prompt_ref]
+    properties:
+      prompt_ref: {type: string, description: "提示词文件（registry 内路径）；提示词版本随本声明 PR 一起评审"}
+      style: {type: string, description: "交互风格提示，可缺省"}
+  model:
+    type: object
+    required: [alias]
+    properties:
+      alias: {type: string, description: "必须存在于 registry/models.yaml；运行时经 LLM Gateway 路由（AR-3）"}
+      temperature: {type: number, maximum: 1}
+      reasoning_level: {enum: [off, low, medium, high]}
+  capabilities:
+    type: object
+    properties:
+      skills: {type: array, items: {type: string, pattern: "^skill:"}, description: "引用 skill:<id>"}
+      tools: {type: array, items: {type: string, pattern: "^tool:"}, description: "工具面白名单；未列出=不可见（供给侧裁剪）"}
+  permissions:
+    type: object
+    properties:
+      inherit: {type: string, description: "继承的策略基线（如 org-default）"}
+      mode: {enum: [normal, strict], description: "tiered_policy 模式；高危 agent 应为 strict"}
+      overrides:
+        type: array
+        description: "参数级规则；语义继承 openjiuwen tiered_policy（severity 或显式 action）"
+        items:
+          type: object
+          required: [tools]
+          properties:
+            tools: {type: array, items: {type: string}}
+            pattern: {type: string, description: "glob 或 re: 前缀正则"}
+            severity: {enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+            action: {enum: [allow, ask, deny]}
+  credential:
+    type: object
+    description: "凭据引用：只写 env 变量名，绝不写值（AR-4 最小权限）"
+    properties:
+      github_app: {type: string, description: "如 cloudbird-agent；作用域见 GOVERNANCE AG-1"}
+      secrets: {type: array, items: {type: string, pattern: "^[A-Z_]+$", description: "运行时注入的 env 名"}}
+  memory:
+    type: object
+    properties:
+      types: {type: array, items: {enum: [user_profile, episodic, semantic]}, description: "记忆类别；敏感信息过滤默认开启"}
+      retention: {type: string, description: "如 30d；episodic 默认随 ephemeral team 归档"}
+  io_contract:
+    type: object
+    description: "被作为 tool / A2A 调用时必需；未声明则不可被 expose"
+    properties:
+      input: {type: object, required: [schema_ref], properties: {schema_ref: {type: string}}}
+      output: {type: object, required: [schema_ref], properties: {schema_ref: {type: string}}}
+  expose:
+    type: object
+    properties:
+      as_tool: {type: boolean, description: "agent-as-tool：被其他 agent 以 tool:<id> 调用"}
+      a2a_card: {enum: [auto, none], description: "auto=对外发布 Agent Card"}
+  workspace:
+    type: object
+    properties:
+      scope: {enum: [private, team]}
+      root: {type: string, description: "private 工作区根；team 则写相对团队共享根的子路径"}

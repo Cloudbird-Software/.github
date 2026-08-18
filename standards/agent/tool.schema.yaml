@@ -1,0 +1,45 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "cloudbird/agent-standard/tool@1"
+title: Tool Declaration
+description: |
+  能力原子。tool = agent 可调用的最小能力单元（内置函数/MCP/Shell/脚本/A2A端点）。
+  治理关注点：副作用、严重度基线、I/O 契约、实现位置、生命周期状态。
+  条目落盘于 agent-registry/registry/tools/<id>.yaml。
+type: object
+required: [id, version, kind, severity, side_effects, status]
+properties:
+  id:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]*$"
+    description: 全局唯一 id；注册表内一切引用（agent.allowed_tools 等）使用 "tool:<id>"
+  version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+  kind: {enum: [builtin, mcp, a2a, shell, script, api]}
+  severity:
+    enum: [LOW, MEDIUM, HIGH, CRITICAL]
+    description: 默认严重度基线；权限引擎按 tiered_policy（normal/strict 模式）映射 allow/ask/deny
+  side_effects:
+    type: array
+    items: {enum: [none, filesystem_write, vcs_write, network, shell_exec, cost, mutation_external]}
+    description: 只读工具必须显式声明 [none]；有 cost 的按配额计量
+  input: {$ref: "#/$defs/schemaRef"}
+  output: {$ref: "#/$defs/schemaRef"}
+  implementation: {$ref: "#/$defs/implRef"}
+  status:
+    enum: [proposed, approved, deprecated, rejected]
+    description: "approved 才可被 agent/skill 引用（CI gate 强制，见 GOVERNANCE AR-2）"
+  owner:
+    type: string
+    description: 负责审批与维护的持久团队（team id）或人
+$defs:
+  schemaRef:
+    type: object
+    required: [schema_ref]
+    properties:
+      schema_ref: {type: string, description: "相对 registry 的 JSON Schema 路径"}
+  implRef:
+    type: object
+    required: [repo, path]
+    properties:
+      repo: {type: string}
+      path: {type: string}
+      ref: {type: string, description: "缺省跟随默认分支"}
