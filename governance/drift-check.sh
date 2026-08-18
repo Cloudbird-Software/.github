@@ -93,7 +93,7 @@ done
 # ---------- 5. 必需 org secrets（只查存在性，值不可读）----------
 SECRETS=$(api "https://api.github.com/orgs/$ORG/actions/secrets")
 for s in $(jq -r '.org_secrets_required[]' "$EXPECTED"); do
-  jq -e --arg s "$s" '.secrets[].name == $s' <<<"$SECRETS" >/dev/null \
+  jq -e --arg s "$s" 'any(.secrets[]; .name == $s)' <<<"$SECRETS" >/dev/null \
     && ok "org secret '$s'" || drift "org secret '$s' 缺失"
 done
 
