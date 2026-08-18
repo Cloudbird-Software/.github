@@ -148,7 +148,7 @@ EOF
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
   DIRECT=$(api "https://api.github.com/repos/$ORG/$r/commits?sha=main&since=$SINCE&per_page=100" \
-    | jq -r '[.[] | select(.commit.message | test("[(]#[0-9]+[)]\$") | not) | .sha[0:8] + " " + (.commit.message | split("\n")[0])] | .[]')
+    | jq -r '[.[] | select(.commit.message | test("[(]#[0-9]+[)]$") | not) | .sha[0:8] + " " + (.commit.message | split("\n")[0])] | .[]')
   if [[ -n "$DIRECT" ]]; then
     while IFS= read -r line; do
       drift "repo '$r' 存在非 PR 直推 commit: $line（破玻璃须 24h 内回填 ADR+PR，见 flows.governance_change）"
