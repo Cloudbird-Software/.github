@@ -1,0 +1,64 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "cloudbird/agent-standard/event@1"
+title: Agent Process Event
+description: |
+  过程数据的事件标准。所有事件 append-only 写入数据层（JSONL 起步，见 ADR-0003），
+  不进任何 git 仓库。五类事件覆盖 agent 运行全过程；沉淀/审计/用量统计均从事件流派生。
+  原始轨迹（完整对话、工具入出参全文）不属于本 schema，按 trace_id 关联存放于对象存储/本地滚动目录。
+type: object
+required: [event, ts, trace_id]
+properties:
+  event: {enum: [run_started, tool_called, skill_used, decision_made, run_finished]}
+  ts: {type: string, format: date-time}
+  trace_id: {type: string, description: "贯穿一次任务全链路"}
+  session_id: {type: string}
+  team_id: {type: string, description: "team:<id>；单 agent 任务可缺省"}
+  agent_id: {type: string, description: "agent:<id>[@version]"}
+  parent_trace_id: {type: string, description: "子任务派生时回链"}
+  payload: {type: object, description: "按 event 类型见 $defs"}
+$defs:
+  run_started:
+    type: object
+    properties:
+      goal: {type: string}
+      team_snapshot: {type: string, description: "实例化所用 team 声明+版本的摘要"}
+  tool_called:
+    type: object
+    properties:
+      tool: {type: string, description: "tool:<id>"}
+      ok: {type: boolean}
+      duration_ms: {type: integer}
+      severity: {enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+      denied_by: {type: string, description: "被权限引擎拦截时记录命中的规则 id（硬控制审计依据）"}
+      cost: {type: number, description: "计费工具的计量值"}
+  skill_used:
+    type: object
+    properties:
+      skill: {type: string, description: "skill:<name>@<version>"}
+      acceptance_results:
+        type: array
+        description: "验收断言逐条结果"
+        items:
+          type: object
+          properties:
+            check: {type: string}
+            kind: {enum: [ci, llm]}
+            passed: {type: boolean}
+  decision_made:
+    type: object
+    description: "开发过程中的认识与决策数据（为什么这么做）"
+    properties:
+      question: {type: string}
+      choice: {type: string}
+      alternatives: {type: array, items: {type: string}}
+      rationale: {type: string}
+      adr_ref: {type: string, description: "若升级为正式决策，指向 registry decisions/ 编号"}
+  run_finished:
+    type: object
+    properties:
+      status: {enum: [success, failed, aborted]}
+      model_alias: {type: string}
+      tokens_in: {type: integer}
+      tokens_out: {type: integer}
+      duration_ms: {type: integer}
+      handoff_done: {type: boolean, description: "ephemeral team：handoff 是否全部完成"}

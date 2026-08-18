@@ -1,0 +1,67 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "cloudbird/agent-standard/team@1"
+title: Team (Swarm) Declaration
+description: |
+  多智能体团队声明。Team = Members + Topology + Orchestration + Workspace + Storage + Lifecycle。
+  条目落盘 agent-registry/registry/teams/<id>.yaml。
+  核心规则：团队必须声明 lifecycle；ephemeral 团队销毁前必须完成 handoff（AR-6），
+  其资产沉淀给 archive_to 指向的 persistent 团队。
+type: object
+required: [id, goal, members, topology, lifecycle]
+properties:
+  id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$", description: "引用形式 team:<id>"}
+  version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+  status: {enum: [proposed, approved, active, archived, deprecated]}
+  goal: {type: string, description: "团队目标；persistent 团队写持续职责"}
+  members:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [agent]
+      properties:
+        agent: {type: string, pattern: "^(registry:)?agent:", description: "agent:<id>[@version]，缺省 latest approved"}
+        count: {type: integer, minimum: 1, description: "同型多实例"}
+        as_tool: {type: boolean, description: "该成员以 agent-as-tool 方式被 leader 调用"}
+        role_override: {type: [string, "null"], description: "实例级角色覆盖"}
+  topology:
+    enum: [leader-teammate, flat, hub-spoke]
+    description: 分布式运行时（pyzmq/A2X 注册中心）由编排框架按此装配
+  orchestration:
+    type: object
+    properties:
+      assign: {enum: [leader-dispatch, claim, hybrid], description: "任务分配方式"}
+      merge: {enum: [leader-aggregate, shared-store, debate], description: "结果合并方式"}
+      workflow_ref: {type: string, description: "团队级流程文件（阶段/波次/验收门）；复杂流程引用，不在此内联"}
+  workspace:
+    type: object
+    description: "团队共享工作区；中间产物可追溯"
+    properties:
+      shared:
+        type: object
+        properties:
+          root: {type: string, description: "共享根路径或 env: 引用；分布式部署须各方可见（如 NFS）"}
+          version_control: {type: boolean}
+      layout: {type: object, description: "约定子目录", properties: {inbox: {type: string}, artifacts: {type: string}, decisions: {type: string}}}
+  storage:
+    type: object
+    properties:
+      type: {enum: [local, postgresql]}
+      ref: {type: string, description: "env: 变量引用（如 env:TEAM_DB_DSN）；禁止明文连接串"}
+  lifecycle:
+    type: object
+    required: [type]
+    properties:
+      type: {enum: [ephemeral, persistent], description: "persistent=常设，持有仓库/治理职责；ephemeral=任务制，完成即归档"}
+      archive_to:
+        type: string
+        description: "ephemeral 必填：资产沉淀目标 persistent 团队（team:<id>）"
+      handoff:
+        type: array
+        description: "销毁前强制移交动作；全部完成才允许销毁（AR-6）"
+        items: {enum: [artifacts-pr, memory-distill, skill-extract, adr-write, trace-archive, retrospective]}
+      destroy_policy: {enum: [after-handoff, manual], description: "after-handoff=移交完成自动销毁"}
+  channels:
+    type: array
+    description: "对外通道（web/tui/a2a/频道）；缺省仅内部"
+    items: {type: string}

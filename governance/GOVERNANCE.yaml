@@ -139,6 +139,37 @@ domains:
         intent: "agent 工具/技能定义放仓库不放本地（可审计防漂移）"
         strength: advisory
 
+  agent_runtime:
+    # 标准本体: standards/agent/{tool,skill,agent,team,event}.schema.yaml
+    # 注册条目: Cloudbird-Software/agent-registry
+    measures:
+      - id: AR-1
+        intent: "agent/skill/tool/team 四类声明 + 模型注册表唯一落盘 agent-registry；本地运行目录仅为部署产物；运行实例可追溯到声明+版本"
+        strength: enforced
+        platform: {github: {mechanism: repo, name: agent-registry, validate: agent-registry/scripts/validate.py}}
+        verify: {method: registry-validate, on: PR}
+      - id: AR-2
+        intent: "引用 status!=approved 的注册条目 = CI 拒绝；proposed→approved 必须走 PR"
+        strength: enforced
+        platform: {github: {mechanism: script, entry: agent-registry/scripts/validate.py}}
+      - id: AR-3
+        intent: "模型接入一律经 LLM Gateway：声明只引用 alias；provider key 仅存 gateway secret store；任何仓库/agent 配置零明文 key"
+        strength: enforced
+      - id: AR-4
+        intent: "agent 凭据最小权限：per-agent/per-team 作用域 token（衔接 AG-1）；声明中只写 env 引用"
+        strength: enforced
+      - id: AR-5
+        intent: "双层控制：软引导（AGENTS.md/identity/skill 正文）+ 硬边界（工具面裁剪→权限引擎→凭据→平台防线）；冲突时硬控制优先；拦截记录进事件流"
+        strength: enforced
+      - id: AR-6
+        intent: "团队必须声明 lifecycle；ephemeral 团队 archive_to+handoff 全部完成才允许销毁；persistent 团队（governance-core）对治理资产持续负责"
+        strength: enforced
+        platform: {github: {mechanism: script, entry: agent-registry/scripts/validate.py, check: lifecycle}}
+      - id: AR-7
+        intent: "过程数据三分离：声明/决策→git(registry/ADR)；事件→数据层(JSONL 起步)；原始轨迹→对象存储滚动30天；项目仓仅 AGENTS.md+team 引用行"
+        strength: enforced
+        schema: standards/agent/event.schema.yaml
+
 flows:
   new_repo:
     steps:
@@ -154,6 +185,12 @@ flows:
       - {step: 5, action: "差分 job 进 gate", policy: T-09}
       - {step: 6, action: "mutation 周跑盯 score", policy: T-10}
       - {step: 7, action: "v2 发布走环境审批+升级/回滚测试", policies: [RL-1, R-01..R-05]}
+  agent_team_lifecycle:
+    rules:
+      - {step: 1, action: "从 agent-registry 声明实例化 team（引用 id@version）", gate: AR-1}
+      - {step: 2, action: "运行期事件按 event.schema 追加到数据层；拦截记录 tool_called.denied_by", policies: [AR-5, AR-7]}
+      - {step: 3, action: "ephemeral 完成→执行 handoff：artifacts 走 PR、经验提炼 skill、关键决策升 ADR、轨迹归档", policy: AR-6}
+      - {step: 4, action: "persistent 团队（governance-core）审核归档资产入库；handoff_done 审计", policy: AR-6}
 
 portability:
   neutral: [intent, strength, verify, risk_posture, flows]  # 平台无关，直接搬运
