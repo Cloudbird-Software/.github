@@ -1,0 +1,48 @@
+name: governance-drift
+on:
+  schedule:
+    - cron: "0 3 * * 1" # 每周一 03:00 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: 检测治理漂移
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::缺 org secret GOVERNANCE_TOKEN（需 org admin token）。设置: 组织 Settings → Secrets and variables → Actions → New organization secret" >&2
+            exit 2
+          fi
+          bash governance/drift-check.sh | tee drift-report.txt
+      - name: 发现漂移则开 issue（幂等）
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          TITLE="治理漂移检测：组织配置与 governance/ 落盘不一致"
+          EXISTING=$(gh issue list --repo "$REPO" --state open --search "in:title 治理漂移" --json number --jq 'length')
+          BODY="自动化检测发现以下漂移（运行 #${{ github.run_id }}）：
+
+          $(cat drift-report.txt)
+
+          修复方式：本地跑 \`bash governance/apply.sh\`，或手动改回后跑 \`bash governance/drift-check.sh\` 验证。
+
+          @randypanding"
+          if [[ "$EXISTING" != "0" ]]; then
+            NUM=$(gh issue list --repo "$REPO" --state open --search "in:title 治理漂移" --json number --jq '.[0].number')
+            gh issue comment "$NUM" --repo "$REPO" --body "$BODY"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$BODY"
+          fi

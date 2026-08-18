@@ -1,0 +1,40 @@
+{
+  "org": "Cloudbird-Software",
+  "comment": "组织治理期望状态。drift-check.sh 据此检测漂移；apply.sh 据此幂等修复。ruleset 完整定义在 rulesets/ 目录。",
+  "actions_policy": {
+    "allowed_actions": "selected",
+    "github_owned_allowed": true,
+    "verified_allowed": true,
+    "patterns_allowed": [
+      "zizmorcore/*",
+      "astral-sh/*",
+      "dependabot/fetch-metadata",
+      "softprops/action-gh-release",
+      "docker/*",
+      "Cloudbird-Software/*"
+    ],
+    "default_workflow_permissions": "read",
+    "default_workflow_permissions_can_approve": false
+  },
+  "code_security": {
+    "configuration_name": "GitHub recommended",
+    "default_for_new_repos": "all"
+  },
+  "repo_baseline": {
+    "squash_only": true,
+    "delete_branch_on_merge": true,
+    "exclude_repos": ["AI_Web_School"]
+  },
+  "org_secrets_required": ["AGENT_APP_SECRET"],
+  "github_app": {
+    "name": "cloudbrid-agent",
+    "id": 4632704,
+    "permissions": {
+      "contents": "write",
+      "issues": "write",
+      "metadata": "read",
+      "pull_requests": "write"
+    },
+    "must_not_have": ["workflows", "administration"]
+  }
+}
