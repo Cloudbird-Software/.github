@@ -1,17 +1,29 @@
 $schema: "https://json-schema.org/draft/2020-12/schema"
-$id: "cloudbird/agent-standard/team@1"
-title: Team (Swarm) Declaration
+$id: "cloudbird/agent-standard/team@2"
+title: Team (Swarm) Declaration (v2, ADR-0012)
 description: |
-  多智能体团队声明。Team = Members + Topology + Orchestration + Workspace + Storage + Lifecycle。
-  条目落盘 agent-registry/registry/teams/<id>.yaml。
-  核心规则：团队必须声明 lifecycle；ephemeral 团队销毁前必须完成 handoff（AR-6），
-  其资产沉淀给 archive_to 指向的 persistent 团队。
+  多智能体团队声明。Team = Members(seats) + Topology + Orchestration + Verification
+  + Workspace + Storage + Budget + Lifecycle。
+  条目落盘 agent-registry/registry/teams/<id>.yaml；团队原型（delivery_squad/stewardship/
+  incident_cell）语义单一真源 = agent-registry standards/team-collaboration.yaml PART 2。
+  核心规则：团队必须声明 lifecycle；ephemeral 团队销毁 = after-handoff AND destroy_condition
+  （AR-6：移交完成且语义条件满足才允许销毁）；销毁范围 = agent 实例与临时 workspace，
+  数据层制品/事件不随队销毁（destroy_scope，ADR-0011）。
+  v2（ADR-0012）：对齐 team-collaboration v1.0 实例语义——lifecycle 增 trigger/ttl/
+  on_ttl_expiry/destroy_condition；coverage 枚举增 re-check-sample；topology/frequency/
+  handoff 枚举补齐；顶层增 archetype/scope/budget/backlog_role；members 增 seat。
 type: object
 required: [id, goal, members, topology, lifecycle]
 properties:
   id: {type: string, pattern: "^[a-z0-9][a-z0-9-]*$", description: "引用形式 team:<id>"}
   version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
   status: {enum: [proposed, approved, active, archived, deprecated]}
+  archetype:
+    type: string
+    description: "团队原型（team-collaboration PART 2 teams.*：delivery_squad | stewardship | incident_cell）；新增原型须 ADR 论证"
+  scope:
+    enum: [delivery, knowledge, adversarial, operational]
+    description: "权限域（边界公理：权限边界切团队，不按功能切）；跨域动作走 escalation"
   goal: {type: string, description: "团队目标；persistent 团队写持续职责"}
   members:
     type: array
@@ -21,21 +33,28 @@ properties:
       required: [agent]
       properties:
         agent: {type: string, pattern: "^(registry:)?agent:", description: "agent:<id>[@version]，缺省 latest approved"}
+        seat:
+          type: string
+          description: "座位（时序成员位）；须属于原型 seats 声明——多相位在场的成员占实体座位（as_tool=false），单次往返走 as_tool"
         count: {type: integer, minimum: 1, description: "同型多实例"}
         as_tool: {type: boolean, description: "该成员以 agent-as-tool 方式被 leader 调用"}
         role_override: {type: [string, "null"], description: "实例级角色覆盖"}
   topology:
-    enum: [leader-teammate, flat, hub-spoke]
-    description: 分布式运行时（pyzmq/A2X 注册中心）由编排框架按此装配
+    type: string
+    pattern: "^(leader-teammate|flat|hub-spoke|single-seat)"
+    description: "标准值开头，可附括号尾注：leader-teammate（leader 可为 mechanism:scheduler——openjiuwen 形态）/ flat / hub-spoke / single-seat（常驻单座位团队：stewardship、incident_cell）"
   orchestration:
     type: object
     properties:
-      assign: {enum: [leader-dispatch, claim, hybrid], description: "任务分配方式"}
-      merge: {enum: [leader-aggregate, shared-store, debate], description: "结果合并方式"}
+      assign: {type: string, description: "分派机制（机制名+关键规则；如 scheduler 状态机按 capability_tags 路由、预算熔断）——v1 三选一枚举废弃：实例语义是机制描述"}
+      merge: {type: string, description: "合并机制（如 integrator：gate.pass AND review.approve，无 agent 持合并权；治理仓 owner 手合）"}
+      release: {type: string, description: "发布执行者（release_bot 部署 behind flag 并写 release_record——无 agent 持发布权）"}
+      phases_ref: {type: string, description: "相位状态机单一真源引用（standards/team-collaboration.yaml#flow.phases；不在此重复）"}
+      authorization_ref: {type: string, description: "条件预授权单一真源引用（incident_cell.authorization）"}
       workflow_ref: {type: string, description: "团队级流程文件（阶段/波次/验收门）；复杂流程引用，不在此内联"}
   verification:
     type: object
-    description: "验证链（AR-9 v2，ADR-0010）：test-author 出题 + verifier 机制判卷 + team 外周期审计；含 builder 成员的团队必须声明"
+    description: "验证链（AR-9 v2，ADR-0010）三层：agent 内 guardrails → team 内 test-author 出题 + verifier 机制判卷 → team 外周期审计；含 builder 成员的团队必须声明"
     properties:
       test_authors:
         type: array
@@ -45,18 +64,23 @@ properties:
         type: string
         pattern: "^mechanism:verifier"
         description: "判卷机制（required status check，跑冻结测试树 test_tree_sha）；判卷不是 agent 职责"
+      coverage:
+        enum: [all-outputs, sampled, re-check-sample]
+        description: "验收覆盖（声明位：含 builder 的团队）：all-outputs=每件产出必验收；sampled=抽样（附比例说明）；re-check-sample=前道全审+后道抽检复核（attention-ledger.sampled 语义——如 curator 全审在前、owner 抽检 10% 复核）"
       in_team_check:
         type: object
-        description: "兼容位（治理团队等无 builder 团队可空）"
+        description: "team 内检查（声明位：无 builder 的治理/运营团队；与顶层 coverage 同枚举）"
         properties:
           checkers: {type: array, items: {type: string}, description: "遗留字段：等价 test_authors；新声明用 test_authors"}
-          coverage: {enum: [all-outputs, sampled], description: "all-outputs=每件产出必验收；sampled=抽样（附比例说明）"}
+          coverage: {enum: [all-outputs, sampled, re-check-sample], description: "同顶层 coverage 枚举（ADR-0012 增 re-check-sample）"}
+          note: {type: string, description: "验证模式说明（如：产出走平台防线、跨团队可审）"}
       external_audit:
         type: object
         properties:
-          team: {type: string, description: "审计方 persistent 团队（如 team:governance-core；治理团队自身用 null:owner）"}
-          frequency: {enum: [per-delivery, weekly, monthly]}
+          team: {type: string, description: "审计方 persistent 团队（如 team:stewardship；治理团队自身用 null:owner）"}
+          frequency: {enum: [per-delivery, weekly, monthly, per-incident], description: "per-incident=事故后 retro 审计（incident_cell：预授权动作 24h 审计）"}
           method: {type: array, items: {enum: [metrics-anomaly, re-check-sample, drift-review, retrospective-review, escape-review, control-test-report]}, description: "指标异常/抽样复检/漂移复盘/回溯评审/逃逸归因/控制测试报告"}
+          note: {type: string, description: "审计安排说明（如 owner 周审三件套+归档抽检比例）"}
   workspace:
     type: object
     description: "团队共享工作区；中间产物可追溯"
@@ -66,26 +90,52 @@ properties:
         properties:
           root: {type: string, description: "共享根路径或 env: 引用；分布式部署须各方可见（如 NFS）"}
           version_control: {type: boolean}
-      layout: {type: object, description: "约定子目录", properties: {inbox: {type: string}, artifacts: {type: string}, decisions: {type: string}}}
+      layout: {type: object, description: "约定子目录", properties: {inbox: {type: string}, artifacts: {type: string}, decisions: {type: string}, contracts: {type: string, description: "跨卡契约（delivery_squad wave_consistency）"}, findings: {type: string, description: "adversary findings（stewardship）"}, backlog: {type: string, description: "backlog proposals 归并（stewardship 单写者）"}}}
   storage:
     type: object
     properties:
       type: {enum: [local, postgresql]}
-      ref: {type: string, description: "env: 变量引用（如 env:TEAM_DB_DSN）；禁止明文连接串"}
+      ref: {type: string, description: "env: 变量引用（如 env:TEAM_DB_DSN）；禁止明文连接串；各队独占 DSN——销毁语义清晰"}
+  budget:
+    type: object
+    description: "预算包络（不变式单一真源 team-collaboration PART 4 budget.invariants：升级通道永不冻结）"
+    properties:
+      team_envelope:
+        type: object
+        properties:
+          usd: {type: string, description: "金额或 env: 引用"}
+          wall_clock: {type: string, description: "时长上限或 env: 引用（incident_cell 此项即 TTL）"}
+      per_card: {type: string, description: "按 card.risk_class（卡字段声明）"}
+      overhead_pool:
+        type: object
+        properties:
+          usd: {type: string, description: "升级/evidence-pack 走池（env: 引用）；永不冻结"}
+      invariants_ref: {type: string, description: "预算不变式单一真源引用"}
+  backlog_role:
+    type: string
+    description: "backlog 角色（proposals 多写者 → 单写者归并排序；单一真源 team-collaboration PART 3 interfaces.backlog）"
   lifecycle:
     type: object
     required: [type]
     properties:
       type: {enum: [ephemeral, persistent], description: "persistent=常设，持有仓库/治理职责；ephemeral=任务制，完成即归档"}
+      trigger:
+        type: string
+        description: "ephemeral 组队触发事件（delivery_squad: intent.received——组队即 planner 入场；incident_cell: incident.sev_alert——外部告警/移交/owner 呼叫）"
+      ttl: {type: string, description: "存续上限（incident_cell: 72h）；到期绝不 auto-destroy"}
+      on_ttl_expiry: {type: string, description: "TTL 到期动作（escalate_to_owner + extension_requires_owner——冻结现场持续升级，不销毁）"}
       archive_to:
         type: string
         description: "ephemeral 必填：资产沉淀目标 persistent 团队（team:<id>）"
       handoff:
         type: array
-        description: "销毁前强制移交动作；全部完成才允许销毁（AR-6）"
-        items: {enum: [artifacts-pr, memory-distill, skill-extract, adr-write, trace-archive, retrospective]}
-      destroy_policy: {enum: [after-handoff, manual], description: "after-handoff=移交完成自动销毁"}
+        description: "销毁前强制移交动作；全部完成才允许销毁（AR-6）；每项执行者见 team-collaboration PART 2 对应原型 lifecycle.handoff"
+        items: {enum: [artifacts-pr, memory-distill, skill-extract, adr-write, trace-archive, retrospective, incident_report, retro_24h, followup_backlog_merge, retro_debt_tracking]}
+      destroy_policy: {enum: [after-handoff, manual], description: "after-handoff=移交完成自动销毁；persistent 团队用 manual"}
+      destroy_condition:
+        type: string
+        description: "销毁语义条件（ADR-0012 增；与 destroy_policy=after-handoff 是 AND 关系）：delivery_squad 如 released_behind_flag OR reverted；incident_cell 如 exit_criteria 满足（service_restored AND root_cause_hypothesis AND followup_cards_created）。销毁范围（destroy_scope）=agent 实例与临时 workspace；数据层制品/事件不随队销毁"
   channels:
     type: array
-    description: "对外通道（web/tui/a2a/频道）；缺省仅内部"
+    description: "对外通道（web/tui/a2a/频道/pager 值班）；缺省仅内部"
     items: {type: string}
