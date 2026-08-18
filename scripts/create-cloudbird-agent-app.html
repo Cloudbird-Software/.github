@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>创建 cloudbird-agent GitHub App</title>
+</head>
+<body onload="document.forms[0].submit()">
+  <p>正在跳转到 GitHub 创建 <strong>cloudbird-agent</strong> App……<br>
+  （浏览器需已登录 Cloudbird-Software 组织 owner 账号；表单已按最小权限预填，确认后点 <em>Create GitHub App</em>。）</p>
+  <form method="post" action="https://github.com/organizations/Cloudbird-Software/settings/apps/new">
+    <input type="hidden" name="manifest" value='{
+  "name": "cloudbird-agent",
+  "description": "AI agent 的仓库写入身份：分支/PR/Issue，无 CI 改动权，受 ruleset 约束",
+  "url": "https://github.com/Cloudbird-Software",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "pull_requests": "write",
+    "metadata": "read"
+  }
+}'>
+    <noscript><button type="submit">继续</button></noscript>
+  </form>
+</body>
+</html>
