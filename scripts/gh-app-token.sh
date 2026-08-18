@@ -11,17 +11,22 @@
 #
 # 用法：
 #   export CB_APP_ID=123456                                # App 详情页的 App ID
+#   # 私钥注入（评审项）：本地优先 AGENT_APP_SECRET_FILE（文件路径，不进 shell history）；
+#   # CI 中由 Actions secret 机制以环境变量注入 AGENT_APP_SECRET（等效 secret manager）。
+#   # 禁止在交互 shell 里 `export AGENT_APP_SECRET="-----BEGIN..."`——命令会进
+#   # history 且被子进程环境继承；确需临时注入用 read -s 或 secret manager。
 #   export AGENT_APP_SECRET_FILE=~/.config/cloudbird/cloudbrid-agent.pem
-#   # CI / secret 场景改用字面量（org secret 同名注入）： export AGENT_APP_SECRET="<PEM 全文>"
 #
-#   GH_TOKEN=$(bash gh-app-token.sh)                        # 作用域=安装的全部仓库
-#   GH_TOKEN=$(REPO=template-service bash gh-app-token.sh)  # 作用域=单仓库（推荐）
+#   GH_TOKEN=$(REPO=template-service bash gh-app-token.sh)  # 作用域=单仓库（强制最小权限）
 #   gh api user                                             # 验证：应显示 cloudbrid-agent[bot]
 set -euo pipefail
 
 API="${CB_GITHUB_API:-https://api.github.com}"
 ORG="${ORG:-Cloudbird-Software}"
 APP_ID="${CB_APP_ID:?需要环境变量 CB_APP_ID（GitHub App 设置页的 App ID）}"
+# REPO 强制（评审项）：不设 REPO 时令牌作用域=安装的全部仓库，违反最小权限——
+# agent 只应以单仓作用域取令牌（AG-1：agent 的写权限以仓为单位显式授予）
+REPO="${REPO:?需要环境变量 REPO（目标仓库名——令牌强制单仓作用域，不提供全安装作用域模式）}"
 
 # 私钥：优先文件，其次字面量（CI secret 里通常存 PEM 全文）
 if [[ -n "${AGENT_APP_SECRET_FILE:-}" && -f "$AGENT_APP_SECRET_FILE" ]]; then
@@ -52,9 +57,8 @@ if [[ -z "$INSTALL_ID" ]]; then
   exit 1
 fi
 
-# 3) JWT 换安装令牌；REPO 非空时把令牌限定到单仓库（最小权限）
-BODY='{}'
-[[ -n "${REPO:-}" ]] && BODY=$(jq -nc --arg r "$REPO" '{repositories: [$r]}')
+# 3) JWT 换安装令牌；令牌限定到单仓库（REPO 必填——最小权限，评审项）
+BODY=$(jq -nc --arg r "$REPO" '{repositories: [$r]}')
 RESP=$(curl -sS -X POST \
   -H "Authorization: Bearer $JWT" \
   -H "Accept: application/vnd.github+json" \
@@ -66,5 +70,5 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-echo "令牌有效至 $(jq -r .expires_at <<<"$RESP")（作用域：${REPO:-全部已安装仓库}，身份 cloudbrid-agent[bot]）" >&2
+echo "令牌有效至 $(jq -r .expires_at <<<"$RESP")（作用域：单仓库 $REPO，身份 cloudbrid-agent[bot]）" >&2
 echo "$TOKEN"

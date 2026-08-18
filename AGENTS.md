@@ -4,7 +4,7 @@ AI agent 进入本仓的工作契约（索引型，CG-1；细节按需读引用�
 
 ## 硬规则
 
-- 治理文件（governance/ standards/ scripts/ .github/ CODEOWNERS）= C1 路径：PR 必须引用 ADR-NNNN，owner-only review（GOVERNANCE flows.governance_change）
+- 治理文件（governance/ standards/ scripts/ .github/ CODEOWNERS profile/）= C1 路径：PR 必须引用 ADR-NNNN，owner-only review（GOVERNANCE flows.governance_change；与 gate adr-required 机器检查同路径集）
 - agent 写仓库身份 = GitHub App `cloudbrid-agent`（AG-1）；令牌经 scripts/gh-app-token.sh，单仓作用域、1h 过期
 - 本仓只读治理声明；ADR 与注册条目落盘 agent-registry（REPOS.yaml L1）
 - 不引入新第三方 Action：白名单见 expected-state.json#actions_policy（CI-2）

@@ -102,15 +102,35 @@ fi
 
 echo "==> 5/5 仓库基线（squash-only / 删分支）"
 EXCLUDES=$(jq -c '.repo_baseline.exclude_repos // []' "$EXPECTED")
-REPOS_RAW=$(api "https://api.github.com/orgs/$ORG/repos?per_page=100")
-# 前置 GET 参与失败计数（评审项）：清单失败时 REPOS 为空 → 循环体全跳过 →
-# apply.sh 假装成功退出 0，基线实际一项未应用——违反 loud-failure 契约
-if ! jq -e 'type == "array" and length > 0' <<<"$REPOS_RAW" >/dev/null 2>&1; then
-  echo "  FAIL：org 仓库清单拉取失败（$(jq -r '.message // "空/非数组"' <<<"$REPOS_RAW" 2>/dev/null || echo 传输失败)），仓库基线未应用" >&2
-  FAILS=$((FAILS+1))
+# 全分页拉取 org 仓库（评审项：单页 100 时 >100 仓的 org 会漏掉后续仓库的基线应用）
+REPOS_TMP=$(mktemp)
+PAGE=1
+REPOS_ERR=0
+while :; do
+  CHUNK=$(api "https://api.github.com/orgs/$ORG/repos?per_page=100&page=$PAGE")
+  if ! jq -e 'type == "array"' <<<"$CHUNK" >/dev/null 2>&1; then
+    echo "  FAIL：org 仓库清单拉取失败（$(jq -r '.message // "非数组"' <<<"$CHUNK" 2>/dev/null || echo 传输失败)），仓库基线未应用" >&2
+    FAILS=$((FAILS+1))
+    REPOS_ERR=1
+    break
+  fi
+  N=$(jq 'length' <<<"$CHUNK")
+  [[ "$N" -eq 0 ]] && break
+  jq -r '.[].name' <<<"$CHUNK" >>"$REPOS_TMP"
+  [[ "$N" -lt 100 ]] && break
+  PAGE=$((PAGE+1))
+done
+if [[ $REPOS_ERR -eq 1 ]]; then
+  rm -f "$REPOS_TMP"
   REPOS=""
+else
+  REPOS=$(cat "$REPOS_TMP")
+  rm -f "$REPOS_TMP"
+  if [[ -z "$REPOS" ]]; then
+    echo "  FAIL：org 仓库清单为空（org 至少应含本治理仓）——清单异常，仓库基线未应用" >&2
+    FAILS=$((FAILS+1))
+  fi
 fi
-REPOS=$(jq -r '.[].name' <<<"$REPOS_RAW" 2>/dev/null)
 for r in $REPOS; do
   jq -e --arg r "$r" 'index($r) != null' <<<"$EXCLUDES" >/dev/null && { echo "  $r: 跳过（exclude）"; continue; }
   code=$(api -o /dev/null -w '%{http_code}' -X PATCH "https://api.github.com/repos/$ORG/$r" \

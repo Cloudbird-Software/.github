@@ -58,9 +58,11 @@ cat <<EOF
 
 完成。后续新仓标准流程：
   gh repo create $ORG/<name> --template $ORG/template-service --public --clone
-  # 用固定引用执行（红队 #17-L：main 未 pin 的远端脚本在 admin 上下文执行=供应链风险）：
-  #   1) 先取当前 main 的 commit sha 并记录
-  #   2) bash <(curl -sS https://raw.githubusercontent.com/$ORG/.github/<sha>/scripts/new-repo-init.sh) <name>
+  # 用固定引用执行（红队 #17-L + 评审项：运行时解析 main 执行=供应链风险——
+  # pin 的必须是**你审阅过的合并提交**，不是"当前 main HEAD"）：
+  #   1) sha=$(gh pr view <审阅过的PR号> --repo $ORG/.github --json mergeCommit -q .mergeCommit.oid)
+  #      （或 gh api repos/$ORG/.github/commits/main -q .sha 后人工确认该 commit 即你审阅的合并）
+  #   2) bash <(curl -sS https://raw.githubusercontent.com/$ORG/.github/$sha/scripts/new-repo-init.sh) <name>
   # 本脚本自检（改动后）: bash -n scripts/new-repo-init.sh
   # 然后开第一个 PR，确认 gate 跑绿后合并
 EOF

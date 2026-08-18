@@ -78,14 +78,29 @@ fi
 
 # ---------- 4. 仓库基线（squash-only / 删分支）----------
 EXCLUDES=$(jq -c '.repo_baseline.exclude_repos // []' "$EXPECTED")
-REPOS_RAW=$(api "https://api.github.com/orgs/$ORG/repos?per_page=100")
-# fail-closed（评审项）：清单拉取失败/非数组时 REPOS 为空会让后续全部循环静默跳过、
-# 检测整体假绿——此处显式报漂移中止，检测器失明不得伪装成无漂移
-if ! jq -e 'type == "array" and length > 0' <<<"$REPOS_RAW" >/dev/null 2>&1; then
-  echo "FATAL: org 仓库清单拉取失败（$(jq -r '.message // "空/非数组"' <<<"$REPOS_RAW" 2>/dev/null || echo 传输失败)），无法检测" >&2
+# 全分页拉取 org 仓库（评审项：单页 100 时 >100 仓的 org 会漏检后续仓库）；
+# fail-closed：清单拉取失败/非数组/为空时 REPOS 为空会让后续全部循环静默跳过、
+# 检测整体假绿——此处显式中止，检测器失明不得伪装成无漂移
+REPOS_TMP=$(mktemp)
+PAGE=1
+while :; do
+  CHUNK=$(api "https://api.github.com/orgs/$ORG/repos?per_page=100&page=$PAGE")
+  if ! jq -e 'type == "array"' <<<"$CHUNK" >/dev/null 2>&1; then
+    echo "FATAL: org 仓库清单拉取失败（$(jq -r '.message // "非数组"' <<<"$CHUNK" 2>/dev/null || echo 传输失败)），无法检测" >&2
+    exit 2
+  fi
+  N=$(jq 'length' <<<"$CHUNK")
+  [[ "$N" -eq 0 ]] && break
+  jq -r '.[].name' <<<"$CHUNK" >>"$REPOS_TMP"
+  [[ "$N" -lt 100 ]] && break
+  PAGE=$((PAGE+1))
+done
+REPOS=$(cat "$REPOS_TMP")
+rm -f "$REPOS_TMP"
+if [[ -z "$REPOS" ]]; then
+  echo "FATAL: org 仓库清单为空（org 至少应含本治理仓）——清单异常，无法检测" >&2
   exit 2
 fi
-REPOS=$(jq -r '.[].name' <<<"$REPOS_RAW")
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
   RR=$(api "https://api.github.com/repos/$ORG/$r")

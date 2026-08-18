@@ -190,9 +190,9 @@ flows:
     # 授权凭证 = ADR + PR 记录；破玻璃保留但被监控
     classes:
       - id: C1
-        scope: [GOVERNANCE.yaml, rulesets/, expected-state.json, standards/, models.yaml, decisions/, scripts/, ".github/（CI 门禁自身——改门禁=改治理）", CODEOWNERS, profile/, "template-service（整仓——供应链入口：模板被污染=全部新仓继承后门，红队修复 P0）"]
+        scope: ["governance/（整目录——含 GOVERNANCE/REPOS.yaml、rulesets、expected-state、apply/drift 脚本、policy）", standards/, models.yaml, decisions/, scripts/, ".github/（CI 门禁自身——改门禁=改治理）", CODEOWNERS, profile/, "tests/（agent-registry 验证器元测试——验证器之验证）", "template-service（整仓——供应链入口：模板被污染=全部新仓继承后门，红队修复 P0）"]
         requires: [PR, "ADR（新建或引用编号）", "drift-check 本地预检", owner-merge]
-        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并。scope 与 gate adr-required 机器检查路径一致（governance/standards/scripts/.github/CODEOWNERS/profile——评审项：声明与执行不得互斥）；template-service 是新仓派生源头，视同治理意图变更（gate adr-required 机器检查 + owner-only review）"
+        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并。scope 与机器执法路径全集一致（.github gate：governance/standards/scripts/.github/CODEOWNERS/profile；agent-registry validate：standards/decisions/scripts/.github/CODEOWNERS/tests——评审项：声明与执行不得互斥）；template-service 是新仓派生源头，视同治理意图变更（gate adr-required 机器检查 + owner-only review）"
       - id: C2
         scope: [agent-registry/registry/, 业务仓 AGENTS.md/CODEOWNERS]
         requires: [PR, "validate.py 通过"]

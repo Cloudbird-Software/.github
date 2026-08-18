@@ -4,12 +4,15 @@ on:
   push:
     branches: [main]
 
-permissions: {contents: read, pull-requests: read}
+permissions: {}
 
 jobs:
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10   # testing.yaml T-01 "gate<5min" 原则的硬上限（红队 #18 P2：无 timeout 的 job 失控可挂 6h）
+    permissions:
+      contents: read        # job 级最小权限（评审项：防后续新增 job 继承 workflow 级权限）
+      pull-requests: read   # 仅 adr-required 步骤读取 PR 文件清单
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
