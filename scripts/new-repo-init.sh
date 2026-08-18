@@ -18,7 +18,7 @@ gh repo edit "$ORG/$REPO" \
   --enable-squash-merge --enable-merge-commit=false --enable-rebase-merge=false \
   --enable-wiki=false --enable-projects=false
 
-echo "==> 2/3 production environment（B 档：required reviewer + 仅受保护分支）"
+echo "==> 2/4 production environment（B 档：required reviewer + 仅受保护分支）"
 curl -sS -o /dev/null -w "environment: %{http_code}\n" \
   -X PUT \
   -H "Authorization: Bearer $(gh auth token)" \
@@ -26,7 +26,22 @@ curl -sS -o /dev/null -w "environment: %{http_code}\n" \
   "https://api.github.com/repos/$ORG/$REPO/environments/production" \
   -d "{\"reviewers\": [{\"type\": \"User\", \"id\": $USER_ID}], \"deployment_branch_policy\": {\"protected_branches\": true, \"custom_branch_policies\": false}}"
 
-echo "==> 3/3 验证"
+echo "==> 3/4 把新仓库挂到 cloudbrid-agent 安装（agent 才能写这个仓库）"
+INSTALL_ID=$(gh api "/orgs/$ORG/installations?per_page=100" \
+  --jq '.installations[] | select(.app_slug == "cloudbrid-agent") | .id')
+NEW_RID=$(gh api "repos/$ORG/$REPO" --jq .id)
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT \
+  -H "Authorization: Bearer $(gh auth token)" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/user/installations/$INSTALL_ID/repositories/$NEW_RID")
+if [[ "$code" == "204" ]]; then
+  echo "app installation: OK (repo#$NEW_RID -> installation#$INSTALL_ID)"
+else
+  echo "app installation: HTTP $code —— 手动路径：GitHub → Settings → Applications →"
+  echo "  cloudbrid-agent → Configure → Repository access 勾选 $REPO"
+fi
+
+echo "==> 4/4 验证"
 echo "environment:"
 curl -sS -H "Authorization: Bearer $(gh auth token)" \
   "https://api.github.com/repos/$ORG/$REPO/environments/production" | jq -c '{rules: [.protection_rules[].type]}'
