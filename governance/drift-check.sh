@@ -136,6 +136,28 @@ else
   echo "SKIP  REPOS.yaml 校验（环境缺 python3+pyyaml；GitHub runner 自带）"
 fi
 
+# ---------- 8. 直推检测（GM-2 破玻璃监控）----------
+# flows.governance_change.policy_effective 之后，受治仓默认分支上的非 PR commit = 漂移
+SINCE=$(python3 - <<'EOF'
+from datetime import datetime, timezone, timedelta
+eff = datetime(2026, 8, 19, tzinfo=timezone.utc)          # policy_effective
+lo = datetime.now(timezone.utc) - timedelta(days=7)        # 检测窗口
+print(max(eff, lo).strftime("%Y-%m-%dT%H:%M:%SZ"))
+EOF
+)
+for r in $REPOS; do
+  jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
+  DIRECT=$(api "https://api.github.com/repos/$ORG/$r/commits?sha=main&since=$SINCE&per_page=100" \
+    | jq -r '[.[] | select(.commit.message | test("[(]#[0-9]+[)]\$") | not) | .sha[0:8] + " " + (.commit.message | split("\n")[0])] | .[]')
+  if [[ -n "$DIRECT" ]]; then
+    while IFS= read -r line; do
+      drift "repo '$r' 存在非 PR 直推 commit: $line（破玻璃须 24h 内回填 ADR+PR，见 flows.governance_change）"
+    done <<<"$DIRECT"
+  else
+    ok "no-direct-push '$r' (since $SINCE)"
+  fi
+done
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"

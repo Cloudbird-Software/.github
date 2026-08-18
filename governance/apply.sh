@@ -4,7 +4,7 @@
 # 什么时候跑：
 #   - drift-check 报漂移后，修复用
 #   - 修改 governance/ 文件后，发布用
-# 变更通过 PR 进入 governance/（main-protection 排除了本仓库，可直接合并），
+# 变更按 flows.governance_change 分级走 PR 进入 governance/（C1 须附 ADR），
 # 合并后本地跑一次本脚本 = "基础设施即代码"的 apply。
 #
 # 用法: GH_TOKEN=<org admin token> bash apply.sh
