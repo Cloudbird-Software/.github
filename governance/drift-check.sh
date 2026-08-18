@@ -113,6 +113,29 @@ else
   drift "github app '$(jq -r .github_app.name "$EXPECTED")' 不存在或 id 不符"
 fi
 
+# ---------- 7. 组织地图（REPOS.yaml）：存在性 / visibility / 未申报仓 ----------
+if python3 -c 'import yaml' 2>/dev/null; then
+  REPO_MAP=$(python3 -c 'import yaml,json,sys;print(json.dumps(yaml.safe_load(open(sys.argv[1]))))' "$DIR/REPOS.yaml")
+  # 7a. active 仓：必须存在且 visibility 一致
+  while IFS=$'\t' read -r r want_vis; do
+    [[ -n "$r" ]] || continue
+    RR=$(api "https://api.github.com/repos/$ORG/$r")
+    if [[ "$(jq -r 'if .message then .message else "" end' <<<"$RR")" == "Not Found" ]]; then
+      drift "REPOS.yaml 申报的 active 仓 '$r' 不存在"; continue
+    fi
+    got_vis=$(jq -r 'if .private then "private" else "public" end' <<<"$RR")
+    [[ "$got_vis" == "$want_vis" ]] || drift "repo '$r' visibility=$got_vis 期望=$want_vis"
+    ok "REPOS map '$r'"
+  done < <(jq -r '.repos[] | select(.status=="active") | "\(.name)\t\(.visibility)"' <<<"$REPO_MAP")
+  # 7b. 线上仓必须在图中申报（任何 status 均可，未申报即漂移）
+  for r in $REPOS; do
+    jq -e --arg r "$r" '[.repos[].name] | index($r) != null' <<<"$REPO_MAP" >/dev/null \
+      || drift "线上仓 '$r' 未在 governance/REPOS.yaml 申报（补申报，或标 exempt 注明原因）"
+  done
+else
+  echo "SKIP  REPOS.yaml 校验（环境缺 python3+pyyaml；GitHub runner 自带）"
+fi
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"

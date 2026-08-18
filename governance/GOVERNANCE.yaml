@@ -125,6 +125,11 @@ domains:
         intent: "政策文件机器可判定（本目录）；agent 按需读取，不常驻上下文"
         strength: advisory
         files: [policy/languages.yaml, policy/testing.yaml]
+      - id: GM-4
+        intent: "组织地图 REPOS.yaml 声明全部仓（层级/角色/可见性/状态）：结构层导航的唯一入口；线上未申报仓=漂移；active 仓存在性与 visibility 周检；新仓初始化后必须申报入图（见 flows.new_repo）"
+        strength: enforced
+        files: [REPOS.yaml]
+        verify: {method: drift-check, part: section-7, frequency: weekly}
 
   context_governance:
     measures:
@@ -175,6 +180,7 @@ flows:
     steps:
       - {cmd: "gh repo create <org>/<name> --template <org>/template-service --public --clone"}
       - {cmd: "bash new-repo-init.sh <name>", effects: [BP-4, RL-1, AG-4]}
+      - {pr: "申报入 governance/REPOS.yaml（name/layer/visibility/role/status:active）", policy: GM-4}
       - {pr: "首PR：按 policy/languages.yaml 选型 + dep-cruise 边界规则 + 模块 AGENTS.md"}
   rewrite_project:  # 如 Go 重写
     rules:
