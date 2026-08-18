@@ -34,10 +34,12 @@ jobs:
         run: |
           bash -n governance/apply.sh && bash -n governance/drift-check.sh && bash -n scripts/new-repo-init.sh && bash -n scripts/gh-app-token.sh
           echo "OK scripts"
-      - name: REPOS.yaml 引用自检（active 仓的 key_paths 存在于本仓声明语境）
-        run: python3 -c "
+      - name: REPOS.yaml 引用自检（无重名仓）
+        run: |
+          python3 - <<'EOF'
           import yaml
-          m = yaml.safe_load(open('governance/REPOS.yaml'))
+          m = yaml.safe_load(open('governance/REPOS.yaml', encoding='utf-8'))
           names = [r['name'] for r in m['repos']]
           assert len(names) == len(set(names)), 'REPOS.yaml 有重名仓'
-          print('OK REPOS.yaml', len(names), 'repos')"
+          print('OK REPOS.yaml', len(names), 'repos')
+          EOF
