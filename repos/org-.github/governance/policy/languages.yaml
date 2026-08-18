@@ -1,0 +1,61 @@
+version: 1
+# 语言生态政策（机器可判定）。规则 ID 可被 gate/PR review 引用。
+# enforcement: gate=CI拦截, review=人工/agent审查引用ID打回, policy=约定
+layers:
+  application:
+    allowed:
+      - {language: go, when: "default"}
+      - {language: typescript, when: "frontend-isomorphic only", requires: [TS-1, TS-2]}
+    forbidden: [rust, java, csharp, cpp, new_language_without_org_approval]
+    rationale: "训练数据海量、写法单一、编译反馈快 → LLM 产出可靠"
+  llm_prompt:
+    allowed: [{language: baml}, {language: python}]
+    forbidden: [prompt_string_interpolation_in_code]
+    rationale: "BAML = 类型化 prompt 契约（深接口）"
+  data:
+    allowed:
+      - {storage: sql, requires: [SQL-1, SQL-2]}
+    forbidden: [heavy_orm]
+    heavy_orm_examples: [prisma, hibernate, gorm-auto-migrate]
+    rationale: "SQL 是深接口 DSL；重 ORM 挡住 agent 对生成的控制"
+  infrastructure:
+    allowed: [terraform, docker_compose]
+    forbidden: [bash_provisioning]
+    rationale: "无逻辑 = AI 不会写错"
+  verification:
+    required: [property_based_test, schema_contract, dependency_boundary_lint]
+    forbidden: [happy_path_only]
+    rationale: "组织护城河"
+
+rules:
+  - {id: GO-1, lang: go, rule: "gofmt 零 diff", enforcement: gate}
+  - {id: GO-2, lang: go, rule: "errcheck 通过（错误显式处理）", enforcement: gate}
+  - {id: GO-3, lang: go, rule: "入口在 cmd/，包间无循环依赖", enforcement: gate}
+  - {id: GO-4, lang: go, rule: "go test -race 通过", enforcement: gate}
+  - {id: GO-5, lang: go, rule: "goleak 无 goroutine 泄漏", enforcement: gate, when: "long_running_process"}
+  - {id: TS-1, lang: typescript, rule: "strict: true", enforcement: gate}
+  - {id: TS-2, lang: typescript, rule: "禁 any（eslint）", enforcement: gate}
+  - {id: TS-3, lang: typescript, rule: "跨模块仅 import 入口 index.ts（depcruise）", enforcement: gate}
+  - {id: BAML-1, lang: baml, rule: "prompt 变更必须过 golden test", enforcement: gate}
+  - {id: SQL-1, lang: sql, rule: "迁移只增不改（up+down 成对）", enforcement: review}
+  - {id: SQL-2, lang: sql, rule: "查询经类型生成器，禁手写拼接", enforcement: review}
+  - {id: INFRA-1, lang: infra, rule: "terraform plan / compose config -q 进 CI", enforcement: gate}
+  - {id: INFRA-2, lang: infra, rule: "local 值禁止参与资源命名", enforcement: review}
+
+dependency_policy:
+  approval_required: true
+  proposal_format: [name, purpose, license, stdlib_alternative]
+  forbidden_licenses: [AGPL-3.0, GPL-3.0, SSPL]
+  enforcement: review
+
+project_invariants:
+  - {id: MOD-1, rule: "每模块一个 public entry", check: make_arch}
+  - {id: MOD-2, rule: "entry 不导出内部实现类型", check: review}
+  - {id: MOD-3, rule: "模块 ≤3000 行，超限拆分", check: review}
+  - {id: MOD-4, rule: "生成代码独立目录，禁手改", check: review}
+  - {id: MOD-5, rule: "depcruise 边界规则随模块落地当周补全", check: gate}
+  - {id: IF-1, rule: "接口标准：LLM 仅凭签名+一行注释可零样本正确使用", check: review}
+
+language_change:
+  rule: "语言选定后更换 = 重新立项，不属重构"
+  enforcement: policy

@@ -1,0 +1,45 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "cloudbird/agent-standard/skill@1"
+title: Skill Declaration (SKILL.md frontmatter)
+description: |
+  流程性知识。skill = 可复用的专业操作规程，载体为 SKILL.md：
+  YAML frontmatter（本 schema 校验）+ Markdown 正文（给 LLM 的执行指令，不做结构化）。
+  声明段管治理（检索/权限/编排/验收），正文管执行。目录落盘 agent-registry/registry/skills/<name>/SKILL.md。
+type: object
+required: [name, version, description, allowed_tools, acceptance]
+properties:
+  name:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]*$"
+    description: 唯一 id（即目录名）；引用形式 "skill:<name>"
+  version: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+  author: {type: string}
+  description:
+    type: string
+    description: 一句话用途说明；不得含 "<" ">"；供技能检索与编排消费
+  tags:
+    description: 检索标签；列表或逗号分隔字符串
+    oneOf:
+      - {type: array, items: {type: string}}
+      - {type: string}
+  allowed_tools:
+    description: 本技能执行中允许调用的工具，引用 "tool:<id>"；实际生效以 agent 工具面与权限引擎取交集
+    oneOf:
+      - {type: array, items: {type: string}}
+      - {type: string}
+  requires:
+    type: array
+    items: {type: string}
+    description: 前置技能（skill:<id>）或能力声明
+  acceptance:
+    type: array
+    minItems: 1
+    items: {type: string}
+    description: |
+      验收断言。分两类，前缀标注：
+      [ci]  机器可判定 → 对应 CI 检查项（gate）
+      [llm] 需语义判定 → 由 reviewer agent / 人复核
+      无前缀视为 [llm]。
+  status:
+    enum: [proposed, approved, deprecated, rejected]
+    description: 与 tool.status 同语义；默认 proposed，PR 评审后 approved

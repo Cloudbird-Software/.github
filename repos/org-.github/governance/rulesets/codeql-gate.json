@@ -1,0 +1,22 @@
+{
+  "name": "codeql-gate",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] },
+    "repository_name": { "include": ["~ALL"], "exclude": ["AI_Web_School", ".github"] }
+  },
+  "bypass_actors": [
+    { "actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always" }
+  ],
+  "rules": [
+    {
+      "type": "code_scanning",
+      "parameters": {
+        "code_scanning_tools": [
+          { "tool": "CodeQL", "security_alerts_threshold": "medium_or_higher", "alerts_threshold": "errors" }
+        ]
+      }
+    }
+  ]
+}

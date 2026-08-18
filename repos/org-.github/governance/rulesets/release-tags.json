@@ -1,0 +1,13 @@
+{
+  "name": "release-tags",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": { "include": ["refs/tags/v*"], "exclude": [] },
+    "repository_name": { "include": ["~ALL"], "exclude": ["AI_Web_School"] }
+  },
+  "bypass_actors": [
+    { "actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always" }
+  ],
+  "rules": [{ "type": "deletion" }, { "type": "non_fast_forward" }, { "type": "update" }]
+}
