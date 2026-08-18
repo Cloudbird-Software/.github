@@ -11,7 +11,9 @@
       "dependabot/fetch-metadata",
       "softprops/action-gh-release",
       "docker/*",
-      "Cloudbird-Software/*"
+      "Cloudbird-Software/*",
+      "step-security/harden-runner",
+      "ossf/scorecard-action"
     ],
     "default_workflow_permissions": "read",
     "default_workflow_permissions_can_approve": false
@@ -23,9 +25,14 @@
   "repo_baseline": {
     "squash_only": true,
     "delete_branch_on_merge": true,
-    "exclude_repos": ["AI_Web_School"]
+    "exclude_repos": [
+      "AI_Web_School"
+    ]
   },
-  "org_secrets_required": ["CB_APP_ID", "AGENT_APP_SECRET"],
+  "org_secrets_required": [
+    "CB_APP_ID",
+    "AGENT_APP_SECRET"
+  ],
   "github_app": {
     "name": "cloudbrid-agent",
     "id": 4632704,
@@ -35,6 +42,9 @@
       "metadata": "read",
       "pull_requests": "write"
     },
-    "must_not_have": ["workflows", "administration"]
+    "must_not_have": [
+      "workflows",
+      "administration"
+    ]
   }
 }
