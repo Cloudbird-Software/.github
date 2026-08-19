@@ -47,5 +47,12 @@
       "workflows",
       "administration"
     ]
+  },
+  "direct_push_exemptions": {
+    "comment": "§8 直推检测豁免=初始建仓导入（flows.new_repo step1-2：gh repo create+push 初始治理树，彼时仓库与 gate/PR 机制尚不存在，初始 commit 结构上无法走 PR）。豁免逐一登记完整 SHA，GM-2 破玻璃回填的机器可读形式（决策背书见 ADR-0016 附录）。",
+    ".github": [
+      "9b056b3a925038484a8f6655ea45f81f071d5df6",
+      "416f5f57fd459f6ece3587f3aa20b772148ad335"
+    ]
   }
 }
