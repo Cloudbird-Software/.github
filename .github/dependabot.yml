@@ -1,0 +1,9 @@
+version: 2
+# 依赖更新工具（scorecard DependencyUpdateTool；ADR-0011 安全姿态基线遗留项）：
+# 本仓唯一第三方依赖面是 workflows 里的 actions（全部 SHA 锚定+版本注释）——
+# dependabot github-actions 生态可对 SHA 锚定引用提更新 PR。
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
