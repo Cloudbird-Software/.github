@@ -1,7 +1,9 @@
 version: 2
 # 依赖更新工具（scorecard DependencyUpdateTool；ADR-0011 安全姿态基线遗留项）：
-# 本仓唯一第三方依赖面是 workflows 里的 actions（全部 SHA 锚定+版本注释）——
-# dependabot github-actions 生态可对 SHA 锚定引用提更新 PR。
+# 仅管理 workflows 里的 github-actions 引用（SHA 锚定+版本注释，dependabot 可提更新 PR）。
+# gate.yml 的 pyyaml==6.0.3 为运行时一次性安装（无 Python manifest）——不纳入 dependabot：
+# 本仓 .github/ 属 C1 路径，依赖升级 PR 须引用 ADR（adr-required），自动 PR 无法自携，
+# 升级走显式人工 PR（评审项：避免注释误读为已覆盖全部第三方依赖）。
 updates:
   - package-ecosystem: github-actions
     directory: /
