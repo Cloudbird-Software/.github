@@ -7,3 +7,5 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:            # zizmor dependabot-cooldown：新版本冷却 7 天再提 PR（供应链缓冲）
+      default-days: 7
