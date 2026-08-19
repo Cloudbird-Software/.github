@@ -13,9 +13,7 @@
       "include": [
         "~ALL"
       ],
-      "exclude": [
-        "AI_Web_School"
-      ]
+      "exclude": []
     }
   },
   "bypass_actors": [
