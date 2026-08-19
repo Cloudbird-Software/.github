@@ -129,7 +129,7 @@ properties:
         description: "ephemeral 必填：资产沉淀目标 persistent 团队（team:<id>）"
       handoff:
         type: array
-        description: "销毁前强制移交动作；全部完成才允许销毁（AR-6）；每项执行者见 team-collaboration PART 2 对应原型 lifecycle.handoff"
+        description: "销毁前强制移交动作（AR-6）。销毁前置=team 侧项全部完成（after-handoff(team_side)——team-collaboration PART 2 对应原型 lifecycle.handoff）；stewardship 侧项（memory-distill/adr-write 等）由 curator 消费归档资产异步执行，不阻塞销毁（destroy_scope：数据层制品/事件不随队销毁）。红队 #18：措辞对齐单一真源，消除 owner 依赖项卡死归档的假想死锁"
         items: {enum: [artifacts-pr, memory-distill, skill-extract, adr-write, trace-archive, retrospective, incident_report, retro_24h, followup_backlog_merge, retro_debt_tracking]}
       destroy_policy: {enum: [after-handoff, manual], description: "after-handoff=移交完成自动销毁；persistent 团队用 manual"}
       destroy_condition:
