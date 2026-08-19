@@ -8,7 +8,11 @@ on:
   push:
     branches: [main]
 
-permissions: {}
+# 顶层不可为空权限集（ADR-0021 实测教训）：hygiene 复用工作流按 workflow_call 需要
+# contents:read 落盘 checkout——被调用方只能收窄不能提升调用方权限，顶层 permissions:{}
+# 会令 reusable workflow 直接 startup_failure。取最小非空集 contents:read；各 job 自行收窄。
+permissions:
+  contents: read
 
 jobs:
   hygiene:
