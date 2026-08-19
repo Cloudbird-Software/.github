@@ -1,21 +1,81 @@
 $schema: "https://json-schema.org/draft/2020-12/schema"
-$id: "cloudbird/agent-standard/event@1"
+$id: "cloudbird/agent-standard/event@1.1"
 title: Agent Process Event
 description: |
   过程数据的事件标准。所有事件 append-only 写入数据层（JSONL 起步，见 ADR-0003），
-  不进任何 git 仓库。五类事件覆盖 agent 运行全过程；沉淀/审计/用量统计均从事件流派生。
+  不进任何 git 仓库。事件覆盖 agent 运行全过程；沉淀/审计/用量统计均从事件流派生。
   原始轨迹（完整对话、工具入出参全文）不属于本 schema，按 trace_id 关联存放于对象存储/本地滚动目录。
+  v1.1（ADR-0016，红队 #20）：五类基础事件之外补齐治理审计缺口——handoff 交接
+  （AR-6 归档审计）、approval 审批流（AR-4/预授权追溯）、credential 凭据使用
+  （AR-4 最小权限审计）、budget 预算消耗（team-collaboration PART 4）、team 生命周期
+  （AR-6 ephemeral 销毁凭证）、judge 仲裁（AR-8 独立性审计）。枚举只增不改，
+  v1 消费方向后兼容。
+  载荷绑定（评审项）：payload 按 event 类型经 allOf/if/then 强制匹配对应 $def——
+  六类 v1.1 新事件 payload 必填（无 v1 兼容包袱，空对象不再合法）；五类基础事件
+  payload 可缺省（v1 存量记录兼容），出现即须匹配对应 $def。条件必填：
+  status=failed→reason、ok=false→reason、pool=per_card→card、
+  transition=destroyed→handoff_ref。
 type: object
 required: [event, ts, trace_id]
 properties:
-  event: {enum: [run_started, tool_called, skill_used, decision_made, run_finished]}
+  event:
+    enum:
+      - run_started
+      - tool_called
+      - skill_used
+      - decision_made
+      - run_finished
+      - handoff_step
+      - approval
+      - credential_used
+      - budget_consumed
+      - team_lifecycle
+      - judge_verdict
   ts: {type: string, format: date-time}
   trace_id: {type: string, description: "贯穿一次任务全链路"}
   session_id: {type: string}
   team_id: {type: string, description: "team:<id>；单 agent 任务可缺省"}
   agent_id: {type: string, description: "agent:<id>[@version]"}
   parent_trace_id: {type: string, description: "子任务派生时回链"}
-  payload: {type: object, description: "按 event 类型见 $defs"}
+  payload: {type: object, description: "按 event 类型绑定 $defs（见 allOf；六类 v1.1 治理事件必填）"}
+# 载荷绑定（评审项：根 schema 此前只有泛化 payload:object，$defs 从未参与校验，
+# 六类治理事件可带任意 payload 甚至缺省通过）。本节把 $defs 接入根校验路径：
+# 六类 v1.1 新事件 required payload；五类 v1 基础事件 payload 出现即校验（后兼容）。
+allOf:
+  - if: {required: [event], properties: {event: {const: run_started}}}
+    then: {properties: {payload: {$ref: '#/$defs/run_started'}}}
+  - if: {required: [event], properties: {event: {const: tool_called}}}
+    then: {properties: {payload: {$ref: '#/$defs/tool_called'}}}
+  - if: {required: [event], properties: {event: {const: skill_used}}}
+    then: {properties: {payload: {$ref: '#/$defs/skill_used'}}}
+  - if: {required: [event], properties: {event: {const: decision_made}}}
+    then: {properties: {payload: {$ref: '#/$defs/decision_made'}}}
+  - if: {required: [event], properties: {event: {const: run_finished}}}
+    then: {properties: {payload: {$ref: '#/$defs/run_finished'}}}
+  - if: {required: [event], properties: {event: {const: handoff_step}}}
+    then:
+      properties: {payload: {$ref: '#/$defs/handoff_step'}}
+      required: [payload]
+  - if: {required: [event], properties: {event: {const: approval}}}
+    then:
+      properties: {payload: {$ref: '#/$defs/approval'}}
+      required: [payload]
+  - if: {required: [event], properties: {event: {const: credential_used}}}
+    then:
+      properties: {payload: {$ref: '#/$defs/credential_used'}}
+      required: [payload]
+  - if: {required: [event], properties: {event: {const: budget_consumed}}}
+    then:
+      properties: {payload: {$ref: '#/$defs/budget_consumed'}}
+      required: [payload]
+  - if: {required: [event], properties: {event: {const: team_lifecycle}}}
+    then:
+      properties: {payload: {$ref: '#/$defs/team_lifecycle'}}
+      required: [payload]
+  - if: {required: [event], properties: {event: {const: judge_verdict}}}
+    then:
+      properties: {payload: {$ref: '#/$defs/judge_verdict'}}
+      required: [payload]
 $defs:
   run_started:
     type: object
@@ -37,7 +97,7 @@ $defs:
       skill: {type: string, description: "skill:<name>@<version>"}
       acceptance_results:
         type: array
-        description: "验收断言逐条结果"
+        description: 验收断言逐条结果
         items:
           type: object
           properties:
@@ -46,7 +106,7 @@ $defs:
             passed: {type: boolean}
   decision_made:
     type: object
-    description: "开发过程中的认识与决策数据（为什么这么做）"
+    description: 开发过程中的认识与决策数据（为什么这么做）
     properties:
       question: {type: string}
       choice: {type: string}
@@ -61,4 +121,96 @@ $defs:
       tokens_in: {type: integer}
       tokens_out: {type: integer}
       duration_ms: {type: integer}
-      handoff_done: {type: boolean, description: "ephemeral team：handoff 是否全部完成"}
+      handoff_done: {type: boolean, description: "ephemeral team：team 侧 handoff 是否全部完成（销毁前置语义——评审项：单一布尔只表达 team 侧；stewardship 侧异步完成态由 handoff_step(side=stewardship_side) 事件逐项审计）"}
+  handoff_step:
+    type: object
+    description: |
+      handoff 交接项逐项审计（AR-6：ephemeral 销毁前置凭证；红队 #20）。
+      每项 team_side/stewardship_side 动作开始/完成/失败各发一条——
+      销毁审计从"retrospective 自述"升级为事件级可追溯（P1-08 部分覆盖）。
+    required: [item, side, status]
+    properties:
+      item:
+        enum: [artifacts-pr, memory-distill, skill-extract, adr-write, trace-archive, retrospective, incident_report, retro_24h, followup_backlog_merge, retro_debt_tracking]
+        description: "team.schema lifecycle.handoff 同枚举（同步维护：两处枚举必须一致——评审项：任意字符串会把未知交接项计为已完成）"
+      side: {enum: [team_side, stewardship_side], description: "执行侧（team-collaboration PART 2 lifecycle.handoff）"}
+      status: {enum: [started, done, failed], description: "failed 须附 reason"}
+      by: {type: string, description: "执行者（seat:xxx / mechanism:xxx）"}
+      reason: {type: string, description: "status=failed 时必填"}
+    allOf:
+      - if: {required: [status], properties: {status: {const: failed}}}
+        then: {required: [reason]}
+  approval:
+    type: object
+    description: |
+      审批流事件（AR-4 ask_risky/ask_per_action 语义、incident_cell 条件预授权、
+      flag 开启 owner-only 等人类/升级决策的追溯；红队 #20）。
+      requested 起始态由 approval.decision=requested 表达，终态 granted/denied/timeout。
+    required: [action, decision]
+    properties:
+      action: {type: string, description: "申请执行的副作用（side-effects 词表值）"}
+      decision: {enum: [requested, granted, denied, timeout], description: "timeout=审批人 SLA 未响应（incident_cell owner ack 窗口语义）"}
+      asked_by: {type: string, description: "发起者（agent:<id> 或 seat:xxx）"}
+      decided_by: {type: string, description: "决策者（owner / 预授权规则 id）；预授权 granted 时写规则 id"}
+      context: {type: string, description: "申请理由/证据引用（evidence-pack 路径等）"}
+      risk_class: {type: string, description: "卡风险级（GOVERNANCE risk_posture 分级）"}
+  credential_used:
+    type: object
+    description: |
+      凭据使用审计（AR-4 最小权限：每次凭据换取/使用留痕；红队 #20）。
+      只记凭据引用名（绝不记值——no-secret-output 同语义）；
+      ok=false 覆盖"凭据被拒/异常暴露告警"场景（severity 升级语义沿 tool_called）。
+    required: [kind, ref, ok]
+    properties:
+      kind: {enum: [github_app, env_secret, oidc], description: "凭据类别"}
+      ref: {type: string, description: "凭据引用名（如 cloudbrid-agent / GH_TOKEN）；禁止出现凭据值"}
+      scope: {type: string, description: "作用域（repo:name / org / team）"}
+      ok: {type: boolean, description: "false=换取/使用失败（含疑似暴露——须附 reason）"}
+      reason: {type: string, description: "ok=false 时必填"}
+      duration_ms: {type: integer, description: "令牌有效期内使用时长（github_app 1h 令牌审计）"}
+    allOf:
+      - if: {required: [ok], properties: {ok: {const: false}}}
+        then: {required: [reason]}
+  budget_consumed:
+    type: object
+    description: |
+      预算消耗事件（team-collaboration PART 4：预算有归属不变式的数据侧）。
+      每笔消耗记 pool+金额+累计；exhausted=true 即预算耗尽熔断信号
+      （升级通道 overhead_pool 永不冻结的语义由 pool 区分）。
+    required: [pool, usd, cumulative]
+    properties:
+      pool: {enum: [team_envelope, per_card, overhead_pool], description: "预算池（team.schema budget 同枚举）"}
+      usd: {type: number, description: "本笔消耗"}
+      cumulative: {type: number, description: "该池累计消耗"}
+      exhausted: {type: boolean, description: "true=该池已耗尽（熔断/升级信号）"}
+      card: {type: string, description: "归属工作卡（per_card 池必填）"}
+    allOf:
+      - if: {required: [pool], properties: {pool: {const: per_card}}}
+        then: {required: [card]}
+  team_lifecycle:
+    type: object
+    description: |
+      团队生命周期转移（AR-6：组队/归档/销毁/冻结的时序凭证；红队 #20）。
+      ephemeral 销毁须先有全量 handoff_step(done, team_side) 事件——
+      审计侧可机器校验"销毁前置满足"（P0-06/P1-21 的数据基础）。
+    required: [team, transition]
+    properties:
+      team: {type: string, description: "team:<id>"}
+      transition: {enum: [created, archived, destroyed, frozen], description: "frozen=TTL 到期冻结（escalate_to_owner 语义）"}
+      reason: {type: string, description: "转移依据（intent.received / handoff 完成 / ttl 到期…）"}
+      handoff_ref: {type: string, description: "destroyed 时指向末条 handoff_step(done) 的 trace 位置"}
+    allOf:
+      - if: {required: [transition], properties: {transition: {const: destroyed}}}
+        then: {required: [handoff_ref]}
+  judge_verdict:
+    type: object
+    description: |
+      仲裁事件（AR-8 judge 独立性审计：每案裁决/回避留痕；红队 #20）。
+      recused=true 即 judge 回避（利益冲突声明），争议转入 owner 或换任 judge。
+    required: [dispute, outcome, judge]
+    properties:
+      dispute: {type: string, description: "争议标识（dispute-in schema 的 id）"}
+      outcome: {type: string, description: "裁决结论（机械可判争议不受理——受理即附理由）"}
+      recused: {type: boolean, description: "true=回避（利益冲突）；此时 outcome 为回避声明"}
+      rationale_ref: {type: string, description: "裁决理由引用（evidence-pack/判例路径；判例非规范）"}
+      judge: {type: string, description: "agent:<id>（审计侧比对族级独立性）"}
