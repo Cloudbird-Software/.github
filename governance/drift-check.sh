@@ -147,12 +147,19 @@ if python3 -c 'import yaml' 2>/dev/null; then
     fi
     got_vis=$(jq -r 'if .private then "private" else "public" end' <<<"$RR")
     [[ "$got_vis" == "$want_vis" ]] || drift "repo '$r' visibility=$got_vis 期望=$want_vis"
+    [[ "$want_vis" == "public" ]] || drift "repo '$r' 申报 visibility=$want_vis 违反全仓公开政策（ADR-0020）"
     ok "REPOS map '$r'"
   done < <(jq -r '.repos[] | select(.status=="active") | "\(.name)\t\(.visibility)"' <<<"$REPO_MAP")
-  # 7b. 线上仓必须在图中申报（任何 status 均可，未申报即漂移）
+  # 7b/7c. 线上全量仓合并遍历（每仓一次 API）：
+  #   7b. 必须在图中申报（任何 status 均可，未申报即漂移）
+  #   7c. 全仓公开政策（ADR-0020）：private 即漂移——不依赖申报完整性（未申报仓
+  #       同样受检）；exempt 状态只豁免治理基线（repo_baseline），不豁免可见性
   for r in $REPOS; do
     jq -e --arg r "$r" '[.repos[].name] | index($r) != null' <<<"$REPO_MAP" >/dev/null \
       || drift "线上仓 '$r' 未在 governance/REPOS.yaml 申报（补申报，或标 exempt 注明原因）"
+    VR=$(api "https://api.github.com/repos/$ORG/$r")
+    [[ "$(jq -r 'if .private then "private" else "public" end' <<<"$VR")" == "public" ]] \
+      || drift "repo '$r' 为 private，违反全仓公开政策（ADR-0020 改回 public，或新 ADR 推翻政策）"
   done
 else
   echo "SKIP  REPOS.yaml 校验（环境缺 python3+pyyaml；GitHub runner 自带）"

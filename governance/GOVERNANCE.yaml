@@ -127,10 +127,10 @@ domains:
         strength: advisory
         files: [policy/languages.yaml, policy/testing.yaml]
       - id: GM-4
-        intent: "组织地图 REPOS.yaml 声明全部仓（层级/角色/可见性/状态）：结构层导航的唯一入口；线上未申报仓=漂移；active 仓存在性与 visibility 周检；新仓初始化后必须申报入图（见 flows.new_repo）"
+        intent: "组织地图 REPOS.yaml 声明全部仓（层级/角色/可见性/状态）：结构层导航的唯一入口；线上未申报仓=漂移；active 仓存在性与 visibility 一致；全仓公开政策（ADR-0020）——组织下一切仓必须 public，申报侧与线上全量侧双重检测，exempt 不豁免可见性；新仓初始化后必须申报入图（见 flows.new_repo）"
         strength: enforced
         files: [REPOS.yaml]
-        verify: {method: drift-check, part: section-7, frequency: daily}
+        verify: {method: drift-check, part: section-7, frequency: hourly}
 
   context_governance:
     measures:

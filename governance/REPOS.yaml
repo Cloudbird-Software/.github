@@ -7,7 +7,8 @@ org: Cloudbird-Software
 # 规则（GM-4）:
 #   - 线上存在的仓必须在下方申报；未申报 = drift（drift-check §7b）
 #   - status: active 的仓必须存在且 visibility 一致（drift-check §7a）
-#   - status: planned = 尚未建仓（不参与检测）；exempt = 申报但不治理
+#   - status: planned = 尚未建仓（不参与检测）；exempt = 申报但不治理（仅豁免治理基线，不豁免可见性）
+#   - 全仓公开政策（ADR-0020）：一切仓 visibility 必须 public（drift-check §7a 申报侧 + §7c 线上全量侧，含未申报仓）
 #   - 新仓初始化后必须申报入图（flows.new_repo step 4）
 # ============================================================================
 layers:
@@ -33,7 +34,7 @@ repos:
 
   - name: agent-registry
     layer: L1
-    visibility: private
+    visibility: public
     status: active
     role: 注册层——agent/skill/tool/team 声明 + 模型注册表(models.yaml) + ADR；AR-2 状态门禁校验器
     key_paths: [registry/, decisions/, scripts/validate.py]
@@ -48,7 +49,7 @@ repos:
 
   - name: agent-tools
     layer: L2
-    visibility: private
+    visibility: public
     status: planned
     role: 自研工具实现仓——被 tool 声明的 implementation 字段引用
 
