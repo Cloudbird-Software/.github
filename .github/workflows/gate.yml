@@ -8,16 +8,38 @@ on:
   push:
     branches: [main]
 
-permissions: {}
+# 顶层不可为空权限集（ADR-0021 实测教训）：hygiene 复用工作流按 workflow_call 需要
+# contents:read 落盘 checkout——被调用方只能收窄不能提升调用方权限，顶层 permissions:{}
+# 会令 reusable workflow 直接 startup_failure。取最小非空集 contents:read；各 job 自行收窄。
+permissions:
+  contents: read
 
 jobs:
+  hygiene:
+    # CI-1 对治理仓自身（ADR-0021）：治理仓内容变更此前不经 gitleaks/zizmor——
+    # 复用 CI-Workflows hygiene（大文件/凭据类文件/gitleaks 全历史/zizmor 工作流审计）
+    # 钉 commit hash（zizmor unpinned-uses：可变 tag 不算钉住；ADR-0021）：
+    # hash 即 CI-Workflows v1 tag 当前指向，升级 v1 须同步换 hash
+    uses: Cloudbird-Software/CI-Workflows/.github/workflows/hygiene.yml@9c20d43d60e9f9d1438f171aeee8e4dbdf02c08b # v1
+
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10   # testing.yaml T-01 "gate<5min" 原则的硬上限（红队 #18 P2：无 timeout 的 job 失控可挂 6h）
+    needs: hygiene
+    if: always()
     permissions:
-      contents: read        # job 级最小权限（评审项：防后续新增 job 继承 workflow 级权限）
+      contents: read        # job 级最小权限（评审项：防后续新增 job 继承 workflow 级权限）；
+                           # 兼读公开仓 agent-registry/decisions（adr-required 存在性校验）
       pull-requests: read   # 仅 adr-required 步骤读取 PR 文件清单
     steps:
+      - name: hygiene green?
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          if echo "$NEEDS" | jq -e '[to_entries[] | select(.value.result != "success" and .value.result != "skipped")] | length > 0' >/dev/null; then
+            echo "::error::hygiene 未通过"; exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -75,11 +97,10 @@ jobs:
       # C1 路径（governance/ standards/ scripts/ .github/ CODEOWNERS）变更的 PR，
       # title/body 必须引用 ADR-NNNN——GOVERNANCE flows.governance_change "无 ADR 不合并"
       # 的机器执行。本仓不落盘 ADR（L1 决策记录在 agent-registry/decisions/，
-      # 见 REPOS.yaml role）。被引 ADR 的**存在性**校验不在本步骤做：agent-registry 是
-      # 私有仓，PR 上下文的 GITHUB_TOKEN 无跨仓读权，而把 org secret（如
-      # GOVERNANCE_TOKEN）注入 PR 触发的 workflow = 向 PR 控制的代码暴露凭据
-      # （zizmor secret-exposure 模型）——存在性由 drift-check.sh §10 后验（每日，
-      # 可信 main 上下文），owner-only review 仍是 C1 的权威人类门禁。
+      # 见 REPOS.yaml role）。存在性校验（ADR-0021 升级）：ADR-0020 全仓公开后，
+      # GITHUB_TOKEN 可读公开仓 contents——被引 ADR 必须真实存在于 agent-registry/decisions/
+      #（此前只能等 drift-check §10 后验，伪造引用有 24h 窗口；现在 PR 时点即拦）。
+      # 实体性（防空壳）仍由 drift-check §10 后验；owner-only review 仍是权威人类门禁。
       - name: adr-required（C1 变更须引用 ADR）
         if: github.event_name == 'pull_request'
         env:
@@ -123,9 +144,26 @@ jobs:
           fi
           # 词边界（评审项）：NOTADR-0013junk 之类子串不得满足 ADR 引用要求
           ADR_RE='\bADR-[0-9]{4}\b'
-          if { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -qE "$ADR_RE"; then
-            echo "OK adr-required: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')（存在性后验：drift-check §10）"
-          else
+          if ! { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -qE "$ADR_RE"; then
             echo "::error::C1 路径变更（governance/standards/scripts/.github/CODEOWNERS）但 PR 未引用任何 ADR-NNNN（GOVERNANCE flows.governance_change C1：无 ADR 不合并）"
             exit 1
           fi
+          # 存在性校验（ADR-0021）：被引 ADR 须存在于公开仓 agent-registry/decisions/
+          #（GITHUB_TOKEN 读公开仓；API 失败 fail-closed——检测器失明不得伪装通过）
+          ADR_LISTING=$(gh api "repos/Cloudbird-Software/agent-registry/contents/decisions?per_page=100" --paginate --jq '.[].name' 2>/dev/null)
+          if [[ -z "$ADR_LISTING" ]]; then
+            echo "::error::agent-registry/decisions 清单拉取失败——ADR 引用存在性无法校验（fail-closed）"
+            exit 1
+          fi
+          MISSING=0
+          for ref in $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u ); do
+            num="${ref#ADR-}"
+            if ! grep -q "^ADR-${num}-" <<<"$ADR_LISTING"; then
+              echo "::error::引用的 ${ref} 在 agent-registry/decisions/ 无对应文件（幽灵 ADR——C1 决策背书不成立）"
+              MISSING=1
+            fi
+          done
+          if [[ $MISSING -eq 0 ]]; then
+            echo "OK adr-required: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')（存在性已验；实体性后验：drift-check §10）"
+          fi
+          exit $MISSING

@@ -33,13 +33,20 @@ jobs:
             exit 2
           fi
           bash governance/drift-check.sh | tee drift-report.txt
-      - name: 发现漂移则开 issue（幂等）
+      - name: 发现漂移则开 issue（幂等；基础设施故障分通道——ADR-0021）
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          TITLE="治理漂移检测：组织配置与 governance/ 落盘不一致"
+          # 分通道（红队 #66-G1）：exit 2（token 缺失）与 API 故障不是漂移——
+          # 此前一律按漂移开口径开 issue，限流/传输故障会在整点被误报为漂移。
+          # 判据：报告里存在 DRIFT 行=真漂移；否则=检测器自身故障（标题/处置路径不同）。
+          if ! grep -q '^DRIFT' drift-report.txt 2>/dev/null; then
+            TITLE="drift-check 运行失败（基础设施故障——非漂移）"
+          else
+            TITLE="治理漂移检测：组织配置与 governance/ 落盘不一致"
+          fi
           # 归属标记（评审项）：issue 归属判定用专属 label 而非标题搜索——
           # 标题搜索会把人工/其他来源的同名 issue 误当作本检测器的报告去评论/关闭
           LABEL="auto-drift-report"
