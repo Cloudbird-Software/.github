@@ -56,6 +56,15 @@ repos:
     role: 自研工具实现仓——被 tool 声明的 implementation 字段引用（ADR-0021：approved 工具
       gitcode-pr 引用本仓，planned=悬空供应链引用；已按 flows.new_repo 从 template-service
       派生并跑 new-repo-init）
+  - name: agent-platform
+    layer: L2
+    visibility: public
+    status: active
+    role: 执行层仓——agent-registry 声明渲染到 openjiuwen/jiuwenswarm 运行时（ADR-0025）：
+      渲染器/SwarmFlow workflow 编译器/机制原型执行面/TUI 可观测+agentctl 干预/渲染漂移门禁；
+      Python 仓（languages.yaml PY-* 规则，声明适配现实——openjiuwen SDK 为 Python）
+    key_paths: [src/agentplatform/, tests/, docker/, Makefile]
+
   - name: Shorts_Director
     layer: L2
     visibility: public
@@ -93,6 +102,10 @@ external_upstreams:
     repo: openJiuwen-ai/jiuwenswarm
     role: 多智能体编排框架运行时（AgentServer/Gateway/Team/权限引擎/A2A）
     consumed_by: [agent-registry 的声明渲染]
+  - name: openjiuwen-sdk
+    repo: openJiuwen-ai/agent-core
+    role: agent 内核 SDK（openjiuwen：DeepAgent/TeamAgent/SwarmFlow 引擎；PyPI 钉版消费，ADR-0025）
+    consumed_by: [agent-platform 渲染产物/ArchetypeWorkerBackend/治理 rails]
   - name: openjiuwen-a2x
     repo: openJiuwen-ai/agent-protocol
     role: A2X 注册中心（分布式 Team 控制面）

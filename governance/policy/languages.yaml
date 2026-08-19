@@ -6,6 +6,7 @@ layers:
     allowed:
       - {language: go, when: "default"}
       - {language: typescript, when: "frontend-isomorphic only", requires: [TS-1, TS-2]}
+      - {language: python, when: "agent-runtime integration only（agent-platform：openjiuwen SDK 渲染/治理执行面——不写 Python 无法落地，ADR-0025 声明适配现实）", requires: [PY-1, PY-2]}
     forbidden: [rust, java, csharp, cpp, new_language_without_org_approval]
     rationale: "训练数据海量、写法单一、编译反馈快 → LLM 产出可靠"
   llm_prompt:
@@ -37,6 +38,8 @@ rules:
   - {id: TS-2, lang: typescript, rule: "禁 any（eslint）", enforcement: gate}
   - {id: TS-3, lang: typescript, rule: "跨模块仅 import 入口 index.ts（depcruise）", enforcement: gate}
   - {id: BAML-1, lang: baml, rule: "prompt 变更必须过 golden test", enforcement: gate}
+  - {id: PY-1, lang: python, rule: "ruff check 通过（lint+format 零 diff）", enforcement: gate}
+  - {id: PY-2, lang: python, rule: "uv lock 提交且 pytest 全绿；依赖钉版（无浮动版本）", enforcement: gate}
   - {id: SQL-1, lang: sql, rule: "迁移只增不改（up+down 成对）", enforcement: review}
   - {id: SQL-2, lang: sql, rule: "查询经类型生成器，禁手写拼接", enforcement: review}
   - {id: INFRA-1, lang: infra, rule: "terraform plan / compose config -q 进 CI", enforcement: gate}
