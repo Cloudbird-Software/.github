@@ -16,7 +16,8 @@
       "ossf/scorecard-action"
     ],
     "default_workflow_permissions": "read",
-    "default_workflow_permissions_can_approve": false
+    "default_workflow_permissions_can_approve": false,
+    "enabled_repositories": "all"
   },
   "code_security": {
     "configuration_name": "GitHub recommended",
@@ -49,10 +50,20 @@
     ]
   },
   "direct_push_exemptions": {
-    "comment": "§8 直推检测豁免=已经 ADR 追认回填的破玻璃直推（事件定性见 ADR-0017：两次误直推净变更仅为 Trae IDE 分享 zip 与误入的 agent-registry gitlink，彼时 PR 流程已运转——diff 证据 f3974a6...416f5f5；并非'初始建仓导入'，勘误见 ADR-0016 附录）。豁免机制=GM-2 破玻璃回填的机器可读形式（ADR-0016 附录）：逐完整 SHA 登记，新直推不可能搭便车；豁免须有 ADR 背书，不得口头/临时豁免。",
+    "comment": "§8 直推检测豁免——两类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃。",
     ".github": [
       "9b056b3a925038484a8f6655ea45f81f071d5df6",
       "416f5f57fd459f6ece3587f3aa20b772148ad335"
+    ],
+    "Shorts_Director": [
+      "d81fea9db47e065fd2bd5211dd1a8e3c26589f41",
+      "014f38986ee5338fe0d7e3ea260c9a4f289af401"
+    ],
+    "agent-tools": [
+      "1050459443ce0373cffff7788c668d6f5dec0048"
+    ],
+    "Script_Writer": [
+      "3446a39a0e2ec7527cab4e6da87b6e6ee0199fa7"
     ]
   }
 }

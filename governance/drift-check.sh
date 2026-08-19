@@ -53,6 +53,9 @@ EXTRA=$(jq -c --argjson known "$(jq -s '[.[].name]' "$DIR"/rulesets/*.json)" \
 AP=$(api "https://api.github.com/orgs/$ORG/actions/permissions")
 [[ "$(jq -r .allowed_actions <<<"$AP")" == "$(jq -r .actions_policy.allowed_actions "$EXPECTED")" ]] \
   || drift "allowed_actions=$(jq -r .allowed_actions <<<"$AP")"
+# enabled_repositories 同检（ADR-0021）：apply §2 写该字段而 check 不验=修复回路盲区
+[[ "$(jq -r .enabled_repositories <<<"$AP")" == "$(jq -r .actions_policy.enabled_repositories "$EXPECTED")" ]] \
+  || drift "enabled_repositories=$(jq -r .enabled_repositories <<<"$AP") ≠ expected $(jq -r .actions_policy.enabled_repositories "$EXPECTED")"
 
 SA=$(api "https://api.github.com/orgs/$ORG/actions/permissions/selected-actions")
 [[ "$(jq -c '{github_owned_allowed, verified_allowed, patterns_allowed}' <<<"$SA")" == \
