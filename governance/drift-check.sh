@@ -204,11 +204,19 @@ for r in $REPOS; do
     rm -f "$COMMITS_TMP"
     continue
   fi
+  # §8 豁免清单（ADR-0016 附录机制：已经 ADR 追认回填的破玻璃直推——
+  # expected-state.json direct_push_exemptions 逐 SHA 登记，事件定性见 ADR-0017；
+  # 豁免须有 ADR 背书，不得口头/临时豁免）
+  EXEMPT=$(jq -r --arg r "$r" '.direct_push_exemptions[$r] // [] | join(" ")' "$EXPECTED")
   DIRECT_FOUND=0
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
     sha=$(jq -r .sha <<<"$row")
     cdate=$(jq -r .date <<<"$row")
+    if grep -qF "$sha" <<<"$EXEMPT"; then
+      ok "repo '$r' commit ${sha:0:8} 已回填破玻璃直推（§8 豁免清单，ADR-0017）"
+      continue
+    fi
     # 关联 PR 复核（全 SHA；响应须为数组——error 对象/传输失败均为无法验证）
     PRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$sha/pulls?per_page=5" \
       | jq -r 'if type == "array" then (if length > 0 then "has-pr" else "none" end) else "error" end' 2>/dev/null || echo error)

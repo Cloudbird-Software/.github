@@ -18,7 +18,7 @@ jobs:
       contents: read        # job 级最小权限（评审项：防后续新增 job 继承 workflow 级权限）
       pull-requests: read   # 仅 adr-required 步骤读取 PR 文件清单
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -26,7 +26,11 @@ jobs:
           python-version: "3.12"
       - name: YAML 全量解析（governance + standards）
         run: |
-          pip install pyyaml==6.0.3 -q   # 版本钉死（scorecard PinnedDependencies；ADR-0011 版本钉死遗留项）
+          # 版本+sha256 双锚定（scorecard PinnedDependencies pipCommand not pinned by hash；
+          # ADR-0011 版本钉死遗留项）。新版 pip 的 --hash 仅支持 requirements 文件形态，
+          # 故经 .github/requirements-gate.txt 下发；哈希对应 cp312 manylinux x86_64 wheel
+          # （本 job 固定 python 3.12 + ubuntu-latest），升级版本须同步换哈希
+          pip install -q --require-hashes -r .github/requirements-gate.txt
           python3 - <<'EOF'
           import glob, sys, yaml
           files = glob.glob("governance/**/*.yaml", recursive=True) + glob.glob("standards/**/*.yaml", recursive=True)
@@ -36,10 +40,24 @@ jobs:
           EOF
       # JSON 全量校验（红队 #17-B）：expected-state.json 与 rulesets 同为 drift-check/apply 的
       # 期望状态真源——此前 gate 只验 rulesets/*.json，expected-state.json 畸形可静默合入
+      # python3 校验替代 apt 装 jq：2026-08-19 两次 main gate 因 apt-get update 挂起烧穿
+      # timeout-minutes: 10 整体 cancelled（run 32217218076/32217301896）；python 已就绪、
+      # 零外部依赖，消除该故障面。adr-required 用的 jq 系 runner 镜像预装（CI-Workflows
+      # ci.yml 从不安装 jq 且连跑绿，实证预装），无需 apt。
       - name: JSON 校验（rulesets + expected-state）
         run: |
-          sudo apt-get -qq update && sudo apt-get -qq install -y jq >/dev/null
-          for f in governance/rulesets/*.json governance/expected-state.json; do jq -e . "$f" >/dev/null || exit 1; echo "OK $f"; done
+          python3 - <<'EOF'
+          import glob, json
+          files = sorted(glob.glob("governance/rulesets/*.json")) + ["governance/expected-state.json"]
+          assert len(files) > 1, "未找到 JSON 文件"
+          for f in files:
+              # 顶层必须是 JSON 对象（ruleset/期望状态均为对象结构）——语义对齐并严于
+              # 原 jq -e .（jq 仅拒 null/false，本断言连数字/字符串标量一并拒绝；
+              # qodo review：json.load 裸放行 null/false 属语义回归）
+              data = json.load(open(f, encoding="utf-8"))
+              assert isinstance(data, dict), f"{f}: 顶层须为 JSON 对象，得到 {type(data).__name__}"
+              print("OK", f)
+          EOF
       - name: 脚本语法检查
         run: |
           bash -n governance/apply.sh && bash -n governance/drift-check.sh && bash -n scripts/new-repo-init.sh && bash -n scripts/gh-app-token.sh

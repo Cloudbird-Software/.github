@@ -47,5 +47,12 @@
       "workflows",
       "administration"
     ]
+  },
+  "direct_push_exemptions": {
+    "comment": "§8 直推检测豁免=已经 ADR 追认回填的破玻璃直推（事件定性见 ADR-0017：两次误直推净变更仅为 Trae IDE 分享 zip 与误入的 agent-registry gitlink，彼时 PR 流程已运转——diff 证据 f3974a6...416f5f5；并非'初始建仓导入'，勘误见 ADR-0016 附录）。豁免机制=GM-2 破玻璃回填的机器可读形式（ADR-0016 附录）：逐完整 SHA 登记，新直推不可能搭便车；豁免须有 ADR 背书，不得口头/临时豁免。",
+    ".github": [
+      "9b056b3a925038484a8f6655ea45f81f071d5df6",
+      "416f5f57fd459f6ece3587f3aa20b772148ad335"
+    ]
   }
 }
