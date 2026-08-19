@@ -47,7 +47,12 @@ jobs:
           files = sorted(glob.glob("governance/rulesets/*.json")) + ["governance/expected-state.json"]
           assert len(files) > 1, "未找到 JSON 文件"
           for f in files:
-              json.load(open(f, encoding="utf-8")); print("OK", f)
+              # 顶层必须是 JSON 对象（ruleset/期望状态均为对象结构）——语义对齐并严于
+              # 原 jq -e .（jq 仅拒 null/false，本断言连数字/字符串标量一并拒绝；
+              # qodo review：json.load 裸放行 null/false 属语义回归）
+              data = json.load(open(f, encoding="utf-8"))
+              assert isinstance(data, dict), f"{f}: 顶层须为 JSON 对象，得到 {type(data).__name__}"
+              print("OK", f)
           EOF
       - name: 脚本语法检查
         run: |
