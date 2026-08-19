@@ -223,7 +223,7 @@ flows:
       - {step: 1, action: "从 agent-registry 声明实例化 team（引用 id@version）", gate: AR-1}
       - {step: 2, action: "运行期事件按 event.schema 追加到数据层；拦截记录 tool_called.denied_by", policies: [AR-5, AR-7]}
       - {step: 3, action: "ephemeral 完成→执行 team 侧 handoff：artifacts 走 PR、retrospective、轨迹归档（销毁前置只含 team 侧项）", policy: AR-6}
-      - {step: 4, action: "persistent 团队（team:stewardship）消费归档资产异步执行 stewardship 侧 handoff（memory-distill/adr-write）并审核入库；handoff_done 审计", policy: AR-6}
+      - {step: 4, action: "persistent 团队（team:stewardship）消费归档资产异步执行 stewardship 侧 handoff（memory-distill/adr-write）并审核入库；完成态审计走事件流——run_finished.handoff_done 仅表达 team 侧销毁前置完成，stewardship 侧由 handoff_step(side=stewardship_side) 事件逐项留痕（评审项：单一布尔无法承载双侧完成态）", policy: AR-6}
 
 portability:
   neutral: [intent, strength, verify, risk_posture, flows]  # 平台无关，直接搬运
