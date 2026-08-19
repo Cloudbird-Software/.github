@@ -6,6 +6,13 @@ on:
 
 permissions: {}
 
+# 串行化（coderabbit review：评论去重的"查指纹→写评论"非原子——两个并发运行
+# 可能都未发现指纹而各自评论；workflow 级 concurrency 使同一时刻至多一个检测
+# 运行，后发的排队等前者落评论后再查指纹，构成原子保护）
+concurrency:
+  group: governance-drift
+  cancel-in-progress: false
+
 jobs:
   drift-check:
     runs-on: ubuntu-latest
@@ -58,8 +65,10 @@ jobs:
           <!-- drift-fingerprint: $FP -->"
           if [[ "$EXISTING" != "0" ]]; then
             NUM=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq '.[0].number')
-            RECENT=$(gh issue view "$NUM" --repo "$REPO" --json comments --jq '[.comments[].body] | .[-10:] | join("\n---\n")')
-            if grep -qF "drift-fingerprint: $FP" <<<"$RECENT"; then
+            # 全量评论比对（coderabbit review：只看最近 10 条时，同一指纹若在
+            # 更早的自动评论里会被重复发布——长期未回填漂移的旧报告就是这种形态）
+            COMMENTS=$(gh issue view "$NUM" --repo "$REPO" --json comments --jq '[.comments[].body] | join("\n---\n")')
+            if grep -qF "drift-fingerprint: $FP" <<<"$COMMENTS"; then
               echo "漂移指纹 $FP 已在 #$NUM 报告过且内容未变化，跳过重复评论（RB-B2 去重）"
             else
               gh issue comment "$NUM" --repo "$REPO" --body "$BODY"
