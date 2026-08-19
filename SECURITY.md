@@ -2,7 +2,7 @@
 
 ## 报告漏洞
 
-请通过仓库 **Security → Report a vulnerability** 提交（Private vulnerability reporting 已开启）。不要在 Issue/PR/讨论中公开披露。
+请通过仓库 **Security → Report a vulnerability** 提交（Private vulnerability reporting 已开启，[报告入口文档](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/report-privately)）。不要在 Issue/PR/讨论中公开披露。
 
 ## 响应时限（红队修复：此前无 SLA）
 

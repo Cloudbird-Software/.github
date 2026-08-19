@@ -1,0 +1,13 @@
+version: 2
+# 依赖更新工具（scorecard DependencyUpdateTool；ADR-0011 安全姿态基线遗留项）：
+# 仅管理 workflows 里的 github-actions 引用（SHA 锚定+版本注释，dependabot 可提更新 PR）。
+# gate.yml 的 pyyaml==6.0.3 为运行时一次性安装（无 Python manifest）——不纳入 dependabot：
+# 本仓 .github/ 属 C1 路径，依赖升级 PR 须引用 ADR（adr-required），自动 PR 无法自携，
+# 升级走显式人工 PR（评审项：避免注释误读为已覆盖全部第三方依赖）。
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:            # zizmor dependabot-cooldown：新版本冷却 7 天再提 PR（供应链缓冲）
+      default-days: 7

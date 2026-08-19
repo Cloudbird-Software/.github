@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
       - name: YAML 全量解析（governance + standards）
         run: |
-          pip install pyyaml -q
+          pip install pyyaml==6.0.3 -q   # 版本钉死（scorecard PinnedDependencies；ADR-0011 版本钉死遗留项）
           python3 - <<'EOF'
           import glob, sys, yaml
           files = glob.glob("governance/**/*.yaml", recursive=True) + glob.glob("standards/**/*.yaml", recursive=True)
