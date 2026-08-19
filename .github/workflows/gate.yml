@@ -26,7 +26,11 @@ jobs:
           python-version: "3.12"
       - name: YAML 全量解析（governance + standards）
         run: |
-          pip install pyyaml==6.0.3 -q   # 版本钉死（scorecard PinnedDependencies；ADR-0011 版本钉死遗留项）
+          # 版本+sha256 双锚定（scorecard PinnedDependencies pipCommand not pinned by hash；
+          # ADR-0011 版本钉死遗留项）。新版 pip 的 --hash 仅支持 requirements 文件形态，
+          # 故经 .github/requirements-gate.txt 下发；哈希对应 cp312 manylinux x86_64 wheel
+          # （本 job 固定 python 3.12 + ubuntu-latest），升级版本须同步换哈希
+          pip install -q --require-hashes -r .github/requirements-gate.txt
           python3 - <<'EOF'
           import glob, sys, yaml
           files = glob.glob("governance/**/*.yaml", recursive=True) + glob.glob("standards/**/*.yaml", recursive=True)
