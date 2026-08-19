@@ -69,8 +69,9 @@ for f in "$DIR"/rulesets/*.json; do
 done
 
 echo "==> 2/5 Actions 允许策略 + 白名单"
+# enabled_repositories 为 org 级 PUT 必填字段（ADR-0021：缺失即 422——apply 长期"静默 FAIL 一项"）
 code=$(api -o /dev/null -w '%{http_code}' -X PUT "https://api.github.com/orgs/$ORG/actions/permissions" \
-  -d '{"enabled": true, "allowed_actions": "selected"}')
+  -d "$(jq -c '.actions_policy | {enabled_repositories, allowed_actions}' "$EXPECTED")")
 expect_ok "actions permissions" "$code"
 code=$(api -o /dev/null -w '%{http_code}' -X PUT "https://api.github.com/orgs/$ORG/actions/permissions/selected-actions" \
   -d "$(jq -c '.actions_policy | {github_owned_allowed, verified_allowed, patterns_allowed}' "$EXPECTED")")

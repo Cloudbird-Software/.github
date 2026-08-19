@@ -63,6 +63,13 @@ repos:
     role: 产品仓——短视频导演工具（ADR-0021：线上存在但未申报=GM-4 漂移，补申报；治理面
       随首个正式 PR 落地 AGENTS.md/CODEOWNERS 接入）
 
+  - name: Script_Writer
+    layer: L2
+    visibility: public
+    status: active
+    role: 产品仓——剧本创作工具（ADR-0021：建仓未申报=GM-4 漂移，补申报；治理面随首个
+      正式 PR 落地 AGENTS.md/CODEOWNERS 接入，路径同 Shorts_Director）
+
   - name: AI_Web_School
     layer: L2
     visibility: public
