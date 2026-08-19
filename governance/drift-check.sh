@@ -299,6 +299,52 @@ else
   [[ $GHOST -eq 0 ]] && ok "adr-reference-existence（窗口内合并 PR 的 ADR 引用全部真实）"
 fi
 
+# ---------- 11. CI-Workflows 大版本指针完整性（供应链，红队 #6-A / ADR-0016 决策 3）----------
+# 全部业务仓 gate 引用 CI-Workflows@v1 浮动指针；release-tags ruleset 的 admin bypass
+# 使指针可被强移（改变所有业务仓实际执行的 CI 内容）。声明不变式（CI-Workflows README
+# 版本策略）：vN 恒指向最高 vN.x.y 的 commit。本节每日校验——admin 强移指针 24h 内检出，
+# 不可见通道变可检测。附注 tag 指向 tag 对象（非 commit），须解引用后比对。
+CW_REFS=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/matching-refs/tags/")
+if ! jq -e 'type == "array"' <<<"$CW_REFS" >/dev/null 2>&1; then
+  drift "CI-Workflows tag refs 拉取失败，大版本指针完整性无法校验（fail-closed）: $(jq -r '.message // "非数组"' <<<"$CW_REFS" 2>/dev/null || echo 传输失败)"
+else
+  # 解引用到 commit SHA（轻量 tag 直指 commit 零额外请求；附注 tag 走 tag 对象一跳）
+  cw_commit_sha() { # $1=tag 名（ refs/tags/<name> 去前缀）
+    local row obj type sha
+    row=$(jq -c --arg r "refs/tags/$1" '.[] | select(.ref == $r)' <<<"$CW_REFS")
+    [[ -z "$row" || "$row" == "null" ]] && { echo ""; return; }
+    obj=$(jq -c '.object' <<<"$row")
+    type=$(jq -r '.type' <<<"$obj"); sha=$(jq -r '.sha' <<<"$obj")
+    if [[ "$type" == "tag" ]]; then
+      api "https://api.github.com/repos/$ORG/CI-Workflows/git/tags/$sha" | jq -r '.object.sha // empty'
+    else
+      echo "$sha"
+    fi
+  }
+  CW_NAMES=$(jq -r '.[].ref | sub("^refs/tags/"; "")' <<<"$CW_REFS")
+  PTR_FOUND=0
+  while IFS= read -r ptr; do
+    [[ -n "$ptr" ]] || continue
+    PTR_FOUND=$((PTR_FOUND+1))
+    N="${ptr#v}"
+    HIGHEST=$(grep -E "^v${N}\.[0-9]+\.[0-9]+$" <<<"$CW_NAMES" | sort -V | tail -1)
+    PTR_SHA=$(cw_commit_sha "$ptr")
+    if [[ -z "$HIGHEST" ]]; then
+      drift "CI-Workflows 指针 tag '$ptr' 存在但无任何 v${N}.x.y 具体版本 tag——指针失去锚点（发布流程漏步，README 版本策略）"
+    elif [[ -z "$PTR_SHA" ]]; then
+      drift "CI-Workflows 指针 '$ptr' 解引用失败（fail-closed）"
+    else
+      HIGH_SHA=$(cw_commit_sha "$HIGHEST")
+      if [[ "$PTR_SHA" == "$HIGH_SHA" ]]; then
+        ok "CI-Workflows 指针 '$ptr' == $HIGHEST（${PTR_SHA:0:7}）"
+      else
+        drift "CI-Workflows 指针 '$ptr'（${PTR_SHA:0:7}）≠ 最高版本 $HIGHEST（${HIGH_SHA:0:7}）——指针被强移或发布流程漏步（不变式 vN==最高 vN.x.y，红队 #6-A）"
+      fi
+    fi
+  done < <(grep -E '^v[0-9]+$' <<<"$CW_NAMES" | sort -V)
+  [[ $PTR_FOUND -eq 0 ]] && ok "CI-Workflows 无大版本指针 tag（不变式不适用）"
+fi
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"
