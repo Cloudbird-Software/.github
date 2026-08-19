@@ -6,6 +6,13 @@ on:
 
 permissions: {}
 
+# 串行化（coderabbit review：评论去重的"查指纹→写评论"非原子——两个并发运行
+# 可能都未发现指纹而各自评论；workflow 级 concurrency 使同一时刻至多一个检测
+# 运行，后发的排队等前者落评论后再查指纹，构成原子保护）
+concurrency:
+  group: governance-drift
+  cancel-in-progress: false
+
 jobs:
   drift-check:
     runs-on: ubuntu-latest
@@ -38,16 +45,34 @@ jobs:
           LABEL="auto-drift-report"
           gh label create "$LABEL" --repo "$REPO" --description "governance-drift 工作流自动报告（勿手工使用）" --color d73a4a >/dev/null 2>&1 || true
           EXISTING=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq 'length')
+          # 评论去重（红队 RB-B2，ADR-0016 决策 7）：漂移指纹=稳定漂移集合的 sha256。
+          # 同一指纹只报一次——未变化的漂移不每日重复评论（防 issue 评论无限膨胀：
+          # 破玻璃未回填等长期漂移此前每日+1 评论）；漂移集变化=新指纹=新评论。
+          # 指纹稳定性（评审项：全量报告含每次运行都变的字段——§8 回填时限秒数随
+          # 时间增长、OK 行的检测窗口/commit 数随日期漂移，同一漂移会天天得到新
+          # 指纹使去重失效）：只取 DRIFT 行、归一化时长秒数（回填时限=NNNs→<AGE>s）、
+          # 排序去重后哈希——语义集合不变则指纹跨日恒定，漂移新增/消除/内容实质
+          # 变化才产生新指纹。
+          FP=$(grep '^DRIFT' drift-report.txt | sed -E 's/回填时限=[0-9]+s/回填时限=<AGE>s/g' | sort -u | sha256sum | cut -d' ' -f1)
           BODY="自动化检测发现以下漂移（运行 #${{ github.run_id }}）：
 
           $(cat drift-report.txt)
 
           修复方式：本地跑 \`bash governance/apply.sh\`，或手动改回后跑 \`bash governance/drift-check.sh\` 验证。
 
-          @randypanding"
+          @randypanding
+
+          <!-- drift-fingerprint: $FP -->"
           if [[ "$EXISTING" != "0" ]]; then
             NUM=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq '.[0].number')
-            gh issue comment "$NUM" --repo "$REPO" --body "$BODY"
+            # 全量评论比对（coderabbit review：只看最近 10 条时，同一指纹若在
+            # 更早的自动评论里会被重复发布——长期未回填漂移的旧报告就是这种形态）
+            COMMENTS=$(gh issue view "$NUM" --repo "$REPO" --json comments --jq '[.comments[].body] | join("\n---\n")')
+            if grep -qF "drift-fingerprint: $FP" <<<"$COMMENTS"; then
+              echo "漂移指纹 $FP 已在 #$NUM 报告过且内容未变化，跳过重复评论（RB-B2 去重）"
+            else
+              gh issue comment "$NUM" --repo "$REPO" --body "$BODY"
+            fi
           else
             gh issue create --repo "$REPO" --title "$TITLE" --body "$BODY" --label "$LABEL"
           fi
