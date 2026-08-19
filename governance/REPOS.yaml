@@ -37,7 +37,9 @@ repos:
     visibility: public
     status: active
     role: 注册层——agent/skill/tool/team 声明 + 模型注册表(models.yaml) + ADR；AR-2 状态门禁校验器
-    key_paths: [registry/, decisions/, scripts/validate.py]
+    key_paths: [registry/, decisions/, standards/, scripts/validate.py, scripts/simulate-wave.py]
+                                      # ADR-0021：standards/（协作标准）与 simulate-wave.py（CI required
+                                      # 门禁，ADR-0015）此前不在组织地图——门禁自身逃逸治理地图
     policies: [agent_runtime]
 
   - name: template-service
@@ -50,8 +52,16 @@ repos:
   - name: agent-tools
     layer: L2
     visibility: public
-    status: planned
-    role: 自研工具实现仓——被 tool 声明的 implementation 字段引用
+    status: active
+    role: 自研工具实现仓——被 tool 声明的 implementation 字段引用（ADR-0021：approved 工具
+      gitcode-pr 引用本仓，planned=悬空供应链引用；已按 flows.new_repo 从 template-service
+      派生并跑 new-repo-init）
+  - name: Shorts_Director
+    layer: L2
+    visibility: public
+    status: active
+    role: 产品仓——短视频导演工具（ADR-0021：线上存在但未申报=GM-4 漂移，补申报；治理面
+      随首个正式 PR 落地 AGENTS.md/CODEOWNERS 接入）
 
   - name: AI_Web_School
     layer: L2

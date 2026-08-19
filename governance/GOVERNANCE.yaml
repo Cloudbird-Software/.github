@@ -28,7 +28,7 @@ domains:
         intent: "合并前置：唯一 required check = gate（聚合检查）"
         strength: enforced
         platform: {github: {mechanism: ruleset-required-status, context: gate}}
-        verify: {method: negative-test, frequency: weekly, see: T-11}
+        verify: {method: "drift-check §1（required_status_checks 对账）", frequency: hourly}
       - id: BP-3
         intent: "发布标签 v* 不可删除/覆盖"
         strength: enforced
@@ -96,9 +96,9 @@ domains:
         strength: enforced
         platform: {github: {mechanism: script, entry: scripts/gh-app-token.sh}}
       - id: AG-3
-        intent: "App 受全部 ruleset 约束（无 bypass）；CI 合并用 App 令牌（触发下游 workflow）"
+        intent: "App 受全部 ruleset 约束（bypass 仅 OrganizationAdmin——App 非 admin 无 bypass）；CI 合并用 App 令牌（触发下游 workflow）"
         strength: enforced
-        verify: {method: negative-test, frequency: weekly, see: T-11}
+        verify: {method: "drift-check §1（bypass_actors 对账）+ 季度人工负向复核", frequency: hourly}
       - id: AG-4
         intent: "App 安装范围 selected；新仓初始化自动挂载"
         strength: monitored
@@ -114,14 +114,14 @@ domains:
   governance_meta:
     measures:
       - id: GM-1
-        intent: "期望状态落盘；每日漂移检测（红队修复：周检盲区最长 7 天→1 天）；漂移自动开 issue；漂移消除自动关闭 issue（防陈旧报告累积噪音）"
+        intent: "期望状态落盘；小时级漂移检测（ADR-0020：可见性盲区 24h→1h）；漂移自动开 issue；漂移消除自动关闭 issue（防陈旧报告累积噪音）；基础设施故障（token 缺失/API 不可达）与漂移分通道报告（ADR-0021）"
         strength: monitored
-        platform: {github: {mechanism: workflow, file: .github/workflows/governance-drift.yml, cron: "daily 03:00 UTC"}}
+        platform: {github: {mechanism: workflow, file: .github/workflows/governance-drift.yml, cron: "0 * * * *"}}
         verify: {method: self, state: expected-state.json}
       - id: GM-2
         intent: "治理仓变更一律走 flows.governance_change 分级流程（C1 附 ADR / C2 过 validate / C3 走 PR）；破玻璃=直推后 24h 内回填；owner 与 AI 同受约束"
         strength: enforced
-        verify: {method: drift-check, part: section-8, frequency: daily}
+        verify: {method: drift-check, part: section-8, frequency: hourly}
       - id: GM-3
         intent: "政策文件机器可判定（本目录）；agent 按需读取，不常驻上下文"
         strength: advisory
@@ -190,9 +190,9 @@ flows:
     # 授权凭证 = ADR + PR 记录；破玻璃保留但被监控
     classes:
       - id: C1
-        scope: ["governance/（整目录——含 GOVERNANCE/REPOS.yaml、rulesets、expected-state、apply/drift 脚本、policy）", standards/, models.yaml, decisions/, scripts/, ".github/（CI 门禁自身——改门禁=改治理）", CODEOWNERS, profile/, "tests/（agent-registry 验证器元测试——验证器之验证）", "template-service（整仓——供应链入口：模板被污染=全部新仓继承后门，红队修复 P0）"]
+        scope: ["governance/（整目录——含 GOVERNANCE/REPOS.yaml、rulesets、expected-state、apply/drift 脚本、policy）", standards/, models.yaml, decisions/, scripts/, ".github/（CI 门禁自身——改门禁=改治理）", CODEOWNERS, profile/, "tests/（agent-registry 验证器元测试——验证器之验证）", "template-service 脚手架面（.github/、AGENTS.md、Makefile、docs/、zizmor.yml——供应链入口：模板防线被污染=全部新仓继承后门，红队修复 P0；src/ 业务面属 C3。ADR-0021 收敛范围：整仓 C1 会与 SC-3 依赖 automerge 冲突——依赖 PR 无 ADR 不可自动合并）"]
         requires: [PR, "ADR（新建或引用编号）", "drift-check 本地预检", owner-merge]
-        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并。scope 与机器执法路径全集一致（.github gate：governance/standards/scripts/.github/CODEOWNERS/profile；agent-registry validate：standards/decisions/scripts/.github/CODEOWNERS/tests——评审项：声明与执行不得互斥）；template-service 是新仓派生源头，视同治理意图变更（gate adr-required 机器检查 + owner-only review）"
+        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并。scope 与机器执法路径全集一致（.github gate：governance/standards/scripts/.github/CODEOWNERS/profile；agent-registry validate：standards/decisions/scripts/.github/CODEOWNERS/tests——评审项：声明与执行不得互斥）；template-service 的脚手架面是新仓派生源头，视同治理意图变更（gate adr-required 机器检查 + owner-only review；ADR-0021 范围收敛后与 CI-Workflows ci.yml 的 C1 路径判定一致）"
       - id: C2
         scope: [agent-registry/registry/, 业务仓 AGENTS.md/CODEOWNERS]
         requires: [PR, "validate.py 通过"]
