@@ -36,10 +36,19 @@ jobs:
           EOF
       # JSON 全量校验（红队 #17-B）：expected-state.json 与 rulesets 同为 drift-check/apply 的
       # 期望状态真源——此前 gate 只验 rulesets/*.json，expected-state.json 畸形可静默合入
+      # python3 校验替代 apt 装 jq：2026-08-19 两次 main gate 因 apt-get update 挂起烧穿
+      # timeout-minutes: 10 整体 cancelled（run 32217218076/32217301896）；python 已就绪、
+      # 零外部依赖，消除该故障面。adr-required 用的 jq 系 runner 镜像预装（CI-Workflows
+      # ci.yml 从不安装 jq 且连跑绿，实证预装），无需 apt。
       - name: JSON 校验（rulesets + expected-state）
         run: |
-          sudo apt-get -qq update && sudo apt-get -qq install -y jq >/dev/null
-          for f in governance/rulesets/*.json governance/expected-state.json; do jq -e . "$f" >/dev/null || exit 1; echo "OK $f"; done
+          python3 - <<'EOF'
+          import glob, json
+          files = sorted(glob.glob("governance/rulesets/*.json")) + ["governance/expected-state.json"]
+          assert len(files) > 1, "未找到 JSON 文件"
+          for f in files:
+              json.load(open(f, encoding="utf-8")); print("OK", f)
+          EOF
       - name: 脚本语法检查
         run: |
           bash -n governance/apply.sh && bash -n governance/drift-check.sh && bash -n scripts/new-repo-init.sh && bash -n scripts/gh-app-token.sh
