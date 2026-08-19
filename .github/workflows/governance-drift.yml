@@ -1,7 +1,7 @@
 name: governance-drift
 on:
   schedule:
-    - cron: "0 3 * * *" # 每日 03:00 UTC（红队 #18 P0-1：周检盲区最长 7 天 → 每日；轻量只读检测，成本可忽略）
+    - cron: "0 * * * *" # 每小时整点（ADR-0020：可见性漂移盲区 24h→1h——全仓公开政策的小时级执法；红队 #18 P0-1 周检→每日的延续推进；公开仓 Actions 免费，轻量只读检测成本可忽略）
   workflow_dispatch:
 
 permissions: {}
