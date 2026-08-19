@@ -70,6 +70,14 @@ repos:
     role: 产品仓——剧本创作工具（ADR-0021：建仓未申报=GM-4 漂移，补申报；治理面随首个
       正式 PR 落地 AGENTS.md/CODEOWNERS 接入，路径同 Shorts_Director）
 
+  - name: Use-up-Plan
+    layer: L2
+    visibility: public
+    status: active
+    role: 产品仓——AI 多 plan 额度管理与路由调度工具（额度审计/规则标准化描述/最优
+      分配求解/实时切换；立项意图见仓内 Intent.md，ADR-0024 申报入图+bootstrap 直推
+      豁免；README 待首个正式 PR 脱离模板文案）
+
   - name: AI_Web_School
     layer: L2
     visibility: public
