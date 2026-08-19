@@ -299,6 +299,82 @@ else
   [[ $GHOST -eq 0 ]] && ok "adr-reference-existence（窗口内合并 PR 的 ADR 引用全部真实）"
 fi
 
+# ---------- 11. CI-Workflows 大版本指针完整性（供应链，红队 #6-A / ADR-0016 决策 3）----------
+# 全部业务仓 gate 引用 CI-Workflows@v1 浮动指针；release-tags ruleset 的 admin bypass
+# 使指针可被强移（改变所有业务仓实际执行的 CI 内容）。声明不变式（CI-Workflows README
+# 版本策略）：vN 恒指向最高 vN.x.y 的 commit。本节每日校验——admin 强移指针 24h 内检出，
+# 不可见通道变可检测。附注 tag 指向 tag 对象（非 commit），须解引用后比对。
+# 凭据说明（评审项）：本节与 §1-§10 共用 GOVERNANCE_TOKEN——AGENTS.md 声明的
+# drift-check 接口即 "GH_TOKEN=<org admin> bash governance/drift-check.sh"（组织级
+# 检测 rulesets/admin/PR 清单本就需要 org 权限，token 已在 job 内）；本节只读公开仓
+# CI-Workflows 的 refs，复用不扩大暴露面。工作流仅 schedule/dispatch 于可信 main
+# 运行，脚本不受 PR 控制（与 gate.yml 不向 PR 上下文注入 org secret 同一威胁模型）。
+# 分页聚合（评审项：单页请求在 tag 数超页容量后会拿旧集合比较出假绿）：
+# 逐页拉取并验证每页均为数组，任一页失败即 fail-closed，不用部分结果继续比较。
+CW_REFS="[]"
+CW_PAGE_FAIL=0
+CW_PAGE=1
+while :; do
+  CW_PAGE=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/matching-refs/tags/?per_page=100&page=$CW_PAGE")
+  if ! jq -e 'type == "array"' <<<"$CW_PAGE" >/dev/null 2>&1; then
+    CW_PAGE_FAIL=1
+    break
+  fi
+  CW_REFS=$(jq --argjson acc "$CW_REFS" '. as $p | $acc + $p' <<<"$CW_PAGE")
+  [[ "$(jq 'length' <<<"$CW_PAGE")" -lt 100 ]] && break
+  CW_PAGE=$((CW_PAGE+1))
+  [[ $CW_PAGE -gt 50 ]] && { CW_PAGE_FAIL=1; break; }   # >5000 tag 视为异常，fail-closed
+done
+if [[ $CW_PAGE_FAIL -ne 0 ]]; then
+  drift "CI-Workflows tag refs 分页拉取失败（第 $CW_PAGE 页非数组/超界），大版本指针完整性无法校验（fail-closed，不用部分结果比较）"
+else
+  # 解引用到 commit SHA（轻量 tag 直指 commit 零额外请求；附注 tag 走 tag 对象一跳）
+  cw_commit_sha() { # $1=tag 名（ refs/tags/<name> 去前缀）
+    local row obj type sha
+    row=$(jq -c --arg r "refs/tags/$1" '.[] | select(.ref == $r)' <<<"$CW_REFS")
+    [[ -z "$row" || "$row" == "null" ]] && { echo ""; return; }
+    obj=$(jq -c '.object' <<<"$row")
+    type=$(jq -r '.type' <<<"$obj"); sha=$(jq -r '.sha' <<<"$obj")
+    if [[ "$type" == "tag" ]]; then
+      api "https://api.github.com/repos/$ORG/CI-Workflows/git/tags/$sha" | jq -r '.object.sha // empty'
+    else
+      echo "$sha"
+    fi
+  }
+  CW_NAMES=$(jq -r '.[].ref | sub("^refs/tags/"; "")' <<<"$CW_REFS")
+  while IFS= read -r ptr; do
+    [[ -n "$ptr" ]] || continue
+    N="${ptr#v}"
+    HIGHEST=$(grep -E "^v${N}\.[0-9]+\.[0-9]+$" <<<"$CW_NAMES" | sort -V | tail -1)
+    PTR_SHA=$(cw_commit_sha "$ptr")
+    if [[ -z "$HIGHEST" ]]; then
+      drift "CI-Workflows 指针 tag '$ptr' 存在但无任何 v${N}.x.y 具体版本 tag——指针失去锚点（发布流程漏步，README 版本策略）"
+    elif [[ -z "$PTR_SHA" ]]; then
+      drift "CI-Workflows 指针 '$ptr' 解引用失败（fail-closed）"
+    else
+      HIGH_SHA=$(cw_commit_sha "$HIGHEST")
+      if [[ "$PTR_SHA" == "$HIGH_SHA" ]]; then
+        ok "CI-Workflows 指针 '$ptr' == $HIGHEST（${PTR_SHA:0:7}）"
+      else
+        drift "CI-Workflows 指针 '$ptr'（${PTR_SHA:0:7}）≠ 最高版本 $HIGHEST（${HIGH_SHA:0:7}）——指针被强移或发布流程漏步（不变式 vN==最高 vN.x.y，红队 #6-A）"
+      fi
+    fi
+  done < <(grep -E '^v[0-9]+$' <<<"$CW_NAMES" | sort -V)
+  # 必需指针存在性（评审项：删除 v1 ≠ "无指针即不适用"——v1 是全部业务仓 gate 的
+  # 供应链入口（REPOS.yaml CI-Workflows role："业务仓引用 @v1"），指针被删=
+  # admin bypass 绕过发布流程，必须报漂移。v2+ 指针出现后由上方循环自动纳入
+  # 锚点/一致性校验；必需集合当前只声明 v1——v2 落地时随 ADR 扩充此常量。）
+  CW_REQUIRED_POINTERS="v1"
+  REQ_MISSING=0
+  for req in $CW_REQUIRED_POINTERS; do
+    if ! grep -qx "$req" <<<"$CW_NAMES"; then
+      drift "CI-Workflows 必需大版本指针 '$req' 缺失（业务仓 @v1 供应链入口被删——红队 #6-A：release-tags ruleset admin bypass 通道）"
+      REQ_MISSING=1
+    fi
+  done
+  [[ $REQ_MISSING -eq 0 ]] && ok "CI-Workflows 必需大版本指针存在（$CW_REQUIRED_POINTERS）"
+fi
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"
