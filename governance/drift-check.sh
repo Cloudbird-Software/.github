@@ -260,7 +260,7 @@ for r in $REPOS; do
   fi
 done
 
-# ---------- 10. ADR 引用存在性后验（adr-required 的补充防线，评审项）----------
+# ---------- 10. ADR 引用存在性+实体性后验（adr-required 的补充防线，评审项 + RB-D5）----------
 # gate.yml 的 adr-required 在 PR 上下文只能做语法检查：agent-registry 是私有仓，
 # PR 上下文的 GITHUB_TOKEN 无跨仓读权，注入 org secret 又会向 PR 控制的代码暴露
 # 凭据。存在性在本节后验：窗口内合并 PR 的 ADR-NNNN 引用必须真实存在于
@@ -288,8 +288,14 @@ else
       [[ -n "$pnum" ]] || continue
       for ref in $(printf '%s\n%s\n' "$title" "$body" | grep -oE "$ADR_RE" | sort -u); do
         num="${ref#ADR-}"
-        if ! grep -q "^ADR-${num}-" <<<"$ADR_FILES"; then
+        ROW=$(jq -c --arg p "ADR-${num}-" '[.[] | select((.name | startswith($p)) and (.type == "file"))] | first // empty' <<<"$ADR_DIR_LISTING")
+        if [[ -z "$ROW" ]]; then
           drift "repo '$r' PR#$pnum 引用幽灵 ADR ${ref}（agent-registry/decisions/ 无 ADR-${num}-*.md——C1 变更的决策背书不成立）"
+          GHOST=1
+        elif [[ "$(jq -r .size <<<"$ROW")" -lt 100 ]]; then
+          # 实体性校验（红队 RB-D5，ADR-0016 决策 6）：文件存在但 <100B = 空壳 ADR
+          # ——同时骗过 gate 格式检查与旧版 §10 存在性检查；"有 ADR"须=有实质决策记录
+          drift "repo '$r' PR#$pnum 引用空壳 ADR ${ref}（文件存在但 $(jq -r .size <<<"$ROW")B < 100B——无实质决策记录，GM-2 形同虚设）"
           GHOST=1
         fi
       done
