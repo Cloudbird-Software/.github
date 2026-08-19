@@ -23,7 +23,6 @@ domains:
         strength: enforced
         platform: {github: {mechanism: org-ruleset, name: main-protection, definition: rulesets/main-protection.json}}
         verify: {method: drift-check, frequency: daily}
-        exception: [AI_Web_School]
       - id: BP-2
         intent: "合并前置：唯一 required check = gate（聚合检查）"
         strength: enforced

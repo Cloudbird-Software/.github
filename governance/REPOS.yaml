@@ -73,8 +73,10 @@ repos:
   - name: AI_Web_School
     layer: L2
     visibility: public
-    status: exempt
-    role: 历史产品仓——申报在册但豁免治理基线（repo_baseline.exclude_repos）
+    status: active
+    role: 产品仓——小学语数英个性化练习平台（Python/FastAPI 存量栈，语言准入按 ADR-0023
+      存量豁免，仅面向新服务选型）；治理面已接入：gate（CI-Workflows@v1 聚合）/automerge/
+      scorecard/CODEOWNERS/dependabot + App 挂载（AG-4）+ production environment（RL-1）
 
 # 上游依赖（不属于本组织；不 fork、不 submodule）
 # 治理方式：声明于此 + 部署渲染时 clone 并 pin tag（ADR-0002 rev1）

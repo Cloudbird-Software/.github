@@ -26,9 +26,7 @@
   "repo_baseline": {
     "squash_only": true,
     "delete_branch_on_merge": true,
-    "exclude_repos": [
-      "AI_Web_School"
-    ]
+    "exclude_repos": []
   },
   "org_secrets_required": [
     "CB_APP_ID",
