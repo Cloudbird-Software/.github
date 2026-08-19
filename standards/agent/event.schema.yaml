@@ -121,7 +121,7 @@ $defs:
       tokens_in: {type: integer}
       tokens_out: {type: integer}
       duration_ms: {type: integer}
-      handoff_done: {type: boolean, description: "ephemeral team：handoff 是否全部完成"}
+      handoff_done: {type: boolean, description: "ephemeral team：team 侧 handoff 是否全部完成（销毁前置语义——评审项：单一布尔只表达 team 侧；stewardship 侧异步完成态由 handoff_step(side=stewardship_side) 事件逐项审计）"}
   handoff_step:
     type: object
     description: |
