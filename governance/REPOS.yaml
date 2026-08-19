@@ -33,7 +33,7 @@ repos:
 
   - name: agent-registry
     layer: L1
-    visibility: private
+    visibility: public
     status: active
     role: 注册层——agent/skill/tool/team 声明 + 模型注册表(models.yaml) + ADR；AR-2 状态门禁校验器
     key_paths: [registry/, decisions/, scripts/validate.py]
