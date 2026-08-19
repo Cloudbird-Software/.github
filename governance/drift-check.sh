@@ -260,13 +260,46 @@ for r in $REPOS; do
   fi
 done
 
-# ---------- 10. ADR 引用存在性后验（adr-required 的补充防线，评审项）----------
+# ---------- 10. ADR 引用存在性+实体性后验（adr-required 的补充防线，评审项 + RB-D5）----------
 # gate.yml 的 adr-required 在 PR 上下文只能做语法检查：agent-registry 是私有仓，
 # PR 上下文的 GITHUB_TOKEN 无跨仓读权，注入 org secret 又会向 PR 控制的代码暴露
 # 凭据。存在性在本节后验：窗口内合并 PR 的 ADR-NNNN 引用必须真实存在于
 # agent-registry/decisions/——伪造/幽灵 ADR 最长 24h 内被检出（与 §8 直推检测
 # 同为 post-hoc 防线；C1 的权威人类门禁仍是 owner-only review）。
 ADR_RE='ADR-[0-9]{4}'
+# 实体性判定（评审项：size 字节数可被空白/注释/填充绕过——100B 阈值挡不住
+# RB-D5 意义上的空壳）：拉取被引 ADR 全文做结构校验，H1 编号行、status 行、
+# 背景/决策章节齐备且决策节有正文才判"有实质决策记录"；同名多文件（ADR-0011
+# 先例）任一满足即通过；读取失败 fail-closed。按编号缓存（同批多 PR 引用同一
+# ADR 只拉一次）。
+declare -A ADR_VERDICT_CACHE
+adr_substantive() { # $1=四位编号 → stdout: missing|ok|shell|unreadable
+  local num="$1" matches apath content decoded verdict
+  [[ -n "${ADR_VERDICT_CACHE[$num]:-}" ]] && { echo "${ADR_VERDICT_CACHE[$num]}"; return; }
+  matches=$(jq -r --arg p "ADR-${num}-" '.[] | select((.name | startswith($p)) and (.type == "file")) | .path' <<<"$ADR_DIR_LISTING")
+  if [[ -z "$matches" ]]; then
+    verdict="missing"
+  else
+    verdict="unreadable"
+    while IFS= read -r apath; do
+      [[ -n "$apath" ]] || continue
+      content=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/$apath" | jq -r '.content // empty')
+      [[ -z "$content" ]] && continue
+      decoded=$(base64 -d <<<"$content" 2>/dev/null || true)
+      [[ -z "$decoded" ]] && continue
+      if grep -qE "^#[[:space:]]*ADR-${num}([^0-9]|$)" <<<"$decoded" \
+         && grep -qE "^-[[:space:]]*(status|状态):[[:space:]]*[^[:space:]]" <<<"$decoded" \
+         && grep -qE "^##[[:space:]]*背景" <<<"$decoded" \
+         && grep -qE "^##[[:space:]]*决策" <<<"$decoded" \
+         && [[ -n "$(sed -n '/^##[[:space:]]*决策/,$p' <<<"$decoded" | tail -n +2 | sed 's/[[:space:]#*-]//g')" ]]; then
+        verdict="ok"; break
+      fi
+      [[ "$verdict" == "unreadable" ]] && verdict="shell"
+    done <<<"$matches"
+  fi
+  ADR_VERDICT_CACHE[$num]="$verdict"
+  echo "$verdict"
+}
 # 独立 7 天窗口（不用 §8 的 SINCE——那是 policy_effective 起算的直推检测窗口，
 # 而 ADR 引用后验须覆盖 policy 生效前已合并、引用了伪造 ADR 的 PR）
 ADR_SINCE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
@@ -288,15 +321,23 @@ else
       [[ -n "$pnum" ]] || continue
       for ref in $(printf '%s\n%s\n' "$title" "$body" | grep -oE "$ADR_RE" | sort -u); do
         num="${ref#ADR-}"
-        if ! grep -q "^ADR-${num}-" <<<"$ADR_FILES"; then
-          drift "repo '$r' PR#$pnum 引用幽灵 ADR ${ref}（agent-registry/decisions/ 无 ADR-${num}-*.md——C1 变更的决策背书不成立）"
-          GHOST=1
-        fi
+        case "$(adr_substantive "$num")" in
+          ok) : ;;
+          missing)
+            drift "repo '$r' PR#$pnum 引用幽灵 ADR ${ref}（agent-registry/decisions/ 无 ADR-${num}-*.md——C1 变更的决策背书不成立）"
+            GHOST=1 ;;
+          shell)
+            drift "repo '$r' PR#$pnum 引用空壳 ADR ${ref}（文件存在但缺实质结构：H1 编号行/status/背景/决策章节须齐备且决策节有正文——红队 RB-D5：字节数填充不再能绕过）"
+            GHOST=1 ;;
+          unreadable)
+            drift "repo '$r' PR#$pnum 引用的 ADR ${ref} 全部同名文件内容读取失败，实体性无法判定（fail-closed）"
+            GHOST=1 ;;
+        esac
       done
     done < <(jq -r --arg since "$ADR_SINCE" \
       '.[] | select(.merged_at != null and .merged_at >= $since) | [(.number|tostring), (.title // ""), (.body // "")] | @tsv' <<<"$PRSLIST")
   done
-  [[ $GHOST -eq 0 ]] && ok "adr-reference-existence（窗口内合并 PR 的 ADR 引用全部真实）"
+  [[ $GHOST -eq 0 ]] && ok "adr-reference-substantive（窗口内合并 PR 的 ADR 引用全部真实且有实质决策结构）"
 fi
 
 # ---------- 11. CI-Workflows 大版本指针完整性（供应链，红队 #6-A / ADR-0016 决策 3）----------
