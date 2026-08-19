@@ -38,10 +38,15 @@ jobs:
           LABEL="auto-drift-report"
           gh label create "$LABEL" --repo "$REPO" --description "governance-drift 工作流自动报告（勿手工使用）" --color d73a4a >/dev/null 2>&1 || true
           EXISTING=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq 'length')
-          # 评论去重（红队 RB-B2，ADR-0016 决策 7）：漂移指纹=报告内容 sha256。
+          # 评论去重（红队 RB-B2，ADR-0016 决策 7）：漂移指纹=稳定漂移集合的 sha256。
           # 同一指纹只报一次——未变化的漂移不每日重复评论（防 issue 评论无限膨胀：
-          # 破玻璃未回填等长期漂移此前每日+1 评论）；漂移内容变化=新指纹=新评论。
-          FP=$(sha256sum drift-report.txt | cut -d' ' -f1)
+          # 破玻璃未回填等长期漂移此前每日+1 评论）；漂移集变化=新指纹=新评论。
+          # 指纹稳定性（评审项：全量报告含每次运行都变的字段——§8 回填时限秒数随
+          # 时间增长、OK 行的检测窗口/commit 数随日期漂移，同一漂移会天天得到新
+          # 指纹使去重失效）：只取 DRIFT 行、归一化时长秒数（回填时限=NNNs→<AGE>s）、
+          # 排序去重后哈希——语义集合不变则指纹跨日恒定，漂移新增/消除/内容实质
+          # 变化才产生新指纹。
+          FP=$(grep '^DRIFT' drift-report.txt | sed -E 's/回填时限=[0-9]+s/回填时限=<AGE>s/g' | sort -u | sha256sum | cut -d' ' -f1)
           BODY="自动化检测发现以下漂移（运行 #${{ github.run_id }}）：
 
           $(cat drift-report.txt)
