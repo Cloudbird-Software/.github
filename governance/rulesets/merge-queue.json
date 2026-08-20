@@ -1,0 +1,38 @@
+{
+  "name": "merge-queue",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    },
+    "repository_name": {
+      "include": [
+        "agent-registry",
+        "template-service"
+      ],
+      "exclude": []
+    }
+  },
+  "bypass_actors": [
+    {
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    }
+  ],
+  "rules": [
+    {
+      "type": "merge_queue",
+      "parameters": {
+        "check_response_timeout_seconds": 3600,
+        "max_entries_to_build": 5,
+        "merge_method": "squash",
+        "min_entries_to_merge": 1
+      }
+    }
+  ]
+}
