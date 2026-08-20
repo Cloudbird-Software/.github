@@ -62,6 +62,11 @@ domains:
         intent: "工作流安全静态审计（zizmor medium+ 拦截）"
         strength: enforced
         platform: {github: {mechanism: hygiene-job, part_of: CI-1}}
+      - id: CI-5
+        intent: "契约兼容性检测门：OpenAPI/JSON Schema breaking 变更须 ADR 引用；DB migration destructive DDL 须 ADR + downgrade 逆操作；policy 声明路径与实际文件对账（失明即红）"
+        strength: enforced
+        platform: {github: {mechanism: reusable-workflows, repo: CI-Workflows, workflow: contract.yml, policy: "governance/policy/contracts.yaml"}}
+        verify: {method: "contract-selftest（CI-Workflows ci.yml，卡内 T1-T7 fixture 全套）+ 声明路径失明防护红测（T6）"}
 
   supply_chain:
     measures:
