@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# ghcb —— 取 cloudbrid-agent 单仓安装令牌的便捷入口（ADR-0044，包 gh-app-token.sh）
+#
+# 用法：
+#   GH_TOKEN=$(ghcb template-service)          # stdout=令牌，可直接命令替换
+#   ghcb template-service >/dev/null           # 仅预热缓存
+#   GH_TOKEN=$(ghcb template-service --refresh) # 强制刷新
+#
+# 与 gh-app-token.sh 相同的契约：CB_APP_ID + AGENT_APP_SECRET_FILE/AGENT_APP_SECRET
+# 必须已设置；REPO 由第一个参数提供；ORG 可用环境变量覆盖（默认 Cloudbird-Software）。
+set -euo pipefail
+REPO="${1:?用法: GH_TOKEN=\$(ghcb <repo> [--refresh])}"
+shift || true
+export REPO
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec bash "$DIR/gh-app-token.sh" "$@"

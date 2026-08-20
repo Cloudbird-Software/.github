@@ -18,6 +18,7 @@ AI agent 进入本仓的工作契约（索引型，CG-1；细节按需读引用�
 - 成本熔断检查：`GH_TOKEN=<org admin> bash governance/cost-check.sh`（6h CI 自动跑；`COST_USAGE_MINUTES_OVERRIDE=<n>` 注入测试）
 - 漂移修复：`GH_TOKEN=<org admin> bash governance/apply.sh`（幂等；失败 loud 退出）
 - 新仓初始化：`bash scripts/new-repo-init.sh <name>`（失败 loud 退出）
+- 取 App 令牌：`GH_TOKEN=$(scripts/ghcb <repo>)`（缓存命中零网络；`--refresh` 强刷；Windows Git Bash 开箱可用——ADR-0044）
 
 ## 索引
 

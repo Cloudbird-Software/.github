@@ -86,7 +86,7 @@ jobs:
       - name: 脚本语法检查
         run: |
           # ADR-0040：生存护栏脚本纳入同一语法门（新增脚本不登记=语法检查盲区）
-          bash -n governance/apply.sh && bash -n governance/drift-check.sh && bash -n scripts/new-repo-init.sh && bash -n scripts/gh-app-token.sh \
+          bash -n governance/apply.sh && bash -n governance/drift-check.sh && bash -n scripts/new-repo-init.sh && bash -n scripts/gh-app-token.sh && bash -n scripts/ghcb \
           && bash -n governance/auto-fix-limit.sh && bash -n governance/cost-check.sh
           echo "OK scripts"
       - name: REPOS.yaml 引用自检（无重名仓）
