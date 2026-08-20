@@ -555,6 +555,39 @@ for r in $REPOS; do
 done
 [[ $STUCK_TOTAL -eq 0 ]] && ok "pr-liveness（全部受管仓 open PR 无卡死，阈值 ${LIVENESS_H}h）"
 
+# ---------- 14. merge queue 对账（P2-7，ADR-0042；repo 级 ruleset）----------
+# org rulesets API 不支持 merge_queue 规则类型（实测 422）——merge queue 只能以
+# repo 级 ruleset 存在（须与 pull_request/required_status_checks 同集）。期望状态
+# expected-state.json#merge_queue 声明仓清单与参数；REST 读 repo ruleset 可见
+# merge_queue 规则（读支持，写须 GraphQL——apply.sh step6）。
+MQ_REPOS=$(jq -r '.merge_queue.repos // [] | .[]' "$EXPECTED")
+for r in $MQ_REPOS; do
+  RS=$(api "https://api.github.com/repos/$ORG/$r/rulesets?per_page=100")
+  if ! jq -e 'type == "array"' <<<"$RS" >/dev/null 2>&1; then
+    drift "repo '$r' rulesets 清单拉取失败，merge queue 对账无法执行（fail-closed）"; continue
+  fi
+  row=$(jq -c --arg n "merge-queue" '.[] | select(.name == $n)' <<<"$RS")
+  if [[ -z "$row" || "$row" == "null" ]]; then
+    drift "repo '$r' 期望启用 merge queue（ADR-0042）但无 'merge-queue' ruleset"; continue
+  fi
+  rid=$(jq -r .id <<<"$row")
+  detail=$(api "https://api.github.com/repos/$ORG/$r/rulesets/$rid")
+  want_p=$(jq -c '.merge_queue.params' "$EXPECTED")
+  got_p=$(jq -c '.rules[] | select(.type == "merge_queue") | .parameters
+    | {merge_method, check_response_timeout_minutes, max_entries_to_build,
+       min_entries_to_merge, max_entries_to_merge, min_entries_to_merge_wait_minutes,
+       grouping_strategy}' <<<"$detail")
+  [[ "$got_p" == "$want_p" ]] || drift "repo '$r' merge-queue 参数漂移: got=$got_p 期望=$want_p"
+  ok "merge-queue '$r'（参数与期望一致）"
+done
+# 未声明仓不得私自开队列（期望清单外的仓出现 merge-queue ruleset = 漂移）
+for r in $REPOS; do
+  jq -e --arg r "$r" '.merge_queue.repos // [] | index($r) != null' "$EXPECTED" >/dev/null && continue
+  RS=$(api "https://api.github.com/repos/$ORG/$r/rulesets?per_page=100")
+  jq -e 'type == "array"' <<<"$RS" >/dev/null 2>&1 || continue
+  jq -e '.[] | select(.name == "merge-queue")' <<<"$RS" >/dev/null 2>&1     && drift "repo '$r' 存在未声明的 merge-queue ruleset（expected-state.merge_queue.repos 未列——扩围须修订 ADR-0042）"
+done
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"
