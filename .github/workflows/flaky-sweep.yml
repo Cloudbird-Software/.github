@@ -1,0 +1,31 @@
+name: flaky-sweep
+# P2-9（ADR-0043）：隔离清单到期回炉检测——过期隔离不豁免 + 升级 issue。
+# 回炉执法在 check 侧（过期条目不参与豁免）+ 本 sweep 提示人工按 ADR 移除条目。
+on:
+  schedule:
+    - cron: "30 2 * * *"   # 每日（错开整点 drift 洪峰）
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: flaky-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 隔离清单到期扫描
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::缺 org secret GOVERNANCE_TOKEN" >&2; exit 2
+          fi
+          set -o pipefail
+          bash governance/flaky-sweep.sh | tee sweep-report.txt
