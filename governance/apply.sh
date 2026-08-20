@@ -101,7 +101,7 @@ else
   FAILS=$((FAILS+1))
 fi
 
-echo "==> 5/5 仓库基线（squash-only / 删分支）"
+echo "==> 5/5 仓库基线（squash-only / 删分支 / auto-merge，ADR-0029）"
 EXCLUDES=$(jq -c '.repo_baseline.exclude_repos // []' "$EXPECTED")
 # 全分页拉取 org 仓库（评审项：单页 100 时 >100 仓的 org 会漏掉后续仓库的基线应用）
 REPOS_TMP=$(mktemp)
@@ -134,8 +134,9 @@ else
 fi
 for r in $REPOS; do
   jq -e --arg r "$r" 'index($r) != null' <<<"$EXCLUDES" >/dev/null && { echo "  $r: 跳过（exclude）"; continue; }
+  # allow_auto_merge 自期望状态派生（ADR-0029 单一真源）；其余四项保持原有硬编码基线
   code=$(api -o /dev/null -w '%{http_code}' -X PATCH "https://api.github.com/repos/$ORG/$r" \
-    -d '{"allow_squash_merge": true, "allow_merge_commit": false, "allow_rebase_merge": false, "delete_branch_on_merge": true}')
+    -d "$(jq -c '{allow_squash_merge: true, allow_merge_commit: false, allow_rebase_merge: false, delete_branch_on_merge: true, allow_auto_merge: (.repo_baseline.allow_auto_merge // true)}' "$EXPECTED")")
   expect_ok "repo '$r' 基线" "$code"
 done
 

@@ -36,8 +36,8 @@ domains:
       - id: BP-4
         intent: "仓库基线：squash-only、合并删分支、auto-merge 开、wiki/projects 关"
         strength: enforced
-        platform: {github: {mechanism: repo-settings, apply: apply.sh#step5}}
-        verify: {method: drift-check, frequency: daily}
+        platform: {github: {mechanism: repo-settings, apply: apply.sh#step5, state: "expected-state.json#repo_baseline"}}
+        verify: {method: "drift-check §4（repo settings 对账：squash/merge/rebase/delete-branch/allow_auto_merge，ADR-0029）", frequency: hourly}
       - id: BP-5
         intent: "成员不可建仓；成员默认权限 read"
         strength: enforced

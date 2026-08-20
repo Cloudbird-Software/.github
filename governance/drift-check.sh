@@ -79,8 +79,12 @@ else
   ok "code security '$want_cs'（default_for_new_repos 由 apply 保证，API 无读取端点）"
 fi
 
-# ---------- 4. 仓库基线（squash-only / 删分支）----------
+# ---------- 4. 仓库基线（squash-only / 删分支 / auto-merge，ADR-0029）----------
 EXCLUDES=$(jq -c '.repo_baseline.exclude_repos // []' "$EXPECTED")
+# auto-merge 期望值（ADR-0029）：repo setting 不受 ruleset 管，静默漂移 = 自动合并
+# 全链路静默失效。字段读不到（null——如凭据缺 administration 读权限的 fine-grained
+# PAT）与 false 同判漂移——fail-closed：检测器失明不得伪装成无漂移
+WANT_AUTO_MERGE=$(jq -r '.repo_baseline.allow_auto_merge // true' "$EXPECTED")
 # 全分页拉取 org 仓库（评审项：单页 100 时 >100 仓的 org 会漏检后续仓库）；
 # fail-closed：清单拉取失败/非数组/为空时 REPOS 为空会让后续全部循环静默跳过、
 # 检测整体假绿——此处显式中止，检测器失明不得伪装成无漂移
@@ -112,6 +116,7 @@ for r in $REPOS; do
   [[ "$(jq -r .allow_merge_commit <<<"$RR")" == "false" ]] || bad="$bad merge-commit-on"
   [[ "$(jq -r .allow_rebase_merge <<<"$RR")" == "false" ]] || bad="$bad rebase-on"
   [[ "$(jq -r .delete_branch_on_merge <<<"$RR")" == "true" ]] || bad="$bad keep-branch"
+  [[ "$(jq -r .allow_auto_merge <<<"$RR")" == "$WANT_AUTO_MERGE" ]] || bad="$bad auto-merge-off(got=$(jq -r .allow_auto_merge <<<"$RR"))"
   [[ -z "$bad" ]] && ok "repo baseline '$r'" || drift "repo '$r' 基线异常:$bad"
 done
 

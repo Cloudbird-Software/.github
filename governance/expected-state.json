@@ -26,6 +26,7 @@
   "repo_baseline": {
     "squash_only": true,
     "delete_branch_on_merge": true,
+    "allow_auto_merge": true,
     "exclude_repos": []
   },
   "org_secrets_required": [
@@ -69,10 +70,6 @@
     ],
     "agent-platform": [
       "fecdb13d607b584063cadd717d2a7706327fbfa0"
-    ],
-    "agent-registry": [
-      "60bd1557481fa89d0358302e150a8f7d9381309c",
-      "e9424d220ded331c221b37135faa9d6e9cd1ecac"
     ],
     "mutual": [
       "f5d9b5b58d4dc30a2b0e259449862fc4a3c91f6b"
