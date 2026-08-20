@@ -140,6 +140,20 @@ for r in $REPOS; do
   expect_ok "repo '$r' 基线" "$code"
 done
 
+echo "==> 6/6 merge queue（repo 级 ruleset；ADR-0042——REST 不支持 merge_queue 规则，写入走 GraphQL）"
+for r in $(jq -r '.merge_queue.repos // [] | .[]' "$EXPECTED"); do
+  SRC_ID=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Content-Type: application/json"         -d '{"query":"{repository(owner:\"Cloudbird-Software\", name:\"'"$r"'\" ){id}}"}' https://api.github.com/graphql | jq -r '.data.repository.id')
+  RID=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Content-Type: application/json"         -d '{"query":"query($r:String!){repository(owner:\"Cloudbird-Software\", name:$r){rulesets(first:50){nodes{name databaseId}}}}","variables":{"r":"'"$r"'"}}'         https://api.github.com/graphql | jq -r '.data.repository.rulesets.nodes[]? | select(.name == "merge-queue") | .databaseId')
+  if [[ -n "$RID" && "$RID" != "null" ]]; then
+    echo "  repo '$r' merge-queue ruleset 已存在（id=$RID；参数对账由 drift-check §14 执法）"
+    continue
+  fi
+  MUT='mutation($src: ID!) { createRepositoryRuleset(input: { sourceId: $src, name: "merge-queue", target: BRANCH, enforcement: ACTIVE, conditions: { refName: { include: ["~DEFAULT_BRANCH"], exclude: [] } }, rules: [ { type: PULL_REQUEST, parameters: { pullRequest: { requiredApprovingReviewCount: 0, dismissStaleReviewsOnPush: true, requireCodeOwnerReview: false, requireLastPushApproval: false, requiredReviewThreadResolution: false, allowedMergeMethods: [SQUASH] } } }, { type: REQUIRED_STATUS_CHECKS, parameters: { requiredStatusChecks: { requiredStatusChecks: [{ context: "gate", integrationId: null }], strictRequiredStatusChecksPolicy: false } } }, { type: MERGE_QUEUE, parameters: { mergeQueue: { mergeMethod: SQUASH, checkResponseTimeoutMinutes: 60, maxEntriesToBuild: 5, minEntriesToMerge: 1, maxEntriesToMerge: 1, minEntriesToMergeWaitMinutes: 0, groupingStrategy: ALLGREEN } } } ] }) { ruleset { databaseId } } }'
+  RESP=$(jq -n --arg q "$MUT" --arg src "$SRC_ID" '{query:$q, variables:{src:$src}}')
+  OUT=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Content-Type: application/json" -d "$RESP" https://api.github.com/graphql)
+  echo "$OUT" | jq -e '.data.createRepositoryRuleset.ruleset.databaseId' >/dev/null 2>&1     && echo "  repo '$r' merge-queue: created"     || { echo "  repo '$r' merge-queue: FAIL $(echo "$OUT" | jq -r '.errors[0].message // "未知"')" >&2; FAILS=$((FAILS+1)); }
+done
+
 echo "----------------------------------------"
 if [[ $FAILS -gt 0 ]]; then
   echo "结果: $FAILS 项 FAIL（见上方 stderr）。部分应用——修复后重跑本脚本（幂等）。验证: bash $DIR/drift-check.sh" >&2
