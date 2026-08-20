@@ -442,29 +442,32 @@ fi
 # ---------- 12. required check 活体存在性（P1-4，ADR-0034；in-flight 防误报修订）----------
 # 文本对账 ≠ 生效验证：ruleset JSON 完全正确的同时，required check 字符串精确
 # 匹配可能实际为空（job 改名 / workflow 重构）→ "零 required check" → PR 裸奔。
-# 每个受管仓的候选 head（最近更新的至多 3 个已合并/打开 PR + 默认分支 HEAD）上，
-# 必须存在每个 required check 名（从 rulesets/*.json 派生——单一真源）的 check run
-# 且 conclusion 非空。修订（2026-08-20 实测误报 mutual：三连新开 PR 的 CI 起飞
-# 窗口内 gate 尚未报 conclusion，被误判缺失）：
-#   - CI 未完结（任一 check run 状态非 completed）的 head 不构成任何证据——
-#     既不算"缺 gate"，也不算"有 gate"（防起飞窗口误报）；
-#   - 默认分支 HEAD 纳入候选（stacked/连开 PR 场景下 PR head 可能同时 in-flight）；
-#   - 关闭未合并的 PR head 不采样（废弃实验分支的残缺 CI 不构成活体证据）；
-#   - 全部候选 in-flight 时显式 SKIP（非漂移非通过，下轮复核），查询失败仍 fail-closed。
+# 判据：每个受管仓最近更新的至多 3 个已合并/打开 PR 的 head 上，必须存在每个
+# required check 名（从 rulesets/*.json 派生——单一真源）的 check run 且
+# conclusion 非空；无 PR 活动时退化为默认分支 HEAD。修订（2026-08-20 实测误报
+# mutual：三连新开 PR 的 CI 起飞窗口内 gate 尚未报 conclusion，被误判缺失）：
+#   - CI 未完结（任一 check run 非 completed）的 head 不构成任何证据——既不算
+#     "缺 gate"也不算"有 gate"（防起飞窗口误报）；全部候选 in-flight 时显式
+#     SKIP（非漂移，下轮复核）
+#   - 关闭未合并的 PR 不采样（废弃实验分支的残缺 CI 不构成证据）
+#   - 已完结 CI 的 PR head 缺 gate 仍照报（PR 群体缺 required check = CI 结构性
+#     异常或改名注入——T1 的检测对象；main HEAD 仅在无 PR 活动时作退化载体，
+#     不作为豁免来源）。查询失败维持 fail-closed。
 REQ_CHECKS=$(jq -rs '[.[].rules[]? | select(.type == "required_status_checks")
                       | .parameters.required_status_checks[].context] | unique | .[]' "$DIR"/rulesets/*.json)
 [[ -n "$REQ_CHECKS" ]] || { echo "FATAL: rulesets 未声明任何 required check——§12 活体验证失去判据"; exit 2; }
 epoch_of() { date -u -d "$1" +%s; }   # ISO8601 → epoch（runner GNU date）
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
-  # 候选 head：最近更新的至多 3 个已合并/打开 PR head sha + 默认分支 HEAD
   PRS_RECENT=$(api "https://api.github.com/repos/$ORG/$r/pulls?state=all&sort=updated&direction=desc&per_page=20")
   if jq -e 'type == "array"' <<<"$PRS_RECENT" >/dev/null 2>&1; then
     HEADS=$(jq -r '[.[] | select(.state == "open" or .merged_at != null) | .head.sha][0:3] | .[]' <<<"$PRS_RECENT")
-    DBR=$(api "https://api.github.com/repos/$ORG/$r" | jq -r '.default_branch // "main"')
-    MSHA=$(api "https://api.github.com/repos/$ORG/$r/git/ref/heads/$DBR" | jq -r '.object.sha // empty')
-    [[ -n "$MSHA" ]] && HEADS="$HEADS"$'
-'"$MSHA"
+    if [[ -z "$HEADS" ]]; then
+      # 无（已合并/打开的）PR 活动 → 退化为默认分支 HEAD
+      DBR=$(api "https://api.github.com/repos/$ORG/$r" | jq -r '.default_branch // "main"')
+      HEADS=$(api "https://api.github.com/repos/$ORG/$r/git/ref/heads/$DBR" | jq -r '.object.sha // empty')
+      [[ -n "$HEADS" ]] || { drift "repo '$r' 无 PR 活动且默认分支 HEAD 不可读，活体验证无载体（fail-closed）"; continue; }
+    fi
   else
     drift "repo '$r' PR 清单拉取失败，required check 活体验证无法执行（fail-closed）"
     continue
@@ -489,13 +492,13 @@ for r in $REPOS; do
       fi
     done <<<"$HEADS"
     if [[ $FOUND -ne 1 ]]; then
-      if [[ $QUERY_FAIL -eq 1 ]]; then
+      if [[ $QUERY_FAIL -eq 1 && $ALL_INFLIGHT -eq 1 ]]; then
         drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
         LIVE_MISS=1
       elif [[ $ALL_INFLIGHT -eq 1 ]]; then
-        echo "SKIP  required-check-live '$r'（候选 head（近 3 PR + main HEAD）全部 CI in-flight，本轮无法判定——非漂移，下轮复核）"
+        echo "SKIP  required-check-live '$r'（候选 head 全部 CI in-flight，本轮无法判定——非漂移，下轮复核）"
       else
-        drift "repo '$r' required check '$ctx' 活体缺失：已完结 CI 的候选 head（近 3 PR + main HEAD）均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12）"
+        drift "repo '$r' required check '$ctx' 活体缺失：已完结 CI 的候选 head 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12）"
         LIVE_MISS=1
       fi
     fi
