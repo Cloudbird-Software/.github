@@ -1,0 +1,61 @@
+version: 1
+# ============================================================================
+# 契约兼容性检测政策（P2-4，.github#89，ADR-0038）—— 机器可判定的 SoT。
+# 消费方: CI-Workflows scripts/contract/contract_check.py（contract-check job）。
+# 读法:
+#   defaults.breaking_requires_adr —— breaking 契约变更须 PR 引用真实存在的
+#       ADR-NNNN（agent-registry/decisions/，防幽灵 ADR）才放行，否则红。
+#   defaults.openapi_fail_on —— oasdiff --fail-on 档位（ERR=社区默认；
+#       WARN=从严：删可选响应属性也拦——customer_upgrade_failure 姿态）。
+#   repos.<name>.contracts[]     —— kind ∈ openapi|jsonschema（proto 未实装，
+#       声明即报错：组织无 proto，首个 proto 仓落地时修订 ADR-0038 实装 buf breaking）
+#   repos.<name>.migrations      —— tool ∈ alembic|sql + dir。
+#       destructive DDL 模式清单与逆操作映射落盘引擎
+#       （CI-Workflows scripts/contract/contract_check.py，T7 fixture 回归锁定）。
+#   失明防护（T6）: 声明路径在 HEAD 必须命中 ≥1 文件、迁移目录必须非空，
+#       否则红——契约文件被移走后检测器不得静默失明。
+#   N/A 显式: 未声明契约面的仓，contract-check 真跑并显式输出 N/A（非 skipped）。
+# 盘点基线（2026-08-20，#89 执行步骤 1）: 全组织无 OpenAPI/proto 文件；
+#   契约面 = JSON Schema ×3 仓 + alembic ×1 仓。
+# ============================================================================
+defaults:
+  breaking_requires_adr: true
+  openapi_fail_on: WARN
+
+repos:
+  template-service:
+    # 盘点：无契约文件、无迁移——N/A 显式路径的模板载体（新服务仓复制此接线后
+    # 声明自己的契约面即可纳入检测）
+    contracts: []
+    migrations: null
+
+  AI_Web_School:
+    contracts:
+      - {kind: jsonschema, path: "specs/contracts/**"}
+    migrations:
+      tool: alembic
+      dir: alembic/versions
+    # 与 contract.yml（contract-watch，P5 冻结契约变更检测）职责互补：
+    # P5 = 冻结文件任何变更须走契约变更申请；本门 = 全部契约的 breaking 判定 +
+    # 迁移 destructive DDL 判定（ADR-0038）
+
+  Shorts_Director:
+    contracts:
+      - {kind: jsonschema, path: "schema/contracts/**"}
+      - {kind: jsonschema, path: "schema/entities/**"}
+      - {kind: jsonschema, path: "schema/common/**"}
+    migrations: null
+
+  agent-registry:
+    # L1 声明层契约。接线延后：validate.yml 为单 job 架构（gate job 内联全部检查，
+    # 无 needs 聚合层），接入需先做 aggregator 拆分重构——独立小卡（.github#89 留言，
+    # ADR-0038 决策 9）。声明先行：contract-check 一旦在该仓运行即生效。
+    contracts:
+      - {kind: jsonschema, path: "registry/schemas/**"}
+    migrations: null
+
+  # 盘点备注（不声明、不接线）：
+  #   agent-registry 之外的注册表消费方 agent-platform —— 仅 vendor/ 拷贝，
+  #     源头真身在 agent-registry（vendor 漂移属另一关注面，不在本卡范围）
+  #   mutual —— spec/01-schemas.md 为散文 schema，不可机判；落地 JSON Schema 后再声明
+  #   Script_Writer / agent-tools / Use-up-Plan / .github / CI-Workflows —— 无契约面
