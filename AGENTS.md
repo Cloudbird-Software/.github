@@ -31,5 +31,5 @@ AI agent 进入本仓的工作契约（索引型，CG-1；细节按需读引用�
 | 测试政策 | governance/policy/testing.yaml |
 | 无人值守护栏阈值（auto-fix 上限/成本熔断，ADR-0040） | governance/policy/automation-limits.yaml |
 | agent 标准 schema | standards/agent/*.schema.yaml |
-| 自动化规范（CI 链路 / bot 反馈通道，ADR-0031/0032） | standards/automation/ |
+| 自动化规范（CI 链路 / bot 反馈通道 / App 权限与工作流变更通道，ADR-0031/0032/0045） | standards/automation/ |
 | 原型 profiles / 注册条目 | Cloudbird-Software/agent-registry |
