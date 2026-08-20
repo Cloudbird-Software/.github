@@ -439,78 +439,68 @@ else
   [[ $REQ_MISSING -eq 0 ]] && ok "CI-Workflows 必需大版本指针存在（$CW_REQUIRED_POINTERS）"
 fi
 
-# ---------- 12. required check 活体存在性（P1-4，ADR-0034）----------
+# ---------- 12. required check 活体存在性（P1-4，ADR-0034；in-flight 防误报修订）----------
 # 文本对账 ≠ 生效验证：ruleset JSON 完全正确的同时，required check 字符串精确
 # 匹配可能实际为空（job 改名 / workflow 重构）→ "零 required check" → PR 裸奔。
-# 每个受管仓最近活动的 PR head（无 PR 活动时退化为默认分支 HEAD）上，必须存在
-# 每个 required check 名（从 rulesets/*.json 派生——单一真源）的 check run 且
-# conclusion 非空。fail-closed：check-runs 查询失败即判漂移，不用部分结果。
+# 每个受管仓的候选 head（最近更新的至多 3 个已合并/打开 PR + 默认分支 HEAD）上，
+# 必须存在每个 required check 名（从 rulesets/*.json 派生——单一真源）的 check run
+# 且 conclusion 非空。修订（2026-08-20 实测误报 mutual：三连新开 PR 的 CI 起飞
+# 窗口内 gate 尚未报 conclusion，被误判缺失）：
+#   - CI 未完结（任一 check run 状态非 completed）的 head 不构成任何证据——
+#     既不算"缺 gate"，也不算"有 gate"（防起飞窗口误报）；
+#   - 默认分支 HEAD 纳入候选（stacked/连开 PR 场景下 PR head 可能同时 in-flight）；
+#   - 关闭未合并的 PR head 不采样（废弃实验分支的残缺 CI 不构成活体证据）；
+#   - 全部候选 in-flight 时显式 SKIP（非漂移非通过，下轮复核），查询失败仍 fail-closed。
 REQ_CHECKS=$(jq -rs '[.[].rules[]? | select(.type == "required_status_checks")
                       | .parameters.required_status_checks[].context] | unique | .[]' "$DIR"/rulesets/*.json)
 [[ -n "$REQ_CHECKS" ]] || { echo "FATAL: rulesets 未声明任何 required check——§12 活体验证失去判据"; exit 2; }
 epoch_of() { date -u -d "$1" +%s; }   # ISO8601 → epoch（runner GNU date）
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
-  LIVE_MISS=0; QUERY_FAIL=0
-  # 第一判据（强）：open PR 是活体漏洞本体——head 上已产生其他 check run（工作流
-  # 已在跑）但缺任一 required check 名 = 改名/重构实锤，裸奔窗口开启，立即报。
-  # 零 check run 的启动延迟窗口不在此报（§13(c) 以 liveness 阈值兜底），防误报。
-  OPEN_PRS12=$(api "https://api.github.com/repos/$ORG/$r/pulls?state=open&per_page=30")
-  if jq -e 'type == "array"' <<<"$OPEN_PRS12" >/dev/null 2>&1; then
-    while IFS=$'\t' read -r pnum osha; do
-      [[ -n "$pnum" ]] || continue
-      CRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$osha/check-runs?per_page=100")
+  # 候选 head：最近更新的至多 3 个已合并/打开 PR head sha + 默认分支 HEAD
+  PRS_RECENT=$(api "https://api.github.com/repos/$ORG/$r/pulls?state=all&sort=updated&direction=desc&per_page=20")
+  if jq -e 'type == "array"' <<<"$PRS_RECENT" >/dev/null 2>&1; then
+    HEADS=$(jq -r '[.[] | select(.state == "open" or .merged_at != null) | .head.sha][0:3] | .[]' <<<"$PRS_RECENT")
+    DBR=$(api "https://api.github.com/repos/$ORG/$r" | jq -r '.default_branch // "main"')
+    MSHA=$(api "https://api.github.com/repos/$ORG/$r/git/ref/heads/$DBR" | jq -r '.object.sha // empty')
+    [[ -n "$MSHA" ]] && HEADS="$HEADS"$'
+'"$MSHA"
+  else
+    drift "repo '$r' PR 清单拉取失败，required check 活体验证无法执行（fail-closed）"
+    continue
+  fi
+  LIVE_MISS=0; QUERY_FAIL=0; ALL_INFLIGHT=1
+  for ctx in $REQ_CHECKS; do
+    FOUND=0
+    while IFS= read -r sha; do
+      [[ -n "$sha" ]] || continue
+      CRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$sha/check-runs?per_page=100")
       if ! jq -e 'type == "object" and has("check_runs")' <<<"$CRS" >/dev/null 2>&1; then
-        drift "repo '$r' PR#$pnum check-runs 查询失败，required check 活体无法验证（fail-closed）"
         QUERY_FAIL=1; continue
       fi
-      N_ANY=$(jq '.check_runs | length' <<<"$CRS")
-      [[ "$N_ANY" -gt 0 ]] || continue   # 启动延迟窗口，交 §13(c)
-      for ctx in $REQ_CHECKS; do
-        jq -e --arg c "$ctx" '[.check_runs[] | select(.name == $c)] | length > 0' <<<"$CRS" >/dev/null 2>&1 \
-          || { drift "repo '$r' PR#$pnum required check '$ctx' 活体缺失：open PR 的工作流已产出其他 check run 但无 '$ctx'——job 改名/workflow 重构，裸奔窗口开启（ADR-0034 §12）"; LIVE_MISS=1; }
-      done
-    done < <(jq -r '.[] | [(.number|tostring), .head.sha] | @tsv' <<<"$OPEN_PRS12")
-  else
-    drift "repo '$r' open PR 清单拉取失败，required check 活体验证无法执行（fail-closed）"
-    QUERY_FAIL=1
-  fi
-  # 第二判据（退化）：无 open PR 时——最近活动的至多 3 个 PR head（再退化为默认
-  # 分支 HEAD）上必须存在每个 required check 名且 conclusion 非空（改名合入 main
-  # 后连续 PR 均缺失的兜底检出）。
-  if [[ $(jq 'length' <<<"$OPEN_PRS12") -eq 0 && $QUERY_FAIL -eq 0 ]]; then
-    PRS_RECENT=$(api "https://api.github.com/repos/$ORG/$r/pulls?state=all&sort=updated&direction=desc&per_page=20")
-    if jq -e 'type == "array"' <<<"$PRS_RECENT" >/dev/null 2>&1; then
-      HEADS=$(jq -r '[.[] | .head.sha][0:3][]' <<<"$PRS_RECENT")
-      [[ -n "$HEADS" ]] || HEADS=$(api "https://api.github.com/repos/$ORG/$r/git/ref/heads/main" | jq -r '.object.sha // empty')
-    else
-      drift "repo '$r' PR 清单拉取失败，required check 活体验证无法执行（fail-closed）"
-      QUERY_FAIL=1
+      TOTAL=$(jq -r '.total_count // 0' <<<"$CRS")
+      [[ "$TOTAL" -eq 0 ]] && continue
+      # CI 未完结的 head：不构成证据（防起飞窗口误报——gate job 在依赖图末端，
+      # 新开 PR 的前几分钟 conclusion 必为 null，此时判"缺失"全是误报）
+      jq -e '[.check_runs[] | select(.status != "completed")] | length > 0' <<<"$CRS" >/dev/null 2>&1 && continue
+      ALL_INFLIGHT=0
+      if jq -e --arg c "$ctx" '[.check_runs[] | select(.name == $c and .conclusion != null)] | length > 0' <<<"$CRS" >/dev/null 2>&1; then
+        FOUND=1; break
+      fi
+    done <<<"$HEADS"
+    if [[ $FOUND -ne 1 ]]; then
+      if [[ $QUERY_FAIL -eq 1 ]]; then
+        drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
+        LIVE_MISS=1
+      elif [[ $ALL_INFLIGHT -eq 1 ]]; then
+        echo "SKIP  required-check-live '$r'（候选 head（近 3 PR + main HEAD）全部 CI in-flight，本轮无法判定——非漂移，下轮复核）"
+      else
+        drift "repo '$r' required check '$ctx' 活体缺失：已完结 CI 的候选 head（近 3 PR + main HEAD）均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12）"
+        LIVE_MISS=1
+      fi
     fi
-    if [[ -n "${HEADS:-}" && $QUERY_FAIL -eq 0 ]]; then
-      for ctx in $REQ_CHECKS; do
-        FOUND=0
-        while IFS= read -r sha; do
-          [[ -n "$sha" ]] || continue
-          CRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$sha/check-runs?per_page=100")
-          if ! jq -e 'type == "object" and has("check_runs")' <<<"$CRS" >/dev/null 2>&1; then
-            QUERY_FAIL=1; continue
-          fi
-          if jq -e --arg c "$ctx" '[.check_runs[] | select(.name == $c and .conclusion != null)] | length > 0' <<<"$CRS" >/dev/null 2>&1; then
-            FOUND=1; break
-          fi
-        done <<<"$HEADS"
-        if [[ $QUERY_FAIL -eq 1 && $FOUND -eq 0 ]]; then
-          drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
-        elif [[ $FOUND -ne 1 ]]; then
-          drift "repo '$r' required check '$ctx' 活体缺失：ruleset 文本正确但最近 PR head / main HEAD 均无该 check run——job 改名或 workflow 重构？（ADR-0034 §12 退化判据）"
-          LIVE_MISS=1
-        fi
-      done
-    fi
-  fi
-  [[ $LIVE_MISS -eq 0 && $QUERY_FAIL -eq 0 ]] && ok "required-check-live '$r'（open PR 无裸奔；${REQ_CHECKS//$'\n'/ } 活体齐备）"
-  unset HEADS
+  done
+  [[ $LIVE_MISS -eq 0 && $ALL_INFLIGHT -eq 0 ]] && ok "required-check-live '$r'（required check 在已完结候选 head 上齐备）"
 done
 
 # ---------- 13. PR liveness 侦测（P1-4，ADR-0034）----------
