@@ -13,8 +13,9 @@ active_now:
   - {id: T-05, name: doc_examples, tool: "go Example functions", placement: gate, applies: go}
   - {id: T-06, name: license_scan, tool: license-checker, placement: gate}
   - {id: T-07, name: sbom, tool: syft, placement: release}
-  - {id: T-08, name: flaky_governance, tool: none,
-     rule: "重跑一次过≠通过；同测试两次飘→隔离+issue，修复后回归"}
+  - {id: T-08, name: flaky_governance, tool: "CI-Workflows flaky-retry.sh + .github flaky-sweep",
+     rule: "重试≤retry_max 且入账；失败→通过转移记 flaky 事件；窗口内≥阈值入隔离候选；
+     隔离带过期自动回炉（ADR-0043 参数真源=本文件 flaky_governance 段）"}
   - {id: T-09, name: differential, tool: "golden fixtures + 双实现回放",
      placement: gate, note: "重写项目 = gate 必选项"}
   - {id: T-10, name: mutation, tools: "stryker | go-mutesting", placement: weekly,
@@ -113,3 +114,15 @@ test_integrity:
     suppression: '(^|[^A-Za-z_])([Ss]kip|[Xx][Ff][Aa][Ii][Ll])[[:space:]]*\(|\.skip\b|\.only\b|t\.Skip|mark\.skip|mark\.xfail|@Ignore|@Disabled|\[ignore|\.todo\(|unittest\.skip'
     non_source: '^(\.github/|docs/|governance/)|(^|/)([^/]*\.md)$|(^|/)(LICENSE|CODEOWNERS|NOTICE|\.gitignore|\.gitattributes)$'
   fail_closed: true
+
+# ---- flaky_governance 参数（ADR-0043 / .github #94，P2-9）----------------
+# 机器可执行真源：CI-Workflows scripts/flaky-retry.sh 拉取本节（fail-closed）。
+# 语义约束：重试必须入账（无声重试=作弊）；仅"失败→重试通过"转移记 flaky 事件
+# （确定性失败重试全败仍红、不产生记录——真回归不误放）；隔离（tests/quarantine.yaml）
+# 条目含 test/owner/expires/adr，过期自动回炉（governance/flaky-sweep.sh 每日
+# 检测 + 升级 issue）；清单变更走 ADR（adr-required 路径覆盖）。
+flaky_governance:
+  retry_max: 2                 # 自动重试上限（总运行 ≤3）
+  flaky_window_days: 30        # flaky 事件统计窗口
+  flaky_threshold: 3           # 窗口内事件 ≥ 此值 → 隔离候选（自动开 issue 人确认）
+  quarantine_max_days: 30      # 隔离条目最长有效期（到期回炉）
