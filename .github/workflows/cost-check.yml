@@ -1,0 +1,58 @@
+name: cost-check
+# 额度/成本熔断（ADR-0040，P2-8 .github#93）：
+# 6h 周期拉取 /orgs/{org}/settings/billing/usage 当月 Actions 分钟 vs
+# policy/automation-limits.yaml 声明预算——≥80% 告警 issue；≥100% 置 org 变量
+# AUTO_MERGE_DISABLED + 撤全部 open PR auto-merge + P0 issue。复位仅人工（变量 PATCH/DELETE
+# + P0 留评论），脚本观察到复位后自动关 P0。脚本细节/注入通道见 governance/cost-check.sh 头注。
+on:
+  schedule:
+    - cron: "42 */6 * * *" # 每 6h :42（避开整点 governance-drift 与 :18 auto-fix-limit）
+  workflow_dispatch:
+    # 注入入口（T2 注入式测试：79%/85%/100% 全场景不依赖真实超支）：空=真实 API/真源
+    inputs:
+      usage_minutes_override:
+        description: "当月 Actions 分钟用量覆盖（数值；空=billing API 真实值）"
+        required: false
+        default: ""
+      quota_minutes_override:
+        description: "月预算分钟覆盖（空=policy 值）"
+        required: false
+        default: ""
+      llm_tokens_used_override:
+        description: "LLM token 用量覆盖（pending 数据源的注入测试通道）"
+        required: false
+        default: ""
+      llm_tokens_quota_override:
+        description: "LLM token 月预算覆盖（空=policy 值）"
+        required: false
+        default: ""
+      dry_run:
+        description: "1=只报告不执行写操作（含不置熔断变量——注入预检用）"
+        required: false
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: cost-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 用量检查与熔断（exit 1=触发告警/熔断 2=基础设施故障）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          COST_USAGE_MINUTES_OVERRIDE: ${{ inputs.usage_minutes_override }}
+          COST_QUOTA_MINUTES_OVERRIDE: ${{ inputs.quota_minutes_override }}
+          COST_LLM_TOKENS_USED_OVERRIDE: ${{ inputs.llm_tokens_used_override }}
+          COST_LLM_TOKENS_QUOTA_OVERRIDE: ${{ inputs.llm_tokens_quota_override }}
+          COST_DRY_RUN: ${{ inputs.dry_run }}
+        run: bash governance/cost-check.sh
