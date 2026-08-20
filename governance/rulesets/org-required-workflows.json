@@ -1,0 +1,33 @@
+{
+  "name": "org-required-workflows",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    },
+    "repository_name": {
+      "include": [
+        "~ALL"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "workflows",
+      "parameters": {
+        "workflows": [
+          {
+            "path": ".github/workflows/org-gate.yml",
+            "ref": "refs/tags/v1.4.0",
+            "repository_id": 1337911551
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -95,5 +95,14 @@
       "min_entries_to_merge_wait_minutes": 0,
       "grouping_strategy": "ALLGREEN"
     }
+  },
+  "org_required_workflows": {
+    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本（path/ref/repository_id 任何改动即漂移）；§15 校验 tag 钉点的 commit 绑定（tag 指针被移而 ruleset 文本不变的情形）。",
+    "ruleset": "org-required-workflows",
+    "repository": "CI-Workflows",
+    "repository_id": 1337911551,
+    "path": ".github/workflows/org-gate.yml",
+    "ref": "refs/tags/v1.4.0",
+    "ref_commit": "8c2ddc8c0b4a8ffd21659c37e8a934fa540beb83"
   }
 }

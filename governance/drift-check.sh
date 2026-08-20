@@ -577,6 +577,48 @@ for r in $REPOS; do
 done
 [[ $STUCK_TOTAL -eq 0 ]] && ok "pr-liveness（全部受管仓 open PR 无卡死，阈值 ${LIVENESS_H}h）"
 
+# ---------- 15. org-required-workflows 钉点完整性（P3-1 #95 / ADR-0046）----------
+# §1 已对账 ruleset JSON 文本（path/ref/repository_id 任何改动即漂移）。本节补盲区：
+# ref 为 tag 时，tag 指针被移动（ruleset 文本不变、内容换了）——钉点的 commit 绑定
+# 必须与 expected-state.org_required_workflows.ref_commit 一致；钉点 tag 还必须是
+# CI-Workflows 当前发布不变式（§11：vN==最高 vN.x.y）认可的物。fail-closed。
+ORW_CFG=$(jq -c '.org_required_workflows // empty' "$EXPECTED")
+if [[ -n "$ORW_CFG" ]]; then
+  WANT_RULESET=$(jq -r '.ruleset' <<<"$ORW_CFG")
+  WANT_REPO_ID=$(jq -r '.repository_id' <<<"$ORW_CFG")
+  WANT_PATH=$(jq -r '.path' <<<"$ORW_CFG")
+  WANT_REF=$(jq -r '.ref' <<<"$ORW_CFG")
+  WANT_COMMIT=$(jq -r '.ref_commit' <<<"$ORW_CFG")
+  ORW_LIST=$(api "https://api.github.com/orgs/$ORG/rulesets?per_page=100")
+  ORW_ROW=$(jq -c --arg n "$WANT_RULESET" '.[] | select(.name == $n)' <<<"$ORW_LIST" 2>/dev/null)
+  if [[ -z "$ORW_ROW" || "$ORW_ROW" == "null" ]]; then
+    drift "org-required-workflows ruleset '$WANT_RULESET' 线上不存在——中心审判失效，全部受管仓回落本地 gate（P3-1 枢轴脱离，ADR-0046）"
+  else
+    GOT_WF=$(jq -c '.rules[] | select(.type == "workflows") | .parameters.workflows[0] // empty' <<<"$ORW_ROW")
+    GOT_PATH=$(jq -r '.path // empty' <<<"$GOT_WF")
+    GOT_REF=$(jq -r '.ref // empty' <<<"$GOT_WF")
+    GOT_REPO_ID=$(jq -r '.repository_id // empty' <<<"$GOT_WF")
+    BAD=""
+    [[ "$GOT_PATH" == "$WANT_PATH" ]] || BAD="$BAD path=$GOT_PATH"
+    [[ "$GOT_REF" == "$WANT_REF" ]] || BAD="$BAD ref=$GOT_REF"
+    [[ "$GOT_REPO_ID" == "$WANT_REPO_ID" ]] || BAD="$BAD repository_id=$GOT_REPO_ID"
+    if [[ -n "$BAD" ]]; then
+      drift "org-required-workflows 钉点漂移:$BAD（期望 path=$WANT_PATH ref=$WANT_REF repo_id=$WANT_REPO_ID）——审判源被改指（ADR-0046 §15）"
+    fi
+    # tag 解引用 → commit 绑定（tag 移动而 ruleset 文本不变的情形）
+    SHORTREF="${WANT_REF#refs/tags/}"
+    TAGROW=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/ref/tags/$SHORTREF")
+    TAGCOMMIT=$(jq -r '.object.sha // empty' <<<"$TAGROW")
+    if [[ -z "$TAGCOMMIT" ]]; then
+      drift "org-required-workflows 钉点 tag $WANT_REF 解引用失败（fail-closed，ADR-0046 §15）"
+    elif [[ "$TAGCOMMIT" != "$WANT_COMMIT" ]]; then
+      drift "org-required-workflows 钉点 tag $WANT_REF 已移动：${TAGCOMMIT:0:8} ≠ 声明 ${WANT_COMMIT:0:8}——审判内容被换（ADR-0046 §15；还原或走发布流程+expected-state 更新）"
+    else
+      ok "org-required-workflows 钉点完整（$WANT_REF == ${TAGCOMMIT:0:8}，path/repository_id 一致）"
+    fi
+  fi
+fi
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"
