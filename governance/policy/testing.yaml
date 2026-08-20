@@ -21,6 +21,29 @@ active_now:
      threshold: "score<60% 的模块 = fake_tests 风险", trend: "趋势比绝对值重要"}
   - {id: T-11, name: governance_canary, rule: "App 令牌直推 main 必须被拒；被接受=报警",
      placement: weekly, risk: "守门人自身失效", note: "唯一自指的测试"}
+  - {id: T-12, name: diff_coverage, tool: "CI-Workflows scripts/diff-coverage.py + diff-coverage.yml",
+     placement: gate, threshold: "本次变更行覆盖 ≥80%（diff 口径，等值绿；X-01 拒的是全局口径）",
+     policy: "本文件 diff_coverage 段（ADR-0037）", risk: fake_tests}
+
+# diff coverage 门槛参数（ADR-0037，P2-3 .github#88）——T-12 的机器可判定真源。
+# 口径：本次 PR 变更行（unified diff 新增行含修改行，删除行不计）的覆盖率，非全局
+# 覆盖率（全局口径仍按下方 X-01 拒绝——分母可被大 PR 稀释）。执法：CI-Workflows
+# .github/workflows/diff-coverage.yml（caller gate needs 链接入，仅 PR 事件）。
+# 边界语义（#88 T4）: covered/changed ≥ threshold_pct 绿（等值绿）；< 即红（79.9 红）。
+# 本段属 C1 路径——豁免清单/阈值变更必须走 ADR（gate.yml adr-required 拦截），
+# 业务仓 PR 不得自行扩大豁免或放宽阈值。
+diff_coverage:
+  threshold_pct: 80
+  repo_overrides: {}          # 按仓覆盖登记处——caller input 显式阈值须与登记一致，否则红
+  exempt_extensions: [.md, .txt, .rst, .json, .yaml, .yml, .toml, .ini, .cfg, .conf,
+                       .lock, .sql, .html, .css, .svg, .png, .jpg, .jpeg, .ico, .csv,
+                       .baml, .mod, .sum, .tmpl, .j2, .env, .editorconfig]
+  exempt_filenames: [LICENSE, CODEOWNERS, Makefile, Dockerfile, .gitignore, .dockerignore,
+                      .gitattributes, .env.example, conftest.py]
+  exempt_paths: [vendor/, node_modules/, dist/, build/, coverage/, reports/, .github/,
+                 docs/, golden/, baml_client/, migrations/, alembic/, workspace/,
+                 tests/, "*_test.go", "*_test.py", "*.test.ts", "*.test.tsx",
+                 "*.spec.ts", "*.spec.tsx", "*.pb.go"]
 
 on_rewrite_project:  # Go 重写落地时激活
   - {id: R-01, name: upgrade_path, rule: "旧版本→新版本真机升级+smoke", placement: pre_release}
@@ -50,7 +73,9 @@ triggered:  # 触发式；防止"听起来好就上"
   - {id: G-08, name: error_path_coverage, trigger: first_public_api, placement: gate}
 
 rejected:  # 翻案需新证据；引用 revisit_when
-  - {id: X-01, name: coverage_threshold_gate, reason: "数字可游戏", alternative: T-10_mutation, revisit_when: "mutation 不可用的语言"}
+  - {id: X-01, name: coverage_threshold_gate, reason: "数字可游戏（全局口径：分母可稀释、塞无关测试可拉高）",
+     alternative: T-10_mutation, revisit_when: "mutation 不可用的语言",
+     note: "ADR-0037 边界：拒绝的是全局覆盖率门槛；diff 口径（T-12，分母=本次变更行）不受该攻击面影响，另立"}
   - {id: X-02, name: canary_release, reason: "客户本地部署无在线流量", alternative: R-05_smoke, revisit_when: hosted_service}
   - {id: X-03, name: chaos_engineering, reason: "无 k8s 舰队", alternative: "失败模式写单测(磁盘满/断网/超时)", revisit_when: multi_node_prod}
   - {id: X-04, name: formal_tla, reason: "无调度器/共识组件", revisit_when: "写分布式协调组件"}
