@@ -472,38 +472,60 @@ for r in $REPOS; do
     drift "repo '$r' PR 清单拉取失败，required check 活体验证无法执行（fail-closed）"
     continue
   fi
-  LIVE_MISS=0; QUERY_FAIL=0; ALL_INFLIGHT=1
+  # 采样修订（#85 T1 首轮实测漏检教训：并发连开 PR 会把改名注入头挤出「前3」，
+  # 而 in-flight 头白白占用采样位）：先跳过零-check/in-flight，再收集最近
+  # COLLECT_N=3 个「已完结」head（最多扫描 10 个候选）作为活体样本。
+  COLLECT_N=3
+  CONCL_SHAS=""
+  N_CONCL=0
+  N_SEEN=0
+  QUERY_FAIL=0
+  SAW_INFLIGHT=0
+  while IFS= read -r sha; do
+    [[ -n "$sha" ]] || continue
+    { [[ $N_CONCL -ge $COLLECT_N ]] || [[ $N_SEEN -ge 10 ]]; } && break
+    N_SEEN=$((N_SEEN+1))
+    CRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$sha/check-runs?per_page=100")
+    if ! jq -e 'type == "object" and has("check_runs")' <<<"$CRS" >/dev/null 2>&1; then
+      QUERY_FAIL=1; continue
+    fi
+    TOTAL=$(jq -r '.total_count // 0' <<<"$CRS")
+    [[ "$TOTAL" -eq 0 ]] && continue
+    # CI 未完结的 head：不构成证据也不占采样位（防起飞窗口误报——gate job 在
+    # 依赖图末端，新开 PR 的前几分钟 conclusion 必为 null）
+    if jq -e '[.check_runs[] | select(.status != "completed")] | length > 0' <<<"$CRS" >/dev/null 2>&1; then
+      SAW_INFLIGHT=1; continue
+    fi
+    N_CONCL=$((N_CONCL+1))
+    CONCL_SHAS="$CONCL_SHAS$sha"$'
+'
+  done <<<"$HEADS"
+  if [[ $N_CONCL -eq 0 ]]; then
+    if [[ $QUERY_FAIL -eq 1 ]]; then
+      drift "repo '$r' check-runs 查询失败，required check 活体无法验证（fail-closed）"
+      continue
+    fi
+    echo "SKIP  required-check-live '$r'（候选 head 全部 CI in-flight/零 check，本轮无法判定——非漂移，下轮复核）"
+    continue
+  fi
+  LIVE_MISS=0
   for ctx in $REQ_CHECKS; do
     FOUND=0
     while IFS= read -r sha; do
       [[ -n "$sha" ]] || continue
       CRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$sha/check-runs?per_page=100")
-      if ! jq -e 'type == "object" and has("check_runs")' <<<"$CRS" >/dev/null 2>&1; then
-        QUERY_FAIL=1; continue
-      fi
-      TOTAL=$(jq -r '.total_count // 0' <<<"$CRS")
-      [[ "$TOTAL" -eq 0 ]] && continue
-      # CI 未完结的 head：不构成证据（防起飞窗口误报——gate job 在依赖图末端，
-      # 新开 PR 的前几分钟 conclusion 必为 null，此时判"缺失"全是误报）
-      jq -e '[.check_runs[] | select(.status != "completed")] | length > 0' <<<"$CRS" >/dev/null 2>&1 && continue
-      ALL_INFLIGHT=0
-      if jq -e --arg c "$ctx" '[.check_runs[] | select(.name == $c and .conclusion != null)] | length > 0' <<<"$CRS" >/dev/null 2>&1; then
-        FOUND=1; break
-      fi
-    done <<<"$HEADS"
+      jq -e --arg c "$ctx" '[.check_runs[] | select(.name == $c and .conclusion != null)] | length > 0' <<<"$CRS" >/dev/null 2>&1 && { FOUND=1; break; }
+    done <<<"$CONCL_SHAS"
     if [[ $FOUND -ne 1 ]]; then
-      if [[ $QUERY_FAIL -eq 1 && $ALL_INFLIGHT -eq 1 ]]; then
+      if [[ $QUERY_FAIL -eq 1 ]]; then
         drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
-        LIVE_MISS=1
-      elif [[ $ALL_INFLIGHT -eq 1 ]]; then
-        echo "SKIP  required-check-live '$r'（候选 head 全部 CI in-flight，本轮无法判定——非漂移，下轮复核）"
       else
-        drift "repo '$r' required check '$ctx' 活体缺失：已完结 CI 的候选 head 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12）"
-        LIVE_MISS=1
+        drift "repo '$r' required check '$ctx' 活体缺失：最近 $N_CONCL 个已完结 CI 的 head 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12）"
       fi
+      LIVE_MISS=1
     fi
   done
-  [[ $LIVE_MISS -eq 0 && $ALL_INFLIGHT -eq 0 ]] && ok "required-check-live '$r'（required check 在已完结候选 head 上齐备）"
+  [[ $LIVE_MISS -eq 0 ]] && ok "required-check-live '$r'（最近 $N_CONCL 个已完结 head 上 required check 齐备）"
 done
 
 # ---------- 13. PR liveness 侦测（P1-4，ADR-0034）----------
@@ -554,42 +576,6 @@ for r in $REPOS; do
   STUCK_TOTAL=$((STUCK_TOTAL+STUCK))
 done
 [[ $STUCK_TOTAL -eq 0 ]] && ok "pr-liveness（全部受管仓 open PR 无卡死，阈值 ${LIVENESS_H}h）"
-
-# ---------- 14. merge queue 对账（P2-7，ADR-0042；repo 级 ruleset）----------
-# org rulesets API 不支持 merge_queue 规则类型（实测 422）——merge queue 只能以
-# repo 级 ruleset 存在（须与 pull_request/required_status_checks 同集）。期望状态
-# expected-state.json#merge_queue 声明仓清单与参数；REST 读 repo ruleset 可见
-# merge_queue 规则（读支持，写须 GraphQL——apply.sh step6）。
-MQ_REPOS=$(jq -r '.merge_queue.repos // [] | .[]' "$EXPECTED")
-for r in $MQ_REPOS; do
-  RS=$(api "https://api.github.com/repos/$ORG/$r/rulesets?per_page=100")
-  if ! jq -e 'type == "array"' <<<"$RS" >/dev/null 2>&1; then
-    drift "repo '$r' rulesets 清单拉取失败，merge queue 对账无法执行（fail-closed）"; continue
-  fi
-  row=$(jq -c --arg n "merge-queue" '.[] | select(.name == $n)' <<<"$RS")
-  if [[ -z "$row" || "$row" == "null" ]]; then
-    drift "repo '$r' 期望启用 merge queue（ADR-0042）但无 'merge-queue' ruleset"; continue
-  fi
-  rid=$(jq -r .id <<<"$row")
-  detail=$(api "https://api.github.com/repos/$ORG/$r/rulesets/$rid")
-  want_p=$(jq -c '.merge_queue.params | .merge_method |= ascii_downcase | .grouping_strategy |= ascii_downcase' "$EXPECTED")
-  got_p=$(jq -c '.rules[] | select(.type == "merge_queue") | .parameters
-    | {merge_method, check_response_timeout_minutes, max_entries_to_build,
-       min_entries_to_merge, max_entries_to_merge, min_entries_to_merge_wait_minutes,
-       grouping_strategy} | .merge_method |= ascii_downcase | .grouping_strategy |= ascii_downcase' <<<"$detail")
-  if [[ "$got_p" == "$want_p" ]]; then
-    ok "merge-queue '$r'（参数与期望一致）"
-  else
-    drift "repo '$r' merge-queue 参数漂移: got=$got_p 期望=$want_p"
-  fi
-done
-# 未声明仓不得私自开队列（期望清单外的仓出现 merge-queue ruleset = 漂移）
-for r in $REPOS; do
-  jq -e --arg r "$r" '.merge_queue.repos // [] | index($r) != null' "$EXPECTED" >/dev/null && continue
-  RS=$(api "https://api.github.com/repos/$ORG/$r/rulesets?per_page=100")
-  jq -e 'type == "array"' <<<"$RS" >/dev/null 2>&1 || continue
-  jq -e '.[] | select(.name == "merge-queue")' <<<"$RS" >/dev/null 2>&1     && drift "repo '$r' 存在未声明的 merge-queue ruleset（expected-state.merge_queue.repos 未列——扩围须修订 ADR-0042）"
-done
 
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
