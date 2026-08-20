@@ -590,10 +590,12 @@ if [[ -n "$ORW_CFG" ]]; then
   WANT_REF=$(jq -r '.ref' <<<"$ORW_CFG")
   WANT_COMMIT=$(jq -r '.ref_commit' <<<"$ORW_CFG")
   ORW_LIST=$(api "https://api.github.com/orgs/$ORG/rulesets?per_page=100")
-  ORW_ROW=$(jq -c --arg n "$WANT_RULESET" '.[] | select(.name == $n)' <<<"$ORW_LIST" 2>/dev/null)
-  if [[ -z "$ORW_ROW" || "$ORW_ROW" == "null" ]]; then
+  ORW_ID=$(jq -r --arg n "$WANT_RULESET" '.[] | select(.name == $n) | .id' <<<"$ORW_LIST" 2>/dev/null | head -1)
+  if [[ -z "$ORW_ID" || "$ORW_ID" == "null" ]]; then
     drift "org-required-workflows ruleset '$WANT_RULESET' 线上不存在——中心审判失效，全部受管仓回落本地 gate（P3-1 枢轴脱离，ADR-0046）"
   else
+    # LIST 端点不含 rules 数组（同 §1 教训）——须拉 detail 才能取 workflows 规则
+    ORW_ROW=$(api "https://api.github.com/orgs/$ORG/rulesets/$ORW_ID")
     GOT_WF=$(jq -c '.rules[] | select(.type == "workflows") | .parameters.workflows[0] // empty' <<<"$ORW_ROW")
     GOT_PATH=$(jq -r '.path // empty' <<<"$GOT_WF")
     GOT_REF=$(jq -r '.ref // empty' <<<"$GOT_WF")
@@ -613,6 +615,8 @@ if [[ -n "$ORW_CFG" ]]; then
       drift "org-required-workflows 钉点 tag $WANT_REF 解引用失败（fail-closed，ADR-0046 §15）"
     elif [[ "$TAGCOMMIT" != "$WANT_COMMIT" ]]; then
       drift "org-required-workflows 钉点 tag $WANT_REF 已移动：${TAGCOMMIT:0:8} ≠ 声明 ${WANT_COMMIT:0:8}——审判内容被换（ADR-0046 §15；还原或走发布流程+expected-state 更新）"
+    elif [[ -n "$BAD" ]]; then
+      :   # 钉点漂移已上报，不再输出 OK 行（避免同段 OK/DRIFT 并存的误导）
     else
       ok "org-required-workflows 钉点完整（$WANT_REF == ${TAGCOMMIT:0:8}，path/repository_id 一致）"
     fi
