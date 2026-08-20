@@ -572,13 +572,16 @@ for r in $MQ_REPOS; do
   fi
   rid=$(jq -r .id <<<"$row")
   detail=$(api "https://api.github.com/repos/$ORG/$r/rulesets/$rid")
-  want_p=$(jq -c '.merge_queue.params' "$EXPECTED")
+  want_p=$(jq -c '.merge_queue.params | .merge_method |= ascii_downcase | .grouping_strategy |= ascii_downcase' "$EXPECTED")
   got_p=$(jq -c '.rules[] | select(.type == "merge_queue") | .parameters
     | {merge_method, check_response_timeout_minutes, max_entries_to_build,
        min_entries_to_merge, max_entries_to_merge, min_entries_to_merge_wait_minutes,
-       grouping_strategy}' <<<"$detail")
-  [[ "$got_p" == "$want_p" ]] || drift "repo '$r' merge-queue 参数漂移: got=$got_p 期望=$want_p"
-  ok "merge-queue '$r'（参数与期望一致）"
+       grouping_strategy} | .merge_method |= ascii_downcase | .grouping_strategy |= ascii_downcase' <<<"$detail")
+  if [[ "$got_p" == "$want_p" ]]; then
+    ok "merge-queue '$r'（参数与期望一致）"
+  else
+    drift "repo '$r' merge-queue 参数漂移: got=$got_p 期望=$want_p"
+  fi
 done
 # 未声明仓不得私自开队列（期望清单外的仓出现 merge-queue ruleset = 漂移）
 for r in $REPOS; do
