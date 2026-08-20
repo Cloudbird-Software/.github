@@ -1,0 +1,59 @@
+name: auto-fix-limit
+# agent 修复循环上限执法（ADR-0040，P2-8 .github#93）：
+# 小时级扫描受管仓 agent open PR 的 gate 失败计数（真源=Checks API，崩溃续接），
+# 达上限（policy/automation-limits.yaml，默认 3）→ 撤 auto-merge + 关 PR + 开说明 issue；
+# 熔断变量置位时每轮撤全部 open PR 的 auto-merge（硬停机器执法，旁路窗口 ≤1h）。
+# 脚本细节/注入通道见 governance/auto-fix-limit.sh 头注。
+on:
+  schedule:
+    - cron: "18 * * * *" # 每小时 :18（避开整点 governance-drift 高峰）
+  workflow_dispatch:
+    # 注入入口（T1 测试/聚焦扫描）：空=走 policy 真源，不留常开旁路
+    inputs:
+      max_attempts:
+        description: "auto-fix 上限覆盖（空=policy 值）"
+        required: false
+        default: ""
+      check_name:
+        description: "计数的 check 名覆盖（空=gate）"
+        required: false
+        default: ""
+      repos:
+        description: "扫描仓覆盖（逗号表，空=REPOS.yaml 全量 active）"
+        required: false
+        default: ""
+      all_prs:
+        description: "扫描全部 open PR（true=不限 agent 作者；空=仅 agent+opt-in）"
+        required: false
+        default: ""
+      dry_run:
+        description: "1=只报告不执行写操作（T1 预检）"
+        required: false
+        default: ""
+
+permissions: {}
+
+# 串行化：关 PR/开 issue 的"查重→写"非原子，并发运行会重复开 issue（同 governance-drift 设计）
+concurrency:
+  group: auto-fix-limit
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 扫描并执法（超限关 PR；exit 1=有超限 2=基础设施故障）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          AUTOFIX_MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+          AUTOFIX_CHECK_NAME: ${{ inputs.check_name }}
+          AUTOFIX_REPOS: ${{ inputs.repos }}
+          AUTOFIX_ALL_PRS: ${{ inputs.all_prs }}
+          AUTOFIX_DRY_RUN: ${{ inputs.dry_run }}
+        run: bash governance/auto-fix-limit.sh
