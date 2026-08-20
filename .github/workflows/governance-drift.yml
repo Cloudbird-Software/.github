@@ -3,6 +3,13 @@ on:
   schedule:
     - cron: "0 * * * *" # 每小时整点（ADR-0020：可见性漂移盲区 24h→1h——全仓公开政策的小时级执法；红队 #18 P0-1 周检→每日的延续推进；公开仓 Actions 免费，轻量只读检测成本可忽略）
   workflow_dispatch:
+    # P1-4（ADR-0034）：liveness 阈值注入入口——负向注入测试用；缺省走
+    # expected-state.json 的 pr_liveness_hours（真源），不留常开旁路
+    inputs:
+      liveness_hours:
+        description: "PR liveness 阈值覆盖（小时；空=用 expected-state pr_liveness_hours）"
+        required: false
+        default: ""
 
 permissions: {}
 
@@ -27,6 +34,7 @@ jobs:
       - name: 检测治理漂移
         env:
           GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          PR_LIVENESS_HOURS: ${{ inputs.liveness_hours }}
         run: |
           # pipefail（ADR-0032，P1-3）：Actions 默认 shell（bash -e 无 pipefail）下
           # `drift-check | tee` 的退出码被 tee 吞掉——漂移检出时本步骤仍 success，

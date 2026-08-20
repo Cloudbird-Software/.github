@@ -439,6 +439,100 @@ else
   [[ $REQ_MISSING -eq 0 ]] && ok "CI-Workflows 必需大版本指针存在（$CW_REQUIRED_POINTERS）"
 fi
 
+# ---------- 12. required check 活体存在性（P1-4，ADR-0034）----------
+# 文本对账 ≠ 生效验证：ruleset JSON 完全正确的同时，required check 字符串精确
+# 匹配可能实际为空（job 改名 / workflow 重构）→ "零 required check" → PR 裸奔。
+# 每个受管仓最近活动的 PR head（无 PR 活动时退化为默认分支 HEAD）上，必须存在
+# 每个 required check 名（从 rulesets/*.json 派生——单一真源）的 check run 且
+# conclusion 非空。fail-closed：check-runs 查询失败即判漂移，不用部分结果。
+REQ_CHECKS=$(jq -rs '[.[].rules[]? | select(.type == "required_status_checks")
+                      | .parameters.required_status_checks[].context] | unique | .[]' "$DIR"/rulesets/*.json)
+[[ -n "$REQ_CHECKS" ]] || { echo "FATAL: rulesets 未声明任何 required check——§12 活体验证失去判据"; exit 2; }
+epoch_of() { date -u -d "$1" +%s; }   # ISO8601 → epoch（runner GNU date）
+for r in $REPOS; do
+  jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
+  # 候选 head：最近更新的至多 3 个 PR head sha；无 PR 活动则退化为默认分支 HEAD
+  PRS_RECENT=$(api "https://api.github.com/repos/$ORG/$r/pulls?state=all&sort=updated&direction=desc&per_page=20")
+  if jq -e 'type == "array"' <<<"$PRS_RECENT" >/dev/null 2>&1; then
+    HEADS=$(jq -r '[.[] | .head.sha][0:3][]' <<<"$PRS_RECENT")
+    [[ -n "$HEADS" ]] || HEADS=$(api "https://api.github.com/repos/$ORG/$r/git/ref/heads/main" | jq -r '.object.sha // empty')
+  else
+    drift "repo '$r' PR 清单拉取失败，required check 活体验证无法执行（fail-closed）"
+    continue
+  fi
+  [[ -n "$HEADS" ]] || { drift "repo '$r' 无 PR 活动且默认分支 HEAD 不可读，活体验证无载体（fail-closed）"; continue; }
+  LIVE_MISS=0; QUERY_FAIL=0
+  for ctx in $REQ_CHECKS; do
+    FOUND=0
+    while IFS= read -r sha; do
+      [[ -n "$sha" ]] || continue
+      CRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$sha/check-runs?per_page=100")
+      if ! jq -e 'type == "object" and has("check_runs")' <<<"$CRS" >/dev/null 2>&1; then
+        QUERY_FAIL=1; continue
+      fi
+      if jq -e --arg c "$ctx" '[.check_runs[] | select(.name == $c and .conclusion != null)] | length > 0' <<<"$CRS" >/dev/null 2>&1; then
+        FOUND=1; break
+      fi
+    done <<<"$HEADS"
+    if [[ $QUERY_FAIL -eq 1 && $FOUND -eq 0 ]]; then
+      drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
+    elif [[ $FOUND -ne 1 ]]; then
+      drift "repo '$r' required check '$ctx' 活体缺失：ruleset 文本正确但最近 PR head / main HEAD 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12）"
+      LIVE_MISS=1
+    fi
+  done
+  [[ $LIVE_MISS -eq 0 && $QUERY_FAIL -eq 0 ]] && ok "required-check-live '$r'（${HEADS//$'\n'/ } 上 ${REQ_CHECKS//$'\n'/ } 齐备）"
+done
+
+# ---------- 13. PR liveness 侦测（P1-4，ADR-0034）----------
+# 治理不漂移但流水线死了的三类形态（#81 §6——无人值守下卡死 PR 是最隐形的
+# 人类瓶颈）：(a) auto-merge 已设置但 > 阈值无进展；(b) check 停留 queued/
+# in_progress 超 > 阈值；(c) PR 创建超阈值且 head 上零 check run（应有而无）。
+# 命中即走 GM-1 既有漂移 issue 通道。阈值：expected-state pr_liveness_hours，
+# 环境变量 PR_LIVENESS_HOURS 可覆盖（dispatch input liveness_hours 透传，注入测试用）。
+LIVENESS_H="${PR_LIVENESS_HOURS:-$(jq -r '.pr_liveness_hours // 4' "$EXPECTED")}"
+LIVENESS_S=$(( LIVENESS_H * 3600 ))
+STUCK_TOTAL=0
+for r in $REPOS; do
+  jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
+  OPEN_PRS=$(api "https://api.github.com/repos/$ORG/$r/pulls?state=open&per_page=30")
+  jq -e 'type == "array"' <<<"$OPEN_PRS" >/dev/null 2>&1 \
+    || { drift "repo '$r' open PR 清单拉取失败，liveness 侦测无法执行（fail-closed）"; continue; }
+  STUCK=0
+  while IFS=$'\t' read -r pnum created updated headsha has_am; do
+    [[ -n "$pnum" ]] || continue
+    AGE_UPD=$(( NOW_EPOCH - $(epoch_of "$updated") ))
+    AGE_CRE=$(( NOW_EPOCH - $(epoch_of "$created") ))
+    if [[ "$has_am" == "true" && $AGE_UPD -gt $LIVENESS_S ]]; then
+      drift "repo '$r' PR#$pnum auto-merge 已开启但 ${LIVENESS_H}h 无进展（updated ${AGE_UPD}s 前）——卡死侦测 (a)：查 required check 状态/分支冲突（ADR-0034 §13）"
+      STUCK=1; continue
+    fi
+    CRS=$(api "https://api.github.com/repos/$ORG/$r/commits/$headsha/check-runs?per_page=100")
+    if ! jq -e 'type == "object" and has("check_runs")' <<<"$CRS" >/dev/null 2>&1; then
+      drift "repo '$r' PR#$pnum head check-runs 查询失败，liveness 无法验证（fail-closed）"
+      STUCK=1; continue
+    fi
+    N_RUNS=$(jq '.check_runs | length' <<<"$CRS")
+    if [[ "$N_RUNS" -eq 0 && $AGE_CRE -gt $LIVENESS_S ]]; then
+      drift "repo '$r' PR#$pnum 创建 ${AGE_CRE}s 且 head 零 check run——卡死侦测 (c)：应有而无（workflow 未触发/被改名，ADR-0034 §13）"
+      STUCK=1; continue
+    fi
+    # pending 超龄判定（b）：shell 循环做日期运算（jq 无日期运算）
+    while IFS=$'\t' read -r crname crstatus crstart; do
+      [[ -n "$crname" ]] || continue
+      [[ "$crstatus" == "queued" || "$crstatus" == "in_progress" ]] || continue
+      [[ -n "$crstart" ]] || continue
+      AGE_PEND=$(( NOW_EPOCH - $(epoch_of "$crstart") ))
+      if [[ $AGE_PEND -gt $LIVENESS_S ]]; then
+        drift "repo '$r' PR#$pnum check '$crname' 停留 $crstatus 已 ${AGE_PEND}s——卡死侦测 (b)：永久 pending（ADR-0034 §13）"
+        STUCK=1
+      fi
+    done < <(jq -r '.check_runs[] | [.name, .status, (.started_at // "")] | @tsv' <<<"$CRS")
+  done < <(jq -r '.[] | [(.number|tostring), .created_at, .updated_at, .head.sha, (.auto_merge != null | tostring)] | @tsv' <<<"$OPEN_PRS")
+  STUCK_TOTAL=$((STUCK_TOTAL+STUCK))
+done
+[[ $STUCK_TOTAL -eq 0 ]] && ok "pr-liveness（全部受管仓 open PR 无卡死，阈值 ${LIVENESS_H}h）"
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"
