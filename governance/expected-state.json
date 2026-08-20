@@ -29,6 +29,7 @@
     "allow_auto_merge": true,
     "exclude_repos": []
   },
+  "pr_liveness_hours": 4,
   "org_secrets_required": [
     "CB_APP_ID",
     "AGENT_APP_SECRET",
