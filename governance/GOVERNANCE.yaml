@@ -24,10 +24,10 @@ domains:
         platform: {github: {mechanism: org-ruleset, name: main-protection, definition: rulesets/main-protection.json}}
         verify: {method: drift-check, frequency: daily}
       - id: BP-2
-        intent: "合并前置：唯一 required check = gate（聚合检查）"
+        intent: "合并前置：双轨 required check = gate（本地聚合）+ org-gate（中心仓钉点审判，PR 改不到审判源——P3-1/ADR-0046；观察期双轨，一致率 100% 后退役本地轨须新 ADR）"
         strength: enforced
-        platform: {github: {mechanism: ruleset-required-status, context: gate}}
-        verify: {method: "drift-check §1（required_status_checks 对账）", frequency: hourly}
+        platform: {github: {mechanism: ruleset-required-status, context: "gate+org-gate", central_pin: "org-required-workflows ruleset → CI-Workflows@refs/tags/v1.4.0:.github/workflows/org-gate.yml"}}
+        verify: {method: "drift-check §1（ruleset 文本对账）+ §15（钉点 commit 绑定）", frequency: hourly}
       - id: BP-3
         intent: "发布标签 v* 不可删除/覆盖"
         strength: enforced
