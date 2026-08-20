@@ -2,15 +2,12 @@ name: post-merge-verify
 # P2-6（ADR-0041）：自动合并的核心安全绳——合并到 main 后自动冒烟，失败自动
 # revert（auto-merge 回滚）。把"事前人审"实质替换为"事后快速回滚"：坏变更在
 # main 的存活时间从"天"压缩到约 10 分钟级（验证+gate）。
+# v1 范围：治理仓自检冒烟。业务仓接入（自定义冒烟命令）按 ADR-0041 后续逐仓
+# 注册——注意 workflow_call 与 push 混用时 inputs 上下文在 push 事件不存在，
+# 会在运行期引发 startup failure（0 job 实测），拆分时须避免。
 on:
   push:
     branches: [main]
-  workflow_call:
-    inputs:
-      smoke:
-        description: "业务仓自定义冒烟命令（缺省跑治理仓自检：YAML/JSON/脚本语法）"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -23,15 +20,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 冒烟验证（治理仓自检 / 业务仓自定义）
+      - name: 冒烟验证（治理仓自检）
         run: |
           set -o pipefail
-          if [ -n "${{ inputs.smoke }}" ]; then
-            bash -c '${{ inputs.smoke }}'
-            exit $?
-          fi
           python3 - <<'EOF'
-          import glob, json, sys, yaml
+          import glob, json, yaml
           files = glob.glob("governance/**/*.yaml", recursive=True) + glob.glob("standards/**/*.yaml", recursive=True)
           for f in files:
               yaml.safe_load(open(f, encoding="utf-8"))
@@ -57,26 +50,30 @@ jobs:
       contents: write        # revert 分支创建（REST revert 端点服务端建 ref）
       pull-requests: write   # revert PR + auto-merge
       issues: write          # 降级告警通道
+    env:
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: 判定防回环闸
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
           HEAD_MSG: ${{ github.event.head_commit.message }}
         run: |
           # 闸 1：本次 commit 本身是 revert 类（标题含 [auto-revert]）→ 不再嵌套
           if grep -q "\[auto-revert\]" <<<"$HEAD_MSG"; then
             echo "nested=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nested=false" >> "$GITHUB_OUTPUT"
           fi
           # 闸 2：本仓近 1 小时内已有 revert PR → 不重复（限频 1/h）
           RECENT=$(gh api "repos/$REPO/pulls?state=all&sort=created&direction=desc&per_page=20" \
             --jq '[.[] | select(.title | test("\\[auto-revert\\]")) | select(.created_at > (now - 3600 | todateiso8601))] | length')
           echo "recent=$RECENT" >> "$GITHUB_OUTPUT"
-          echo "nested=$(grep -q '\[auto-revert\]' <<<"$HEAD_MSG" && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - name: App 令牌（AG-1 身份——revert PR 的 gate 须能被触发；GITHUB_TOKEN 造的 PR 不触发工作流）
         id: app
-        continue-on-error: true   # App 未安装本仓时降级为仅告警（不静默失败——下方有判定）
+        continue-on-error: true   # App 未安装本仓时降级为仅告警（不静默——下方有判定）
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: 4632704
@@ -89,8 +86,6 @@ jobs:
         if: steps.guard.outputs.nested != 'true' && steps.guard.outputs.recent == '0' && steps.app.outcome == 'success'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
         run: |
           set -o pipefail
           PRN=$(gh api "repos/$REPO/commits/$SHA/pulls?per_page=5" --jq 'if length > 0 then .[0].number else "" end')
@@ -100,7 +95,7 @@ jobs:
           fi
           TITLE="[auto-revert] #$PRN：post-merge 冒烟失败（run ${{ github.run_id }}）"
           RESP=$(gh api -X POST "repos/$REPO/pulls/$PRN/revert" -f title="$TITLE" \
-            -f body="post-merge-verify 冒烟失败，自动回滚（ADR-0041）。原 PR #$PRN，commit ${SHA:0:8}，失败 run：${{ github.server_url }}/${REPO}/actions/runs/${{ github.run_id }}" \
+            -f body="post-merge-verify 冒烟失败，自动回滚（ADR-0041）。原 PR #$PRN，commit ${SHA:0:8}，失败 run：$RUN_URL" \
             --jq '.number')
           echo "revert PR #$RESP 已建，enable auto-merge"
           gh pr merge "$RESP" --repo "$REPO" --auto --squash
@@ -108,7 +103,11 @@ jobs:
         if: failure() || steps.app.outcome != 'success' || steps.guard.outputs.nested == 'true' || steps.guard.outputs.recent != '0'
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
         run: |
-          gh issue create --repo "$REPO" --title "P0: post-merge 冒烟失败且自动 revert 未执行（run ${{ github.run_id }}）" --body "合并 ${SHA:-HEAD} 后冒烟失败。自动 revert 未执行的原因：App 令牌不可用（未安装本仓？）/ 防回环闸（嵌套 revert 或 1h 限频）/ 无关联 PR。人工复核并回滚：${{ github.server_url }}/${REPO}/actions/runs/${{ github.run_id }}（ADR-0041）" --label auto-revert-alert || \
-            gh issue create --repo "$REPO" --title "P0: post-merge 冒烟失败且自动 revert 未执行（run ${{ github.run_id }}）" --body "同上（label 创建失败兜底）"
+          gh issue create --repo "$REPO" \
+            --title "P0: post-merge 冒烟失败且自动 revert 未执行（run ${{ github.run_id }}）" \
+            --body "合并 ${SHA:0:8} 后冒烟失败。自动 revert 未执行的原因：App 令牌不可用（未安装本仓？）/ 防回环闸（嵌套 revert 或 1h 限频）/ 无关联 PR。人工复核并回滚：$RUN_URL（ADR-0041）" \
+            --label P0 || \
+          gh issue create --repo "$REPO" \
+            --title "P0: post-merge 冒烟失败且自动 revert 未执行（run ${{ github.run_id }}）" \
+            --body "同上（label 不存在兜底重试）"
