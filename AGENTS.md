@@ -26,5 +26,5 @@ AI agent 进入本仓的工作契约（索引型，CG-1；细节按需读引用�
 | 语言/依赖政策 | governance/policy/languages.yaml |
 | 测试政策 | governance/policy/testing.yaml |
 | agent 标准 schema | standards/agent/*.schema.yaml |
-| bot/agent 反馈通道规范（禁 review thread） | standards/automation/bot-channels.md |
+| 自动化规范（CI 链路 / bot 反馈通道，ADR-0031/0032） | standards/automation/ |
 | 原型 profiles / 注册条目 | Cloudbird-Software/agent-registry |

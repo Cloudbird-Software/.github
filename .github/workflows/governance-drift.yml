@@ -28,6 +28,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
         run: |
+          # pipefail（ADR-0032，P1-3）：Actions 默认 shell（bash -e 无 pipefail）下
+          # `drift-check | tee` 的退出码被 tee 吞掉——漂移检出时本步骤仍 success，
+          # 下方 if: failure() 的开 issue 分支从不触发（run 32331351942 实证）。
+          # GM-1 报警机制依赖本步骤真实变红。
+          set -o pipefail
           if [[ -z "$GH_TOKEN" ]]; then
             echo "::error::缺 org secret GOVERNANCE_TOKEN（需 org admin token）。设置: 组织 Settings → Secrets and variables → Actions → New organization secret" >&2
             exit 2
