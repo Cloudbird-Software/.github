@@ -73,6 +73,10 @@
     ],
     "mutual": [
       "f5d9b5b58d4dc30a2b0e259449862fc4a3c91f6b"
+    ],
+    "agent-registry": [
+      "60bd1557481fa89d0358302e150a8f7d9381309c",
+      "e9424d220ded331c221b37135faa9d6e9cd1ecac"
     ]
   }
 }
