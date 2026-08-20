@@ -37,8 +37,11 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
         run: |
           echo "$NEEDS"
-          if echo "$NEEDS" | jq -e '[to_entries[] | select(.value.result != "success" and .value.result != "skipped")] | length > 0' >/dev/null; then
-            echo "::error::hygiene 未通过"; exit 1
+          # P1-3（ADR-0032）：skipped ≠ success——官方行为下 skipped job 上报 Success，
+          # 即使 required 也不拦合并；gate 是唯一 required check，必须显式断言每个
+          # needs 的 result == "success"，skipped/cancelled/failure/startup_failure 全红
+          if echo "$NEEDS" | jq -e '[to_entries[] | select(.value.result != "success")] | length > 0' >/dev/null; then
+            echo "::error::hygiene 未通过（skipped 不算绿——ADR-0032 严格断言）"; exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
