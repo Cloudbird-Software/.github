@@ -24,6 +24,8 @@ active_now:
   - {id: T-12, name: diff_coverage, tool: "CI-Workflows scripts/diff-coverage.py + diff-coverage.yml",
      placement: gate, threshold: "本次变更行覆盖 ≥80%（diff 口径，等值绿；X-01 拒的是全局口径）",
      policy: "本文件 diff_coverage 段（ADR-0037）", risk: fake_tests}
+  - {id: T-13, name: test_integrity, tool: "CI-Workflows test-integrity.yml（钉 hash）",
+     placement: gate, rule: "测试篡改四形态直接红（ADR-0035）", note: "P2-1 第一必需门"}
 
 # diff coverage 门槛参数（ADR-0037，P2-3 .github#88）——T-12 的机器可判定真源。
 # 口径：本次 PR 变更行（unified diff 新增行含修改行，删除行不计）的覆盖率，非全局
@@ -85,3 +87,29 @@ rejected:  # 翻案需新证据；引用 revisit_when
 existing:  # 勿重复建设
   [unit_property_golden, differential(T-09 已active), mutation(T-10), codeql, zizmor,
    dependency_review, hygiene, dependabot_automerge, provenance_attestation, governance_drift]
+
+# ---- test_integrity（ADR-0035 / .github #86，P2-1）------------------------
+# 机器可执行声明：CI-Workflows .github/workflows/test-integrity.yml 拉取本节并
+# 覆盖检测器内置缺省（同值双源，policy 为准）；本节拉取失败 = gate 红（fail-closed，
+# 非裸奔内置缺省）。regex 级、语言无关；AST 级解析为后续增强（不在 #86 范围）。
+# escape_hatch：命中可经 PR title/body 引用 ADR-NNNN 豁免（存在性校验防幽灵 ADR），
+# 豁免计数入账（job log TI-COUNT escape_hatch_waived + step summary）；P3-2（#96）
+# ADR scope 实质校验落地后升级为 scope 匹配。
+test_integrity:
+  policy_id: T-13
+  placement: gate
+  rules:
+    - {id: TI-R1, name: test_file_deleted, severity: red,
+       note: "真实删除或改名移出测试路径；内容不变的 rename 不算"}
+    - {id: TI-R2, name: assertion_net_decline, severity: red,
+       note: "全 PR 断言净额 < 0 即红；测试文件间迁移（净额不变）不受影响"}
+    - {id: TI-R3, name: suppression_marker_added, severity: red,
+       note: "仅统计新增行；移除抑制标记不触发"}
+    - {id: TI-R4, name: expectation_rewrite, severity: require_adr,
+       note: "测试文件有删改行且零实现文件变更；调为 red 则不可豁免"}
+  patterns:  # ERE；bash =~ 与 grep -E 语义（\b 为 GNU 扩展，ubuntu runner 原生）
+    test_file: '((^|/)(tests?|__tests__|__snapshots__|testdata)(/|$)|_test\.go$|\.test\.[cm]?[jt]sx?$|\.spec\.[cm]?[jt]sx?$|(^|/)test_[^/]*\.py$|_test\.py$|_test\.rs$|\.snap$)'
+    assertion: '\bassert|\bexpect\(|\bexpect\.|\brequire\(|\brequire\.|\bshould\b|\bt\.Error|\bt\.Fatal|\bself\.assert|\bfail_if\(|\bAssert|\bExpect\(|\bRequire\(|\bSo\('
+    suppression: '(^|[^A-Za-z_])([Ss]kip|[Xx][Ff][Aa][Ii][Ll])[[:space:]]*\(|\.skip\b|\.only\b|t\.Skip|mark\.skip|mark\.xfail|@Ignore|@Disabled|\[ignore|\.todo\(|unittest\.skip'
+    non_source: '^(\.github/|docs/|governance/)|(^|/)([^/]*\.md)$|(^|/)(LICENSE|CODEOWNERS|NOTICE|\.gitignore|\.gitattributes)$'
+  fail_closed: true
