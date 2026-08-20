@@ -73,7 +73,9 @@ jobs:
           # 指纹使去重失效）：只取 DRIFT 行、归一化时长秒数（回填时限=NNNs→<AGE>s）、
           # 排序去重后哈希——语义集合不变则指纹跨日恒定，漂移新增/消除/内容实质
           # 变化才产生新指纹。
-          FP=$(grep '^DRIFT' drift-report.txt | sed -E 's/回填时限=[0-9]+s/回填时限=<AGE>s/g' | sort -u | sha256sum | cut -d' ' -f1)
+          # §13 liveness 行含逐秒增长的年龄字段（updated NNNNs 前 / 已 NNNNs / 创建 NNNNs），
+          # 不归一化则同一卡死/活体缺失每小时产生新指纹、去重失效（RB-B2 同款）
+          FP=$(grep '^DRIFT' drift-report.txt | sed -E 's/回填时限=[0-9]+s/回填时限=<AGE>s/g; s/updated [0-9]+s 前/updated <AGE>s 前/g; s/已 [0-9]+s/已 <AGE>s/g; s/创建 [0-9]+s/创建 <AGE>s/g' | sort -u | sha256sum | cut -d' ' -f1)
           BODY="自动化检测发现以下漂移（运行 #${{ github.run_id }}）：
 
           $(cat drift-report.txt)
