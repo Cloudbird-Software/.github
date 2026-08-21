@@ -1,0 +1,64 @@
+name: butler-ledger
+# 管家账本刷新——唤醒矩阵行 2（宪法 §11 行 2 / §12 投影；ADR-0057，W1-C5 .github#168）
+# 每 15min 调用 W1-C3 的投影脚本：governance/board-sync.py（label→Project 板）与
+# governance/dashboard-update.py（dashboard 账本 issue 刷新）。**两脚本由 C3 卡并行
+# 开发、本卡时点尚未落盘**——用 [ -f ] 守卫：存在才跑；不存在输出
+# skipped 审计行且保持绿（守卫原因：账本刷新骨架先行——cron 节奏与审计形态先定型，
+# 投影脚本随后合入即自动生效，两卡解耦不互相阻塞）。
+# 骨架期本卡自带轻量记账：每次运行无条件追加一条 dashboard 备注行（v1 仅审计日志，
+# 不动 issue——dashboard 账本 issue 归 C3 建）。
+on:
+  schedule:
+    - cron: "*/15 * * * *" # 每 15min（宪法 §11 行 2；:00 与 governance-drift 整点重叠可接受——drift 是只读 GET 扫描，本流程是 GraphQL 投影同步，通道不同）
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: butler-ledger
+  cancel-in-progress: false # 15min 高频：排队不取消——取消进行中的同步会留下半写投影状态
+
+jobs:
+  ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 投影脚本守卫调用 + 轻量记账
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }} # C3 投影脚本的跨仓/GraphQL 读
+          BUTLER_TRIGGER: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+          source governance/butler-audit.sh
+          TRIGGER="${BUTLER_TRIGGER:-manual}"
+          # --- W1-C3 投影脚本一：board-sync.py（守卫：未落地=skipped 保持绿） ---
+          if [[ -f governance/board-sync.py ]]; then
+            if ! python3 governance/board-sync.py; then
+              audit_emit ledger-refresh "$TRIGGER" infra-fail '{"board_sync":"failed"}' || true
+              echo "::error::board-sync.py 失败（fail-closed——投影失败不得静默）" >&2
+              exit 2
+            fi
+            audit_emit ledger-refresh "$TRIGGER" ok '{"board_sync":"ran"}'
+          else
+            echo "OK    governance/board-sync.py 不存在（W1-C3 未合并）——skipped"
+            audit_emit ledger-refresh "$TRIGGER" ok '{"skipped":"dashboard-scripts-not-landed(W1-C3)","board_sync":"absent"}'
+          fi
+          # --- W1-C3 投影脚本二：dashboard-update.py（同上守卫） ---
+          if [[ -f governance/dashboard-update.py ]]; then
+            if ! python3 governance/dashboard-update.py; then
+              audit_emit ledger-refresh "$TRIGGER" infra-fail '{"dashboard_update":"failed"}' || true
+              echo "::error::dashboard-update.py 失败（fail-closed——账本刷新失败不得静默）" >&2
+              exit 2
+            fi
+            audit_emit ledger-refresh "$TRIGGER" ok '{"dashboard_update":"ran"}'
+          else
+            echo "OK    governance/dashboard-update.py 不存在（W1-C3 未合并）——skipped"
+            audit_emit ledger-refresh "$TRIGGER" ok '{"skipped":"dashboard-scripts-not-landed(W1-C3)","dashboard_update":"absent"}'
+          fi
+          # --- 本卡自有轻量记账（无条件）：dashboard 备注行 v1=审计日志形态 ---
+          audit_emit ledger-refresh "$TRIGGER" ok '{"ledger":"append","note_row":{"ts":"'"$(date -u +%FT%TZ)"'","run_id":"'"${GITHUB_RUN_ID:-local}"'","kind":"dashboard-remark-v1","sli_keys_reserved":["auto_merge_rate","check_latency","revert_count"]}}'
