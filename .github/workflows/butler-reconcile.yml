@@ -1,0 +1,50 @@
+name: butler-reconcile
+# 管家主收敛循环——唤醒矩阵行 1（宪法 §11；ADR-0057，W1-C5 .github#168）
+# 每 6h 遍历 REPOS.yaml active 仓：僵尸卡（state:in-progress 停滞）/ 孤儿标签
+# （closed 仍挂 state:*）/ 隔离超时（state:quarantine 滞留）→ needs-human issue +
+# reconcile 报告 issue（label 去重、同日防灌水）。铁律（宪法 §11）：管家永远不
+# "自己醒来"——本 workflow 只有 cron 与手动 dispatch 两个触发器，每次运行产出
+# AUDIT 审计行（INV-12，governance/butler-audit.sh）。脚本细节见
+# governance/butler-reconcile.sh 头注；阈值真源 governance/policy/butler.yaml。
+on:
+  schedule:
+    - cron: "17 */6 * * *" # 每 6h :17（宪法 §11 行 1；错峰避开整点 governance-drift、:18 auto-fix-limit、:23 cost-check）
+  workflow_dispatch:
+    # 注入入口（AC-2 演习用；空=butler.yaml 真源，不留常开旁路——同 governance-drift P1-4 模式）
+    inputs:
+      stale_days_override:
+        description: "in-progress stale 阈值覆盖（天；0=全部立即 stale——演习制造检出；空=butler.yaml 真源）"
+        required: false
+        default: ""
+      dry_run:
+        description: "1=只报告不写（预检）"
+        required: false
+        default: ""
+
+permissions: {}
+
+# 串行化：开 issue 的"查重→写"非原子，并发运行会重复开 issue（同 governance-drift 设计）
+concurrency:
+  group: butler-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read   # 读 governance/ 脚本与 policy
+      issues: write    # needs-human/报告 issue 开在 .github 仓（GITHUB_TOKEN 最小权限：
+                       # 跨仓读走 GOVERNANCE_TOKEN，本仓写不占用 org 治理令牌）
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 一致性扫描（exit 1=有发现已开 needs-human 2=基础设施故障）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}        # 跨仓读（缺失=脚本 fail-closed 变红）
+          GH_WRITE_TOKEN: ${{ github.token }}              # 本仓 issue 写（最小权限分离）
+          BUTLER_TRIGGER: ${{ github.event_name }}
+          STALE_DAYS_OVERRIDE: ${{ inputs.stale_days_override }}
+          BUTLER_DRY_RUN: ${{ inputs.dry_run }}
+        run: bash governance/butler-reconcile.sh
