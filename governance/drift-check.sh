@@ -684,6 +684,54 @@ else
   [[ $LBL_DRIFT -eq 0 ]] && ok "治理标签全集（$LBL_N 项 × 受管仓）一致"
 fi
 
+# ---------- 17. 统一入口协议块一致性（W1-C3 #166 / ADR-0055，宪法 §11/§4D）----------
+# REPOS.yaml 中 entry_protocol: true 的仓：其 main 的 AGENTS.md 须携带与
+# template-service main（统一下发真源）逐字节一致的协议块——
+# 提取 <!-- entry-protocol vN --> … <!-- /entry-protocol --> 标记间内容（含标记）比对。
+# 缺失标记/内容不一致/拉取失败 = 漂移（fail-closed：检测器失明不得伪装通过）。
+# 产品仓 rollout（7 个业务仓下发协议块）是后续 fleet 小卡——届时逐仓加
+# entry_protocol: true 即纳入本节管辖。
+PROTO_OK=0
+PROTO_REPOS=$(jq -r '[.repos[] | select((.entry_protocol // false) == true) | .name] | join(" ")' \
+  "$DIR/REPOS.yaml" 2>/dev/null || echo "")
+proto_block() {  # 提取协议块（标记间内容，含首尾标记行）——无标记则输出空
+  awk '/<!-- entry-protocol v[0-9]+ -->/{f=1} f{print} /<!-- \/entry-protocol -->/{f=0}'
+}
+CANON_RAW=$(api "https://raw.githubusercontent.com/$ORG/template-service/main/AGENTS.md" 2>/dev/null || true)
+CANON_BLOCK=""
+if [[ -z "$CANON_RAW" || "$CANON_RAW" == "404:"* ]]; then
+  drift "template-service main AGENTS.md 拉取失败（协议块真源不可读——fail-closed）"
+  PROTO_OK=1
+else
+  CANON_BLOCK=$(proto_block <<<"$CANON_RAW")
+  if [[ -z "$CANON_BLOCK" ]]; then
+    drift "template-service main AGENTS.md 缺协议块或标记不完整（宪法 §4D：块由 template-service 统一下发）"
+    PROTO_OK=1
+  fi
+fi
+PROTO_N=0
+for r in $PROTO_REPOS; do
+  PROTO_N=$((PROTO_N+1))
+  [[ "$r" == "template-service" ]] && continue  # 真源自身即 canon（同 URL 已验）
+  RAW=$(api "https://raw.githubusercontent.com/$ORG/$r/main/AGENTS.md" 2>/dev/null || true)
+  if [[ -z "$RAW" || "$RAW" == "404:"* ]]; then
+    drift "repo '$r' AGENTS.md 拉取失败（协议块对账跳过——fail-closed，ADR-0055 §17）"
+    PROTO_OK=1
+    continue
+  fi
+  BLOCK=$(proto_block <<<"$RAW")
+  if [[ -z "$BLOCK" ]]; then
+    drift "repo '$r' AGENTS.md 缺协议块标记（entry_protocol 已申报——宪法 §11 统一入口）"
+    PROTO_OK=1
+    continue
+  fi
+  if [[ "$BLOCK" != "$CANON_BLOCK" ]]; then
+    drift "repo '$r' 协议块与 template-service 不一致（首处差异: $(diff <<<"$CANON_BLOCK" <<<"$BLOCK" | head -3 | tr '\n' ' ' | cut -c1-160)）"
+    PROTO_OK=1
+  fi
+done
+[[ $PROTO_OK -eq 0 ]] && ok "统一入口协议块一致（真源 template-service × $PROTO_N 个 entry_protocol 仓，逐字节比对）"
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"

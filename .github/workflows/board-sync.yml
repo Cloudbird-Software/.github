@@ -1,0 +1,46 @@
+name: board-sync
+# 手动/演习驱动 factory-floor 板同步 + dashboard 账本刷新（W1-C3 #166 / ADR-0055 决策 10）。
+# **本工作流刻意不带 schedule**：日常每 15min cron 由 butler-ledger.yml（ADR-0057，
+# 唤醒矩阵行 2）统一驱动 governance/board-sync.py 与 governance/dashboard-update.py——
+# 若两处 cron 并存会对同一投影双写竞态；本 dispatch 面 = 演习/手动补偿通道。
+# concurrency 组与 butler-ledger 同名（GitHub concurrency 组按仓全局生效）：手动面
+# 与 cron 面互斥串行，杜绝并发写同一 Project/issue。
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read   # checkout 本仓两脚本；写操作全走 GOVERNANCE_TOKEN（非 GITHUB_TOKEN）
+
+concurrency:
+  group: butler-ledger   # 与 butler-ledger.yml 共组（ADR-0055 决策 10——防双写竞态）
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10   # GraphQL 投影 + SLI 采集的硬上限（宪法 workflow 规范）
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # GOVERNANCE_TOKEN（org admin PAT）：board-sync 需 org project 权限（GraphQL），
+      # dashboard-update 需 .github 仓 issues 写——GITHUB_TOKEN 两者皆无，不分开铸币
+      - name: board-sync + dashboard 刷新（fail-closed）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          BUTLER_TRIGGER: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+          source governance/butler-audit.sh
+          if ! python3 governance/board-sync.py; then
+            audit_emit board-sync manual infra-fail '{"rc":"nonzero"}' || true
+            echo "::error::board-sync.py 失败（fail-closed——投影失败不得静默，ADR-0055）" >&2
+            exit 2
+          fi
+          if ! python3 governance/dashboard-update.py; then
+            audit_emit dashboard-update manual infra-fail '{"rc":"nonzero"}' || true
+            echo "::error::dashboard-update.py 失败（fail-closed——账本刷新失败不得静默）" >&2
+            exit 2
+          fi
