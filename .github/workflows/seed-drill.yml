@@ -1,0 +1,317 @@
+name: seed-drill
+# 周种子缺陷演习（宪法 §4B/§6 / ADR-0069 / .github#223 W4-C4）——整个安全论证
+# 唯一的活体证明：每周向随机目标仓注入 owner 审过的已知缺陷，断言关卡真的会红。
+# 注入由本独立 workflow 执行（非关卡建设者——被审者不能组织对自己的审计）。
+#
+# 链路: 随机选样（seed 可注入复盘）→ 演习分支注入（只开分支不开 PR）→
+#   verify_gate.py 独立验证（与样本库分离）断言"应触发关卡 X 红" →
+#   红=演习成功 / 绿=演习失败 → P0 issue（label drill-escape）→
+#   记录进 governance/drill/history.jsonl（drill-ledger 分支，append-only 台账=
+#   dashboard 数据源）→ redrate 聚合红率（目标 ≈100%）+ 难度趋势（AC-4）。
+#
+# 已知局限（如实记录进每次演习记录）: 组织各仓 gate 触发面为 pull_request +
+#   push:main——push 到演习分支不触发 CI（NO-SURFACE）。补救: 降级开 draft PR
+#   （ADR-0069 决策 2 的原始形态即"向随机 PR 注入"；draft+验后即删控噪，
+#   演习记录公开可查缓解围观噪音）。
+#
+# 诱饵联动（ADR-0069 决策 5）: 演习后联动既有 holdout-canary-drill + sweep
+#   （W1-C4 部署，勿重复建设）——注入正控 marker → sweep 检出=检测通道健康。
+# 缺席 fail-closed 演练（AC-3，季度回归 #180 先例）: failclose job——真置位
+#   AUTO_MERGE_DISABLED → 读回 → 立即复位（时戳入台账）。
+on:
+  schedule:
+    - cron: "23 4 * * 1"        # 每周一 04:23 UTC（错峰：晚于 03:31 holdout-canary-sweep）
+    - cron: "37 4 1 1,4,7,10 *" # 季度首日 04:37 UTC——缺席 fail-closed 实测（ADR-0069 决策 6）
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "选样随机种子（空=run_id+日期自动）"
+        required: false
+        default: ""
+      sample_id:
+        description: "指定样本 id（复盘/定向演习；空=随机）"
+        required: false
+        default: ""
+      target_repo:
+        description: "指定目标仓（空=随机）"
+        required: false
+        default: ""
+      skip_inject:
+        description: "只跑选样/聚合不注入（台账维护用）"
+        type: boolean
+        default: false
+      failclose:
+        description: "附加缺席 fail-closed 演练（默认 dry-run；季度 cron 走真置位+立即复位）"
+        type: boolean
+        default: false
+      failclose_real:
+        description: "failclose 真置位（置位后立即复位；dry-run 断言=默认）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read # 最小非空起步；写操作（分支/台账/dispatch/P0）走 GOVERNANCE_TOKEN 或 job 级授权
+
+concurrency:
+  group: seed-drill # 串行化：台账 append-only 不容忍并发追加
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read   # checkout 样本库/REPOS.yaml
+      issues: write    # 绿=演习失败 → P0 issue（GITHUB_TOKEN）
+    env:
+      GOV_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+      TARGET_REPO: ${{ inputs.target_repo }}
+      SAMPLE_ID: ${{ inputs.sample_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: 选样（随机可注入）
+        id: select
+        env:
+          SEED: ${{ inputs.seed }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          [[ -n "$SEED" ]] && ARGS+=(--seed "$SEED")
+          [[ -n "$SAMPLE_ID" ]] && ARGS+=(--sample-id "$SAMPLE_ID")
+          [[ -n "$TARGET_REPO" ]] && ARGS+=(--target-repo "$TARGET_REPO")
+          python3 governance/drill/drill.py select "${ARGS[@]}" > sel.json
+          cat sel.json
+          SAMPLE_ID=$(python3 -c 'import json;print(json.load(open("sel.json"))["sample_id"])')
+          TARGET_REPO=$(python3 -c 'import json;print(json.load(open("sel.json"))["target_repo"])')
+          GATE=$(python3 -c 'import json;print(json.load(open("sel.json"))["gate"])')
+          echo "sample_id=$SAMPLE_ID" >> "$GITHUB_OUTPUT"
+          echo "target_repo=$TARGET_REPO" >> "$GITHUB_OUTPUT"
+          echo "gate=$GATE" >> "$GITHUB_OUTPUT"
+          echo "seed=$(python3 -c 'import json;print(json.load(open("sel.json"))["seed"])')" >> "$GITHUB_OUTPUT"
+          echo "SAMPLE_ID=$SAMPLE_ID TARGET_REPO=$TARGET_REPO GATE=$GATE" >> "$GITHUB_ENV"
+      - name: 注入演习分支（只开分支不开 PR）
+        id: inject
+        if: ${{ inputs.skip_inject != true }}
+        env:
+          DRILL_TOKEN: ${{ env.GOV_TOKEN }}
+          GH_TOKEN: ${{ env.GOV_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 governance/drill/drill.py inject --sample-id "$SAMPLE_ID" --repo "$TARGET_REPO" > inj.json
+          cat inj.json
+          echo "branch=$(python3 -c 'import json;print(json.load(open("inj.json"))["branch"])')" >> "$GITHUB_OUTPUT"
+          echo "sha=$(python3 -c 'import json;print(json.load(open("inj.json"))["head_sha"])')" >> "$GITHUB_OUTPUT"
+      - name: 独立验证（push 分支面）
+        id: verify1
+        if: ${{ inputs.skip_inject != true }}
+        env:
+          GH_TOKEN: ${{ env.GOV_TOKEN }}
+          SHA: ${{ steps.inject.outputs.sha }}
+        run: |
+          set -uo pipefail
+          python3 governance/drill/verify_gate.py --repo "$TARGET_REPO" \
+            --sha "$SHA" --gate "$GATE" --timeout 900 > v1.json || true
+          cat v1.json
+          V=$(python3 -c 'import json;print(json.load(open("v1.json"))["verdict"])')
+          echo "verdict=$V" >> "$GITHUB_OUTPUT"
+          echo "push_surface=$V" >> "$GITHUB_OUTPUT"
+      - name: NO-SURFACE 补救——draft PR 面（ADR-0069 原始形态）
+        id: prfallback
+        if: ${{ inputs.skip_inject != true && steps.verify1.outputs.verdict == 'NO-SURFACE' }}
+        env:
+          GH_TOKEN: ${{ env.GOV_TOKEN }}
+          BRANCH: ${{ steps.inject.outputs.branch }}
+          SHA: ${{ steps.inject.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # 标题按样本 pr_title_adr 决定是否带 ADR（隔离 adr-required 判定，
+          # org-adr-required-missing 样本除外——其靶就是"无 ADR 必须被拦"）
+          ADR=$(python3 -c 'import yaml;[s]=[x for x in yaml.safe_load(open("governance/drill/samples/registry.yaml",encoding="utf-8"))["samples"] if x["id"]=="'"$SAMPLE_ID"'"];print("（ADR-0069）" if s["pr_title_adr"] else "")')
+          gh pr create --repo "Cloudbird-Software/$TARGET_REPO" --draft --head "$BRANCH" \
+            --title "drill(seed): $SAMPLE_ID 演习注入$ADR——勿合并，验后即删" \
+            --body "周种子缺陷演习自动注入（宪法 §4B / ADR-0069 / Card: Cloudbird-Software/.github#223）。分支验后即删，请勿 review/合并。" > pr.txt
+          PR=$(grep -oE '[0-9]+$' pr.txt | tail -1)
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          echo "PR=$PR" >> "$GITHUB_ENV"
+      - name: 独立验证（draft PR 面重验同一 SHA）
+        id: verify2
+        if: ${{ steps.prfallback.outputs.pr != '' }}
+        env:
+          GH_TOKEN: ${{ env.GOV_TOKEN }}
+          SHA: ${{ steps.inject.outputs.sha }}
+        run: |
+          set -uo pipefail
+          python3 governance/drill/verify_gate.py --repo "$TARGET_REPO" \
+            --sha "$SHA" --gate "$GATE" --timeout 900 > v2.json || true
+          cat v2.json
+          echo "verdict=$(python3 -c 'import json;print(json.load(open("v2.json"))["verdict"])')" >> "$GITHUB_OUTPUT"
+      - name: 演习终判 + 绿则开 P0 + 清理（关 PR/删分支）
+        id: finalize
+        if: ${{ inputs.skip_inject != true }}
+        env:
+          GH_TOKEN: ${{ env.GOV_TOKEN }}
+          ISSUES_TOKEN: ${{ github.token }}
+          V1: ${{ steps.verify1.outputs.verdict }}
+          V2: ${{ steps.verify2.outputs.verdict }}
+          BRANCH: ${{ steps.inject.outputs.branch }}
+          SHA: ${{ steps.inject.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          VERDICT="${V2:-$V1}"
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          SURFACE="push"; [[ -n "${PR:-}" ]] && SURFACE="draft-pr"
+          echo "surface=$SURFACE" >> "$GITHUB_OUTPUT"
+          if [[ "$VERDICT" == "GREEN" ]]; then
+            echo "::error::演习失败：缺陷未触发关卡 $GATE（关卡死了，宪法 §4B）——开 P0"
+            LABEL=drill-escape
+            gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --description "种子缺陷演习逃脱（关卡失效，勿手工使用）" --color b60205 >/dev/null 2>&1 || true
+            GH_TOKEN="$ISSUES_TOKEN" gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "[P0] 种子缺陷演习逃脱：$SAMPLE_ID 未触发关卡 $GATE" --label "$LABEL" --body \
+              "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID
+          样本 $SAMPLE_ID 注入 $TARGET_REPO@$SHA 后关卡 $GATE 仍绿——关卡失效（suspect）。
+          处置（宪法 §4B / ADR-0069 决策 3）：修关卡 → 手动重演本样本验证变红 → 关闭本 issue。
+          @randypanding" || echo "::warning::P0 issue 开立失败（infra）"
+          fi
+          # 清理：关 draft PR + 删演习分支（隔离不变量：注入物不长期存续）
+          if [[ -n "${PR:-}" ]]; then gh pr close "$PR" --repo "Cloudbird-Software/$TARGET_REPO" --delete-branch || true; fi
+          REF=$(python3 -c 'import urllib.parse;print(urllib.parse.quote("heads/'"$BRANCH"'", safe=""))')
+          gh api -X DELETE "repos/Cloudbird-Software/$TARGET_REPO/git/refs/$REF" >/dev/null 2>&1 || \
+            gh api -X DELETE "repos/Cloudbird-Software/$TARGET_REPO/git/refs/heads/$BRANCH" >/dev/null 2>&1 || \
+            echo "::warning::演习分支删除失败：$BRANCH（残留无害，注入物已记录）"
+      - name: 诱饵联动（复用 W1-C4 canary drill+sweep，勿重复建设）
+        id: canary
+        env:
+          GH_TOKEN: ${{ env.GOV_TOKEN }}
+        run: |
+          set -uo pipefail
+          gh workflow run holdout-canary-drill.yml --repo Cloudbird-Software/.github || { echo "canary_link=dispatch-fail" >> "$GITHUB_OUTPUT"; exit 0; }
+          sleep 45
+          DID=$(gh run list --workflow holdout-canary-drill.yml --repo Cloudbird-Software/.github -L 1 --json databaseId --jq '.[0].databaseId')
+          gh run watch "$DID" --repo Cloudbird-Software/.github --exit-status >/dev/null 2>&1 || true
+          gh workflow run holdout-canary-sweep.yml --repo Cloudbird-Software/.github \
+            -f since_days=1 -f treat_drill_as_leak=false || { echo "canary_link=dispatch-fail" >> "$GITHUB_OUTPUT"; exit 0; }
+          sleep 45
+          SID=$(gh run list --workflow holdout-canary-sweep.yml --repo Cloudbird-Software/.github -L 1 --json databaseId --jq '.[0].databaseId')
+          if gh run watch "$SID" --repo Cloudbird-Software/.github --exit-status >/dev/null 2>&1; then
+            echo "canary_link=healthy（drill marker 被检出=检测通道健康）"
+            echo "canary_link=healthy" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::canary sweep 未报健康（LEAK/NO-CONTROL——sweep run 自身已红并报警，详见 run $SID）"
+            echo "canary_link=unhealthy(sweep_run=$SID)" >> "$GITHUB_OUTPUT"
+          fi
+      - name: 记录进台账（drill-ledger 分支 append-only）+ 红率聚合
+        env:
+          GH_TOKEN: ${{ env.GOV_TOKEN }}
+          DRILL_TOKEN: ${{ env.GOV_TOKEN }}
+          VERDICT: ${{ steps.finalize.outputs.verdict }}
+          SURFACE: ${{ steps.finalize.outputs.surface }}
+          CANARY: ${{ steps.canary.outputs.canary_link }}
+          BRANCH: ${{ steps.inject.outputs.branch }}
+          SHA: ${{ steps.inject.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          SEED: ${{ steps.select.outputs.seed }}
+        run: |
+          set -euo pipefail
+          git config user.name drill-seed-bot && git config user.email drill-bot@users.noreply.github.com
+          if ! git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger -b drill-ledger 2>/dev/null; then
+            git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger
+            git -C ledger checkout -b drill-ledger
+          fi
+          python3 - <<'EOF' > rec.json
+          import json, os
+          verdict = os.environ.get("VERDICT") or "skipped"
+          rec = {
+              "ts": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "kind": "seed-drill",
+              "run_id": os.environ.get("RUN_ID"),
+              "seed": os.environ.get("SEED"),
+              "sample_id": os.environ.get("SAMPLE_ID"),
+              "difficulty": json.load(open("sel.json"))["difficulty"],
+              "gate": os.environ.get("GATE"),
+              "target_repo": os.environ.get("TARGET_REPO"),
+              "branch": os.environ.get("BRANCH") or None,
+              "head_sha": os.environ.get("SHA") or None,
+              "surface": os.environ.get("SURFACE") or "none",
+              "verdict": verdict.lower(),
+              "limitation": ("push 分支无 CI 触发面（org gate 仅 pull_request+push:main）——"
+                             "已按 ADR-0069 原始形态降级 draft PR 面验证" if os.environ.get("SURFACE") == "draft-pr"
+                             else "无" if verdict == "skipped" else "push 面验证"),
+              "canary_link": os.environ.get("CANARY") or "n/a",
+          }
+          print(json.dumps(rec, ensure_ascii=False))
+          EOF
+          cat rec.json
+          python3 governance/drill/drill.py record --history ledger/governance/drill/history.jsonl --json "$(cat rec.json)"
+          git -C ledger add governance/drill/history.jsonl
+          git -C ledger commit -m "drill(seed): 台账追加 $VERDICT（ADR-0069 周演习 run ${RUN_ID}）"
+          for i in 1 2 3; do git -C ledger push "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/drill-ledger && break
+            git -C ledger pull --rebase "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" drill-ledger || true; sleep 5; done
+          python3 governance/drill/drill.py redrate --history ledger/governance/drill/history.jsonl
+
+  failclose:
+    needs: drill # 台账 append-only 串行追加
+    if: ${{ github.event_name == 'schedule' && github.event.schedule == '37 4 1 1,4,7,10 *' || inputs.failclose == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }} # org 变量读写（真置位+复位路径）
+      DRILL_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 缺席 fail-closed 演练（季度 cron 真置位+立即复位；dispatch 默认 dry-run）
+        id: fc
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FAILCLOSE_REAL: ${{ inputs.failclose_real == true && '0' || '1' }}
+        run: |
+          set -uo pipefail
+          MODE="$FAILCLOSE_REAL"
+          # 季度 cron 走真置位；手动 dispatch 只有显式勾选才真置位
+          if [[ "$EVENT_NAME" == "schedule" ]]; then MODE=0; fi
+          FAILCLOSE_DRY_RUN="$MODE" bash governance/drill/failclose-test.sh | tee fc.log
+          if grep -qE 'real-pass|dry-run-pass' fc.log; then echo "outcome=pass" >> "$GITHUB_OUTPUT"
+          else echo "::error::缺席 fail-closed 演练断言未通过（详见日志）"; exit 1; fi
+      - name: failclose 结果入台账
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name drill-seed-bot && git config user.email drill-bot@users.noreply.github.com
+          if ! git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger -b drill-ledger 2>/dev/null; then
+            git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger
+            git -C ledger checkout -b drill-ledger
+          fi
+          python3 - <<'EOF' > fc_rec.json
+          import datetime, json, os, re
+          log = open("fc.log", encoding="utf-8").read()
+          real = "real-pass" in log
+          rec = {
+              "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "kind": "failclose-drill",
+              "run_id": os.environ.get("RUN_ID"),
+              "mode": "real" if real else "dry-run",
+              "outcome": "pass" if ("real-pass" in log or "dry-run-pass" in log) else "fail",
+          }
+          m = re.search(r'"set_at":"([^"]+)","reset_at":"([^"]+)"', log)
+          if m:
+              rec["set_at"], rec["reset_at"] = m.group(1), m.group(2)
+          print(json.dumps(rec, ensure_ascii=False))
+          EOF
+          cat fc_rec.json
+          python3 governance/drill/drill.py record --history ledger/governance/drill/history.jsonl --json "$(cat fc_rec.json)"
+          git -C ledger add governance/drill/history.jsonl
+          git -C ledger commit -m "drill(failclose): 台账追加缺席 fail-closed 演练结果（ADR-0069 AC-3）"
+          for i in 1 2 3; do git -C ledger push "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/drill-ledger && break
+            git -C ledger pull --rebase "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" drill-ledger || true; sleep 5; done
