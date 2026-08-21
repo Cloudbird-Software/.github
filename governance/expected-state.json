@@ -30,6 +30,71 @@
     "exclude_repos": []
   },
   "pr_liveness_hours": 4,
+  "labels": {
+    "comment": "W0-C2（#131/ADR-0047）：治理标签全集（10 个 state:* 状态机 DECISION-04 + type:*）。apply.sh §7 幂等同步全部受管仓（沿用 §5 清单与 exclude）；drift-check §16 对账存在性与形状。新增式：只增不删不改名，各仓自有业务标签不属治理面。",
+    "items": [
+      {
+        "name": "type:intent",
+        "color": "1D76DB",
+        "description": "意图记录（IR）"
+      },
+      {
+        "name": "type:card",
+        "color": "C5DEF5",
+        "description": "工作卡（wave-planner 产出）"
+      },
+      {
+        "name": "state:ir-draft",
+        "color": "BFD4F2",
+        "description": "意图起草中（未签署）"
+      },
+      {
+        "name": "state:ir-signed",
+        "color": "0E8A16",
+        "description": "意图已签署，可进入 spec 阶段"
+      },
+      {
+        "name": "state:spec",
+        "color": "FBCA04",
+        "description": "spec 阶段"
+      },
+      {
+        "name": "state:redteam",
+        "color": "D93F0B",
+        "description": "红队阶段（分歧度量 + 恶意合规）"
+      },
+      {
+        "name": "state:wave-planned",
+        "color": "C2E0C6",
+        "description": "波次已规划，卡已开出（tasklist 挂 spec）"
+      },
+      {
+        "name": "state:ready",
+        "color": "0E8A16",
+        "description": "前置已满足，可认领开工"
+      },
+      {
+        "name": "state:in-progress",
+        "color": "FB8C04",
+        "description": "卡已被认领，实现进行中（BEH-08 /claim 协议）"
+      },
+      {
+        "name": "state:quarantine",
+        "color": "B60205",
+        "description": "verdict 未过/风险超限，隔离待人工（/retry 重判）"
+      },
+      {
+        "name": "state:needs-human",
+        "color": "5319E7",
+        "description": "升级人工：owner 被 assign，机器不再自动处理"
+      },
+      {
+        "name": "state:done",
+        "color": "0E8A16",
+        "description": "卡完成（AC 验证过 + PR 合并）"
+      }
+    ]
+  },
   "org_secrets_required": [
     "CB_APP_ID",
     "AGENT_APP_SECRET",

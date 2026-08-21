@@ -9,7 +9,8 @@
 #
 # 覆盖范围（红队 #17-H 显式声明：哪些漂移类别本脚本不可修，须人工路径）：
 #   可自动修复：§1 rulesets、§2 actions 策略、§3 workflow 权限、
-#               §4 code-security 默认、§5 仓库基线（对应 drift-check §1-§4）
+#               §4 code-security 默认、§5 仓库基线（对应 drift-check §1-§4）、
+#               §7 治理标签（W0-C2/ADR-0047，对应 drift-check §16）
 #   人工修复（本脚本故意不碰）：
 #     §5 org secrets      —— 值不可读/不可由脚本写入，admin 在网页设置
 #     §6 GitHub App 权限  —— App 权限无公开写 API，须 App 设置页
@@ -153,6 +154,28 @@ for r in $(jq -r '.merge_queue.repos // [] | .[]' "$EXPECTED"); do
   OUT=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Content-Type: application/json" -d "$RESP" https://api.github.com/graphql)
   echo "$OUT" | jq -e '.data.createRepositoryRuleset.ruleset.databaseId' >/dev/null 2>&1     && echo "  repo '$r' merge-queue: created"     || { echo "  repo '$r' merge-queue: FAIL $(echo "$OUT" | jq -r '.errors[0].message // "未知"')" >&2; FAILS=$((FAILS+1)); }
 done
+
+echo "==> 7/7 治理标签（W0-C2/ADR-0047：幂等创建+形状对齐；新增式——不删除既有标签）"
+if [[ -z "$REPOS" ]]; then
+  echo "  FAIL：仓清单为空（§5 已计 FAIL），跳过标签同步" >&2
+  FAILS=$((FAILS+1))
+else
+  while IFS= read -r item; do
+    lname=$(jq -r .name <<<"$item"); lcolor=$(jq -r .color <<<"$item"); ldesc=$(jq -r .description <<<"$item")
+    lenc=$(jq -rn --arg x "$lname" '$x|@uri')
+    payload=$(jq -nc --arg n "$lname" --arg c "$lcolor" --arg d "$ldesc" '{name:$n,color:$c,description:$d}')
+    for r in $REPOS; do
+      jq -e --arg r "$r" 'index($r) != null' <<<"$EXCLUDES" >/dev/null && { echo "  $r: 跳过（exclude）"; continue; }
+      code=$(api -o /dev/null -w '%{http_code}' -X PATCH "https://api.github.com/repos/$ORG/$r/labels/$lenc" -d "$payload")
+      if [[ "$code" == "404" ]]; then
+        code=$(api -o /dev/null -w '%{http_code}' -X POST "https://api.github.com/repos/$ORG/$r/labels" -d "$payload")
+        expect_ok "repo '$r' 标签 '$lname' 创建" "$code"
+      else
+        expect_ok "repo '$r' 标签 '$lname' 对齐" "$code"
+      fi
+    done
+  done < <(jq -c '.labels.items // [] | .[]' "$EXPECTED")
+fi
 
 echo "----------------------------------------"
 if [[ $FAILS -gt 0 ]]; then
