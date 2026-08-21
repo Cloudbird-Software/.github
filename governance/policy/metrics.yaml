@@ -1,0 +1,90 @@
+version: 1
+# ============================================================================
+# metrics.yaml —— 度量 dashboard 完整版阈值与声明位（W5-C4 .github#227，ADR-0073）
+# 真源: 本文件（阈值/护栏/数据源声明唯一来源，宪法 §4A"阈值唯一来源"原则同源）；
+#       执行: governance/metrics.py（纯计算库，零网络）+ governance/dashboard-update.py
+#       （API 采集+呈现，butler-ledger 每 15min 驱动）+ governance/board-sync.py（板字段）。
+# 宪法: §8（度量全景——北极星是指标对非单一指标，防 Goodhart）/§12（状态可视化三投影）
+#       /§7（反退化——注意力成本如实入账不洗白）。
+# 原则: 数据源未落的指标一律声明 pending，dashboard 显示 pending 不显示 0
+#       （ADR-0073 决策 7：缺数据不得被渲染成好数据）。
+# ============================================================================
+
+north_star:
+  # 北极星对同屏互锁（AC-1 / ADR-0073 决策 1）：零接触合并数 × 质量护栏同屏；
+  # 任一护栏 red → 合并数【显示归零】+原因标注（呈现层归零，原始计数保留在 JSON
+  # raw 字段——非数据删除）；护栏回绿自动恢复显示。pending 护栏不触发归零
+  # （缺证据≠劣化，按决策 7 独立显示盲区），但归零判定只认 red。
+  window_days: 7
+  guardrails:
+    # 逃逸率>0 持续：当前窗与上一窗（各 7 天，事件时戳直算——无跨轮状态残留）均>0
+    # 分子=非演习 [auto-revert] PR + post-merge 冒烟 P0 issue（sli-report 同口径）
+    escape_rate_sustained:
+      red_when: "current_window_events>0 and previous_window_events>0"
+    # 回滚率：非演习 [auto-revert] PR 数 / 窗口内 merged PR 数（零分母=pending 不红）
+    revert_rate:
+      red_when_gt: 0.05
+    # holdout 与主套件通过率差（ADR-0073 决策 1 三护栏之一；读取位未建——诚实 pending）
+    holdout_gap:
+      red_when_gt: 0.05
+      data_source: pending
+    # 种子缺陷演习红率（应≈100%，ADR-0069）；零可判定演习=pending 不红（不造 100%）
+    drill_red_rate:
+      red_when_lt: 1.0
+      data_source: governance/drill/history.jsonl
+    # 仲裁误放行（arbiter 台账，ADR-0054 §7；窗口内 false-allow 行数>0 即 red）
+    false_allow:
+      red_when_gt: 0
+      data_source: Cloudbird-Software/arbiter:tests/false_decision_ledger.jsonl
+    # 未经仲裁的状态变更泄漏（检测面未建——诚实 pending，不参与互锁触发）
+    state_change_leak:
+      red_when_gt: 0
+      data_source: pending
+
+attention:
+  # 注意力会计（AC-2 / 宪法 §7）：判断工作如实计量，防"签署退化成隐形 review"
+  # 签署耗时统计窗（type:intent issue 的 state:ir-draft→state:ir-signed timeline 差）
+  sign_window_days: 90
+  # 签署耗时低于此秒数=可疑快速签署（退化信号计数——判断不可压缩，太快=没判断）
+  suspicious_fast_sign_seconds: 60
+  # needs-human p90 停留超此小时数=整机停摆（宪法 §7：单独显示，不洗白成队列健康）
+  needs_human_p90_stop_hours: 24
+  # 超时默认触发数 / 每合并 owner 分钟 / 周审计超时率：决策卡与审计包数据源未落
+  # ——dashboard 显示 pending（不造数）
+
+security:
+  # 安全正确性（AC-2 / 宪法 §8）：误放行/误拒窗口（台账按 date 字段过滤）
+  false_decision_window_days: 30
+  # 误拒数：同台账 kind=false-deny（infra 不算误拒，ADR-0054 §7 约定）
+  # 陷阱拦截率（ADR-0071 W5-C2 硬谓词信任门）与泄漏数：数据源未落 → pending
+
+cost:
+  # 成本（AC-2 / 宪法 §8）：单 IR 美元=（Actions 分钟+LLM token 归账）声明价折算/当月 IR 数
+  # 全仓公开计费净额 $0（ADR-0020）——此为"失控速率"虚拟成本口径，非账单
+  actions_price_per_minute_usd: 0.008
+  llm_price_per_1k_tokens_usd: 0.002
+  # 重数据源（CI-Workflows metering 归账，ADR-0062）快照复用 TTL：15min 刷新节奏下
+  # 每 15min 拉 tarball 属浪费——快佐证龄>TTL 才重拉（快照与龄随 JSON 区回传）
+  snapshot_ttl_minutes: 60
+
+user_results:
+  # 用户结果指标（AC-4 / 宪法 §8：防产品漂向"oracle 友好型"）
+  # 各产品仓在 <repo>:metrics/user-result.yaml 声明一个用户侧结果指标：
+  #   {metric_key: str, value: number, unit: str, updated_at: ISO}——文件缺失=pending
+  read_path: metrics/user-result.yaml
+  products:
+    - repo: Shorts_Director
+    - repo: Script_Writer
+    - repo: Use-up-Plan
+    - repo: AI_Web_School
+    - repo: mutual
+  # 季度难测产品/功能配额（配额制记录位——每季度刻意做一个难测的）：
+  # owner 每季度在 entries 回填 {quarter: "2026-Q4", product: str, goal: str, status: planned|doing|done}；
+  # entries 空=本季未立（诚实显示，不预填占位值）
+  quarterly_hard_quota:
+    entries: []
+
+board:
+  # factory-floor 板字段完善（AC-3 / 宪法 §12）：谓词状态数据源=W5-C2 硬谓词信任门
+  # （ADR-0071，进行中）——未落前板字段存在但值恒为 pending 标注（字段占位≠造数）
+  predicate_status_pending: "pending(W5-C2)"
