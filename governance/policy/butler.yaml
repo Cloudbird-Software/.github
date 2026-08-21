@@ -11,14 +11,14 @@ version: 1
 # ============================================================================
 
 wake_matrix:
-  # 行 1：主收敛循环——僵尸卡/孤儿标签/隔离超时（事件丢失的最终兜底）
+  # 行 1：主收敛循环——僵尸卡/隔离超时（事件丢失的最终兜底）。原"孤儿标签"检查
+  #       已移除（ADR-0074：closed issue 的 state:* 是历史事实非漂移）
   - duty: reconcile
     trigger: cron
     cadence: every_6h            # 机器可读语义值；实际 cron 表达式在 workflow 里（含错峰分钟）
     workflow: .github/workflows/butler-reconcile.yml
     checks:
       - stale_in_progress         # state:in-progress 卡超时未更新 → needs-human
-      - orphan_state_labels       # closed issue 仍挂 state:* 标签 → 记入报告
       - stale_quarantine          # state:quarantine 停留超时 → 升 needs-human
   # 行 2：账本/dashboard 刷新 + Project 板同步（宪法 §12 投影；投影脚本由 W1-C3 提供）
   - duty: ledger-refresh
@@ -46,9 +46,14 @@ services:
     workflow: .github/workflows/butler-heartbeat.yml
     notes: 外部 dead-man 服务的 ping 侧；DEADMAN_PING_URL 未配置时 WARN 不红（owner runbook 见 docs/deadman-setup.md）
   - duty: deadman-trip
-    trigger: repository_dispatch # type=deadman-tripped（外部服务超时回调）+ workflow_dispatch（演习）
+    trigger: repository_dispatch # type=deadman-tripped（外部回调）+ workflow_dispatch（演习）
     workflow: .github/workflows/butler-deadman-trip.yml
-    notes: 缺席即停（宪法 §6）——置共用熔断变量 AUTO_MERGE_DISABLED + 撤全部 auto-merge + P0 issue
+    notes: 缺席即停（宪法 §6）事件入口——执法核心 governance/deadman-trip.sh（ADR-0074 单一实现）
+  - duty: deadman-watch
+    trigger: cron                # 仓内兜底层（ADR-0074 决策 2）：heartbeat 成功 run 陈旧度
+    cadence: every_6h
+    workflow: .github/workflows/butler-heartbeat-watch.yml
+    notes: 覆盖"Actions 活着但心跳工作流死了"形态；"Actions 整体静默"由外部层（hc.io→owner 告警）承担
 
 # 阈值（改动走 C1：本文件在 governance/ 路径，PR 须引用 ADR）
 thresholds:
@@ -58,3 +63,6 @@ thresholds:
   stale_quarantine_days: 2
   # 外部 dead-man 服务的 grace 时长（分钟）——心跳每 30min 一次，grace=60 容忍一次丢失
   deadman_grace_minutes: 60
+  # 仓内兜底层：butler-heartbeat 最近一次成功 run 距今超过 N 小时 → 自动 trip
+  #（ADR-0074；3h=连续 6 次缺失 ping；API 查询失败=infra 红不盲 trip）
+  deadman_stale_hours: 3

@@ -5,9 +5,9 @@
 #   (a) 僵尸卡：open issue 挂 state:in-progress 且 updated 距今 > stale_in_progress_days
 #       → .github 仓开/评论 needs-human issue（label butler:needs-human）；同卡去重：
 #         已有 open issue 标题含 "<repo>#<num> " 即评论不重开，且同日已评论则跳过（防灌水）
-#   (b) 孤儿标签：closed issue 仍挂任意 state:* 标签 → 记入 reconcile 报告 issue
-#       （label butler:reconcile）。本卡 v1 只报告不纠正：状态标签写操作一律 App 令牌
-#       经仲裁路径（INV-02）——纠正动作留给后续波次的执法卡，管家先让不一致可见。
+#   (b) 孤儿标签：已移除（ADR-0074 修订 ADR-0057）——closed issue 退出状态机，
+#       其 state:* 标签是历史事实非漂移（closed+state:done 是正常终态形态）；
+#       管家不纠正历史（INV-02）。
 #   (c) 隔离超时：open issue 挂 state:quarantine 且 updated 距今 > stale_quarantine_days
 #       → 升 needs-human（同 (a) 去重）。用 updated 代理"停留时长"：隔离期间仍有人
 #       评论/更新 = 有活动，不升级是合理语义；静置才是要抓的滞留。
@@ -161,8 +161,7 @@ escalate() {  # <repo> <num> <kind(stale-in-progress|stale-quarantine)> <age_day
 }
 
 # ---------- 主循环：三类检查 ----------
-STALE_COUNT=0; QUAR_COUNT=0; ORPHAN_COUNT=0
-ORPHAN_ROWS=""
+STALE_COUNT=0; QUAR_COUNT=0
 for repo in $REPOS; do
   # ---- open issues：(a) 僵尸卡 + (c) 隔离超时 ----
   if ! OPEN_ROWS=$(repo_issue_rows "$repo" open); then
@@ -211,24 +210,13 @@ for repo in $REPOS; do
       esac
     done <<< "$OPEN_ROWS"
   fi
-  # ---- closed issues：(b) 孤儿 state:* 标签 ----
-  if ! CLOSED_ROWS=$(repo_issue_rows "$repo" closed); then
-    infra "closed issue 清单拉取失败: $repo"
-  else
-    while IFS=$'\t' read -r num updated closed labels title; do
-      [[ -n "${num:-}" ]] || continue
-      if [[ ",$labels," == *state:* ]]; then
-        # 只取 state:* 标签进审计 JSON（标签名字符集受控，防畸形 JSON）
-        stlabels=$(grep -o 'state:[a-z-]*' <<< "$labels" | paste -sd, -)
-        ORPHAN_COUNT=$((ORPHAN_COUNT+1)); FINDINGS=$((FINDINGS+1))
-        ORPHAN_ROWS+="- $ORG/$repo#$num「$title」labels=[$stlabels]（closed=${closed}）"$'\n'
-        act "孤儿标签: $repo#$num 仍挂 [$stlabels]"
-        audit orphan-label "{\"repo\":\"$repo\",\"issue\":$num,\"labels\":\"$stlabels\"}"
-      fi
-    done <<< "$CLOSED_ROWS"
-  fi
+  # ---- closed issues：不检查（ADR-0074 修订 ADR-0057，原检查 (b) 已移除）----
+  # closed issue 退出状态机，其 state:* 标签是历史事实（label 真相源只约束在制
+  # 工作）非漂移对象：#130-134 的 closed+state:done 是正常终态形态，原检查只产
+  # 噪音（run 32484413154 报 6 条全噪音，owner 裁决"不重要"）。管家不纠正历史
+  # （INV-02：状态标签写须 App 令牌经仲裁）。closed 清单因此不再拉取。
 done
-ok "扫描完成：$REPO_COUNT 仓，僵尸卡 $STALE_COUNT / 孤儿标签 $ORPHAN_COUNT / 隔离超时 $QUAR_COUNT"
+ok "扫描完成：$REPO_COUNT 仓，僵尸卡 $STALE_COUNT / 隔离超时 $QUAR_COUNT（closed 历史标签不检——ADR-0074）"
 
 # ---------- 报告 issue（label butler:reconcile 固定去重；全绿不新开防灌水） ----------
 REPORT_ACTION="green-silent"
@@ -239,13 +227,10 @@ if [[ $FINDINGS -gt 0 ]]; then
   REPORT_BODY="管家 reconcile 报告（唤醒矩阵行 1，ADR-0057，运行 $(date -u +%FT%TZ)，trigger=$TRIGGER）：
 
 - 僵尸卡（state:in-progress 停滞 > ${STALE_DAYS}d）: $STALE_COUNT
-- 孤儿标签（closed 仍挂 state:*；v1 只报告不纠正——INV-02 状态标签写须 App 令牌经仲裁）: $ORPHAN_COUNT
 - 隔离超时（state:quarantine 停滞 > ${STALE_Q_DAYS}d）: $QUAR_COUNT
 
-孤儿标签清单：
-${ORPHAN_ROWS:-(无)}
-
-（僵尸卡/隔离超时的明细见 label butler:needs-human 的 issue；本报告聚合计数与孤儿清单。）"
+（closed issue 的历史 state:* 标签不检——ADR-0074：退出状态机即为历史事实。
+僵尸卡/隔离超时的明细见 label butler:needs-human 的 issue；本报告聚合计数。）"
   if [[ -n "$REPORT_EXISTING" ]]; then
     if ! issue_silent_today "$REPORT_EXISTING"; then
       mutate ghw issue comment "$REPORT_EXISTING" --repo "$GOV_REPO" --body "$REPORT_BODY" >/dev/null 2>&1 || true
@@ -279,11 +264,11 @@ fi
 
 # ---------- 汇总 AUDIT + 退出码 ----------
 if [[ $INFRA -gt 0 ]]; then
-  audit infra-fail "{\"repos\":$REPO_COUNT,\"stale_in_progress\":$STALE_COUNT,\"orphan_state_labels\":$ORPHAN_COUNT,\"stale_quarantine\":$QUAR_COUNT,\"report\":\"$REPORT_ACTION\",\"infra_failures\":$INFRA}"
+  audit infra-fail "{\"repos\":$REPO_COUNT,\"stale_in_progress\":$STALE_COUNT,\"stale_quarantine\":$QUAR_COUNT,\"report\":\"$REPORT_ACTION\",\"infra_failures\":$INFRA}"
   exit 2
 fi
 if [[ $FINDINGS -gt 0 ]]; then
-  audit findings "{\"repos\":$REPO_COUNT,\"stale_in_progress\":$STALE_COUNT,\"orphan_state_labels\":$ORPHAN_COUNT,\"stale_quarantine\":$QUAR_COUNT,\"report\":\"$REPORT_ACTION\"}"
+  audit findings "{\"repos\":$REPO_COUNT,\"stale_in_progress\":$STALE_COUNT,\"stale_quarantine\":$QUAR_COUNT,\"report\":\"$REPORT_ACTION\"}"
   exit 1
 fi
 audit ok "{\"repos\":$REPO_COUNT,\"stale_in_progress\":0,\"orphan_state_labels\":0,\"stale_quarantine\":0,\"report\":\"$REPORT_ACTION\"}"

@@ -1,10 +1,13 @@
 # Dead-man 心跳配置 Runbook（owner 手工步骤）
 
 > 关联：宪法 §6（缺席即停 / 外部 dead-man 心跳）、§11（唤醒矩阵末行"外部 dead-man 心跳"）；
-> ADR-0057（W1-C5 .github#168）。
-> 管家代码侧（ping 侧 `butler-heartbeat`、trip 侧 `butler-deadman-trip`）已随 W1-C5 落地；
-> **外部服务的注册与回调配置是 owner 手工步骤**——本页是操作手册。未完成本页配置时：
-> 心跳 workflow 输出 WARN（不红），trip 通道可通过手动 dispatch 演习（见 §4）。
+> ADR-0057（W1-C5 .github#168）、ADR-0074（双层触发修订——hc.io 无法直连回调 GitHub，
+> 外部层=检测+owner 告警，仓内层=heartbeat-watch 陈旧度自动 trip）。
+>
+> **当前状态（2026-08-21）**：healthchecks.io check 已注册（owner）、`DEADMAN_PING_URL`
+> org secret 已配置、`butler-heartbeat` 实测 ping 成功（attempt 1/2）、仓内兜底
+> `butler-heartbeat-watch` 已上线。**剩余 owner 侧仅 §1.3 的 grace 核对与 §3 的
+> 告警通道选择**——自动 trip 已由仓内层承担，外部回调不再是必需项。
 
 ## 为什么心跳必须在外部
 
@@ -32,40 +35,24 @@ gh secret set DEADMAN_PING_URL --org Cloudbird-Software -b"https://hc-ping.com/<
 - 配置后 `butler-heartbeat`（每 30min）自动开始 ping；healthchecks.io 页面应出现
   成功心跳记录（最迟 30min 内）。
 
-## 3. 失败回调配置（grace 超时 → 触发缺席即停）
+## 3. 失败告警配置（grace 超时 → owner 知晓 → 缺席即停）
 
-healthchecks.io → check → **Integrations** 添加 Webhook，URL 指向 GitHub
-repository_dispatch（需要一枚具 `repo` scope 的 PAT，可用 owner 经典 PAT；勿用临时
-token——回调凭据是长期运行的管道）：
+**ADR-0074 双层触发**（hc.io 的 Webhook 不能带 Authorization header，无法直接回调
+GitHub repository_dispatch——这是实测边界，不是配置遗漏）：
 
-```
-https://api.github.com/repos/Cloudbird-Software/.github/dispatches
-```
-
-healthchecks.io 的 Webhook 只支持 GET/POST 简单形态，不能带 JSON body 与自定义
-header，因此实际推荐任一中间形态（三选一）：
-
-- **方案 A（推荐）：Cloudflare Worker / 任意 1 行转发服务**——收到 healthchecks 回调
-  （GET，URL 末尾带 `/fail`）后转发 repository_dispatch：
+- **仓内层（已上线，自动）**：`butler-heartbeat-watch`（6h）检测 heartbeat 成功 run
+  陈旧度 > `deadman_stale_hours`（3h）→ 自动执行 `governance/deadman-trip.sh`。
+  覆盖"Actions 活着但心跳工作流被禁用/改名/损坏"。
+- **外部层（hc.io 账号侧，owner 只需勾告警通道）**：check → **Integrations** 勾选
+  邮件/Slack/Telegram 任一。覆盖"Actions 整体静默"（此时仓内层同死，只有外部
+  服务能说话）。owner 收到告警后一键 trip：
 
   ```bash
-  curl -X POST \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer $PAT" \
-    https://api.github.com/repos/Cloudbird-Software/.github/dispatches \
-    -d '{"event_type":"deadman-tripped"}'
+  gh api -X POST repos/Cloudbird-Software/.github/dispatches     -H "Authorization: Bearer $PAT" -f event_type=deadman-tripped
   ```
 
-- **方案 B：healthchecks.io 的 Ping body / 管理脚本**——用其 "Shell" 集成模板直连上方
-  curl（token 放服务侧模板变量，不落 GitHub）。
-
-- **方案 C（最低成本兜底）**：不配自动回调，依赖 healthchecks.io 的邮件/Telegram 告警，
-  owner 收到告警后手动执行上方 curl 或直接在 Actions 页 dispatch
-  `butler-deadman-trip`（simulate=false）。诚实代价：缺席即停从自动变人工，但可见性
-  不丢。
-
-无论哪种方案，PAT 建议专用窄权限（只读 dispatch 不存在——`repo` scope 是最低可用），
-泄漏面控制在该服务一处。
+若日后想让外部层也全自动（可选）：Cloudflare Worker 一行转发（收到 hc.io 回调
+GET 后代发上方 curl，PAT 存 Worker 侧 secret）——非必需，双层已满足宪法 §6。
 
 ## 4. 演习步骤（月度正控建议 + 上线验证）
 

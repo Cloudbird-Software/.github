@@ -1,0 +1,75 @@
+name: butler-heartbeat-watch
+# dead-man 仓内兜底层（宪法 §6 / ADR-0074 决策 2 第二层）：
+# butler-heartbeat（*/30 ping 外部 hc.io）最近一次成功 run 距今超过
+# butler.yaml deadman_stale_hours（默认 3h=连续 6 次缺失）→ 自动执行
+# deadman-trip（缺席即停）。覆盖"Actions 活着但心跳工作流被禁用/改名/损坏"形态；
+# "Actions 整体静默"形态由外部层（hc.io → owner 告警，runbook 一键 trip）承担——
+# 仓内层不满足"必须外部"的纯粹形态，故为第二张网而非替代（ADR-0074）。
+# API 查询失败 = infra 红（exit 2）不 trip——假熔断需人工复位会停摆流水线
+# （ADR-0040 决策 5 同款权衡）。
+on:
+  schedule:
+    - cron: "43 */6 * * *" # 6h 错峰（:43 避开既有 cron 群）
+  workflow_dispatch:
+    inputs:
+      stale_hours_override:
+        description: "陈旧度阈值覆盖（小时；注入演习用；空=butler.yaml 真源）"
+        required: false
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: butler-heartbeat-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 心跳陈旧度检查（超阈即 trip）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          BUTLER_TRIGGER: ${{ github.event_name }}
+          STALE_HOURS_OVERRIDE: ${{ inputs.stale_hours_override }}
+        run: |
+          set -uo pipefail
+          echo "AUDIT | butler=heartbeat-watch | trigger=${BUTLER_TRIGGER:-schedule} | run_id=${GITHUB_RUN_ID} | started=$(date -u +%FT%TZ) | outcome=running | actions={\"phase\":\"start\"}"
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::缺 GOVERNANCE_TOKEN——陈旧度不可查，fail-closed 变红（不盲 trip）" >&2
+            exit 2
+          fi
+          STALE_H="${STALE_HOURS_OVERRIDE:-$(python3 -c 'import yaml; print(yaml.safe_load(open("governance/policy/butler.yaml", encoding="utf-8"))["deadman_stale_hours"])' | tr -d '\r')}"
+          [[ "$STALE_H" =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "::error::deadman_stale_hours 非数值: $STALE_H" >&2; exit 2; }
+          # 最近一次成功 heartbeat run 的完成时间（workflow 文件名路由；无成功 run = 视为最陈旧）
+          LAST=$(gh api "repos/Cloudbird-Software/.github/actions/workflows/butler-heartbeat.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].updated_at // empty' 2>/dev/null)
+          if [[ -z "$LAST" ]]; then
+            if gh api "repos/Cloudbird-Software/.github/actions/workflows/butler-heartbeat.yml/runs?per_page=1" --jq '.total_count' 2>/dev/null | grep -qE '^[0-9]+$'; then
+              AGE_S=999999999  # 有 run 但零成功 → 视为远古（会 trip）
+              AGE_H="∞（存在 run 但零成功）"
+            else
+              echo "::error::heartbeat runs 查询失败——fail-closed 变红（不盲 trip）" >&2
+              exit 2
+            fi
+          else
+            AGE_S=$(( $(date -u +%s) - $(date -u -d "$LAST" +%s) ))
+            AGE_H=$(( AGE_S / 3600 ))
+          fi
+          THRESH_S=$(( STALE_H * 3600 ))
+          echo "AUDIT | butler=heartbeat-watch | trigger=${BUTLER_TRIGGER:-schedule} | outcome=checked | actions={\"last_success\":\"${LAST:-none}\",\"age_hours\":\"$AGE_H\",\"threshold_hours\":$STALE_H}"
+          if (( AGE_S <= THRESH_S )); then
+            echo "OK    心跳新鲜（最近成功 ${AGE_H}h 前 ≤ 阈值 ${STALE_H}h）——无动作"
+            exit 0
+          fi
+          echo "::error::心跳陈旧（${AGE_H}h > 阈值 ${STALE_H}h）——缺席即停（ADR-0074 双层之仓内层）"
+          SRC="仓内兜底（butler-heartbeat 最近成功已 ${AGE_H}h，阈值 ${STALE_H}h）"
+          TRIGGER="heartbeat-stale" SRC="$SRC" SIM=false bash governance/deadman-trip.sh
+          rc=$?
+          [[ $rc -eq 0 ]] && exit 1 || exit $rc  # 脚本 0=已熔断→本 run 变红=可见信号
