@@ -128,14 +128,30 @@ jobs:
               audit("event=unrecognized verdict=noop"); raise SystemExit(0)
 
           # ---- sender_role（INV-02：API 判定，不硬编码用户名）----
+          # 两级解析（W1-C3 e2e .github#206 实测教训：GOVERNANCE_TOKEN 读
+          # /orgs/{org}/memberships 拿不到 200，role 曾静默落 none——旧 T3 guard
+          # 靠 author_association 兜底掩盖了该单点，arbiter 转介按 role 判权后
+          # 把 owner 也拒了【run 32500211932 role-not-allowed】）：
+          #   ① GOV_TOKEN org 成员资格 role==admin → owner（首选，组织级语义）
+          #   ② 失败时 APP_TOKEN 读仓级协作者权限 ==admin → owner（兜底；
+          #     与 drift-check §9 vcs-admin 唯一性同源——受管仓 admin 唯 owner）
+          # 两路全败=none（arbiter 默认拒绝）。均 API 判定，无硬编码用户名。
           actor = E.get("ACTOR") or ""
           role = "none"
+          role_src = "none"
           if actor == "cloudbrid-agent[bot]":
               role = "agent"
+              role_src = "app-slug"
           else:
               st, m = api(E["GOV_TOKEN"], f"/orgs/{ORG}/memberships/{actor}")
               if st == 200 and m.get("role") == "admin":
                   role = "owner"
+                  role_src = "org-membership"
+              else:
+                  st, p = api(E["APP_TOKEN"], f"/repos/{REPO}/collaborators/{actor}/permission")
+                  if st == 200 and p.get("permission") == "admin":
+                      role = "owner"
+                      role_src = "repo-collab-admin(gov-membership HTTP %s)" % st
           assoc = E.get("COMMENT_ASSOC") or "NONE"  # label 事件无此字段→NONE（guard 用 role）
 
           # ---- 当前状态与标签集 ----
@@ -175,11 +191,11 @@ jobs:
           if ev == "comment:/release":
               rc = adjudicate("/release")
               if rc == 0:
-                  audit(f"event={ev} from={current} sender_role={role} arbiter=allow "
+                  audit(f"event={ev} from={current} sender_role={role}({role_src}) arbiter=allow "
                         f"verdict=ALLOWED release（租约已释放——无标签转移定义，纯租约面）")
                   raise SystemExit(0)
               if rc == 1:
-                  audit(f"event={ev} sender_role={role} verdict=DENIED-by-arbiter "
+                  audit(f"event={ev} sender_role={role}({role_src}) verdict=DENIED-by-arbiter "
                         f"（非 holder/无租约/过期——无租约变更、无标签变更）")
                   raise SystemExit(0)
               audit(f"event={ev} arbiter=infra rc={rc} verdict=ABORT "
@@ -226,7 +242,7 @@ jobs:
                   audit(f"event={ev} transition={t['id']} arbiter=infra rc={rc} verdict=ABORT "
                     f"（fail-closed——不许绕过仲裁；delivery 幂等可安全重投）")
                   raise SystemExit(1)
-              audit(f"event={ev} transition={t['id']} sender_role={role} arbiter=allow "
+              audit(f"event={ev} transition={t['id']} sender_role={role}({role_src}) arbiter=allow "
                 f"（租约已建——T3 落地；TTL 到期由下一 /claim 原子接管，ADR-0054）")
 
           # ---- 执行转移（状态标签写=App 身份，INV-02；写失败=fail-closed，
