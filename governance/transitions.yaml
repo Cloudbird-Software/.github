@@ -1,0 +1,41 @@
+version: 1
+# 状态机转移表（IR-0001 IFACE-03 / ADR-0049）——conductor 唯一定义源，
+# 只解释不内嵌逻辑。本文件是 C1 资产：改动走 PR+ADR。
+#
+# schema：
+#   from_state  = 转移前状态（当前 issue 无 state:* 标签时视为 ir-draft）
+#   event       = label:state:<name> | comment:/start | comment:/claim | comment:/retry
+#   to_state    = 转移后状态（conductor 以 App 身份换标签：移除 from、置上 to）
+#   action      = invoke:spec-author | claim | noop（W0 全集）
+#   guard       = 布尔表达式；变量白名单：sender_role（owner|agent|none）、
+#                 author_association（OWNER|MEMBER|COLLABORATOR|CONTRIBUTOR|NONE）、
+#                 label_set（当前标签名集合）
+# 未列出的 (from_state, event) 组合 = 禁止转移（conductor no-op；重复投递/
+# 跳态/反向天然被 from_state 匹配拒绝——幂等键 {issue, from, to} 的落盘形态）。
+states: [ir-draft, ir-signed, spec, redteam, wave-planned, ready, in-progress, quarantine, needs-human, done]
+
+transitions:
+  - id: T1  # 主通路：owner/agent 打签署标签 → 进 spec 阶段（BEH-01）
+    from_state: ir-draft
+    event: label:state:ir-signed
+    to_state: spec
+    action: invoke:spec-author
+    guard: "sender_role in ['owner', 'agent'] and 'type:intent' in label_set"
+  - id: T2  # owner 评论 /start 等价签署（AC-1 的 comment 路径）
+    from_state: ir-draft
+    event: comment:/start
+    to_state: spec
+    action: invoke:spec-author
+    guard: "sender_role == 'owner' and 'type:intent' in label_set"
+  - id: T3  # 认领：先到先得（当前态必须 ready，否则 no-op）（BEH-08）
+    from_state: ready
+    event: comment:/claim
+    to_state: in-progress
+    action: claim
+    guard: "sender_role == 'agent' or author_association in ['OWNER', 'MEMBER', 'COLLABORATOR']"
+  - id: T4  # 隔离重判（BEH-07 的 /retry 回流）
+    from_state: quarantine
+    event: comment:/retry
+    to_state: ready
+    action: noop
+    guard: "sender_role in ['owner', 'agent']"

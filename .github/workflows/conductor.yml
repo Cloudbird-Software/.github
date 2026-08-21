@@ -1,0 +1,221 @@
+name: conductor
+# 状态机路由器（IR-0001 W0-C3 / ADR-0049）。W0 事件面=本仓（issues.labeled +
+# issue_comment）；跨仓扩展随产品仓接入。全部状态标签写操作以 cloudbrid-agent
+# App 令牌执行（INV-02：GITHUB_TOKEN 身份不持有状态写权）。
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+# INV-09：每 issue 一个 concurrency group、cancel-in-progress=false——重复投递
+# 排队串行而非并发竞态；幂等由 from_state 匹配承担（重复事件=当前态已变=no-op）
+concurrency:
+  group: conductor-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read   # checkout 本仓（transitions.yaml + gh-app-token.sh）
+
+jobs:
+  route:
+    if: github.repository == 'Cloudbird-Software/.github'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      invoke: ${{ steps.route.outputs.invoke }}
+      issue: ${{ steps.route.outputs.issue }}
+      ir_ref: ${{ steps.route.outputs.ir_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 铸 App 令牌（AG-2：本仓单仓作用域）
+        env:
+          CB_APP_ID: ${{ secrets.CB_APP_ID }}
+          AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
+        run: |
+          TOKEN=$(REPO=.github CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
+                  bash scripts/gh-app-token.sh)
+          echo "APP_TOKEN=$TOKEN" >>"$GITHUB_ENV"
+      # 事件路由与守卫：transitions.yaml 是唯一转移定义；guard 受限求值
+      # （变量白名单注入、无内建）；非授权=静默丢弃（回退标签、不评论、审计进
+      # run 日志——AC-11）。注释/标签正文绝不进入任何求值（命令白名单精确匹配）。
+      - name: route（INV-02/09）
+        id: route
+        env:
+          APP_TOKEN: ${{ env.APP_TOKEN }}
+          GOV_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_ASSOC: ${{ github.event.comment.author_association }}
+          ACTOR: ${{ github.actor }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, re, urllib.parse, urllib.request, urllib.error, yaml
+
+          E = os.environ
+          ORG, REPO = "Cloudbird-Software", E["REPO"]
+          ISSUE = E["ISSUE_NUMBER"]
+          def api(token, path, method="GET", body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(f"https://api.github.com{path}", data=data, method=method,
+                  headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                           "User-Agent": "conductor"})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return r.status, json.load(r)
+              except urllib.error.HTTPError as e:
+                  return e.code, {}
+
+          def audit(msg):
+              # 审计面 = 本 run 日志（AC-11；不评论、不写 issue——防评论轰炸）
+              print(f"AUDIT | issue=#{ISSUE} | actor={E.get('ACTOR')} | {msg}", flush=True)
+
+          # ---- 事件规范化（白名单精确匹配，正文不进任何求值）----
+          ev = None
+          if E["EVENT_NAME"] == "issues" and E["ACTION"] == "labeled":
+              ln = E.get("LABEL_NAME") or ""
+              if ln.startswith("state:"):
+                  ev = f"label:{ln}"
+              else:
+                  audit(f"event=label(non-state:{ln}) verdict=noop"); raise SystemExit(0)
+          elif E["EVENT_NAME"] == "issue_comment" and E["ACTION"] == "created":
+              head = (E.get("COMMENT_BODY") or "").strip().split()
+              token = head[0] if head else ""
+              if token in ("/start", "/claim", "/retry"):
+                  ev = f"comment:{token}"
+              else:
+                  raise SystemExit(0)  # 普通评论：无审计面（噪音）
+          if ev is None:
+              audit("event=unrecognized verdict=noop"); raise SystemExit(0)
+
+          # ---- sender_role（INV-02：API 判定，不硬编码用户名）----
+          actor = E.get("ACTOR") or ""
+          role = "none"
+          if actor == "cloudbrid-agent[bot]":
+              role = "agent"
+          else:
+              st, m = api(E["GOV_TOKEN"], f"/orgs/{ORG}/memberships/{actor}")
+              if st == 200 and m.get("role") == "admin":
+                  role = "owner"
+          assoc = E.get("COMMENT_ASSOC") or "NONE"  # label 事件无此字段→NONE（guard 用 role）
+
+          # ---- 当前状态与标签集 ----
+          st, iss = api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}")
+          if st != 200:
+              audit(f"verdict=abort 读取 issue 失败 HTTP {st}"); raise SystemExit(1)
+          labels = {l["name"] for l in iss.get("labels", [])}
+          states = [n[len("state:"):] for n in labels if n.startswith("state:")]
+          current = states[0] if states else "ir-draft"
+          if len(states) > 1:
+              audit(f"verdict=abort 多状态标签并存: {states}"); raise SystemExit(1)
+
+          # ---- 转移表匹配（幂等：from_state 不符=no-op）----
+          table = yaml.safe_load(open("governance/transitions.yaml", encoding="utf-8"))
+          cands = [t for t in table["transitions"] if t["event"] == ev]
+          t = next((x for x in cands if x["from_state"] == current), None)
+          if t is None:
+              audit(f"event={ev} from={current} verdict=noop（无匹配转移——跳态/重复/未列组合）")
+              raise SystemExit(0)
+
+          # ---- guard 受限求值 ----
+          env_vars = {"sender_role": role, "author_association": assoc, "label_set": labels}
+          ok = False
+          try:
+              ok = bool(eval(t["guard"], {"__builtins__": {}}, dict(env_vars)))
+          except Exception as e:
+              audit(f"verdict=abort guard 求值失败 {t['id']}: {e}"); raise SystemExit(1)
+
+          def swap_state(frm, to):
+              enc_from = urllib.parse.quote(f"state:{frm}", safe="")
+              api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3A{frm}", "DELETE")
+              api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels",
+                  "POST", {"labels": [f"state:{to}"]})
+
+          if not ok:
+              # 静默丢弃（AC-11）：回退标签、不评论、不启动
+              if ev.startswith("label:"):
+                  api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/"
+                      + urllib.parse.quote(ev[len("label:"):], safe=""), "DELETE")
+              audit(f"event={ev} transition={t['id']} sender_role={role} assoc={assoc} "
+                    f"verdict=DENIED-silent-drop（标签已回退，无评论，无阶段启动）")
+              raise SystemExit(0)
+
+          # ---- 执行转移（状态标签写=App 身份，INV-02）----
+          out = open(E["GITHUB_OUTPUT"], "a", encoding="utf-8")
+          action = t["action"]
+          if action == "invoke:spec-author":
+              m = re.match(r"(IR-\d+)", iss.get("title") or "")
+              task_id = m.group(1) if m else f"ISSUE-{ISSUE}"
+              swap_state(t["from_state"], t["to_state"])
+              out.write(f"invoke=spec-author\nissue={ISSUE}\nir_ref={task_id} {REPO}#{ISSUE}\n")
+              audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
+                    f"{t['from_state']}->{t['to_state']} action=invoke:spec-author")
+          elif action == "claim":
+              swap_state(t["from_state"], t["to_state"])
+              api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/assignees", "POST", {"assignees": [actor]})
+              out.write("invoke=none\n")
+              audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
+                    f"claim->in-progress assignee={actor}")
+          else:
+              swap_state(t["from_state"], t["to_state"])
+              out.write("invoke=none\n")
+              audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
+                    f"{t['from_state']}->{t['to_state']} action=noop")
+          out.close()
+          PYEOF
+      - name: 幂等键落盘（{issue, from, to}——重复投递复核凭据）
+        if: steps.route.outputs.invoke == 'spec-author'
+        run: |
+          echo "transition-key: {issue: ${{ steps.route.outputs.issue }}, to: spec} @ $(date -u +%FT%TZ)"
+
+  spec:
+    # spec-author 钉发布 tag 的 commit SHA（供应链；ADR-0049/0050）
+    needs: route
+    if: needs.route.outputs.invoke == 'spec-author'
+    uses: Cloudbird-Software/CI-Workflows/.github/workflows/spec-author.yml@b89d88696a5b184447c317851e9bcbebb733a439
+    with:
+      issue_number: ${{ fromJson(needs.route.outputs.issue) }}
+      target_repo: 'Cloudbird-Software/.github'
+      ir_ref: ${{ needs.route.outputs.ir_ref }}
+    # 显式传递（zizmor secrets-inherit：调用方 secrets 必须显式点名）
+    secrets:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      CB_APP_ID: ${{ secrets.CB_APP_ID }}
+      AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
+
+  on-failure:
+    # BEH-01：启动失败在原 issue 评论原因（人类只看 issue 就能知道卡在哪）
+    needs: [route, spec]
+    if: always() && (needs.route.result == 'failure' || needs.spec.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 评论失败原因
+        env:
+          CB_APP_ID: ${{ secrets.CB_APP_ID }}
+          AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
+          ISSUE: ${{ needs.route.outputs.issue }}
+          ROUTE_RC: ${{ needs.route.result }}
+          SPEC_RC: ${{ needs.spec.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TOKEN=$(REPO=.github CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
+                  bash scripts/gh-app-token.sh)
+          gh api "repos/Cloudbird-Software/.github/issues/$ISSUE/comments" \
+            -f body="**conductor：spec 阶段启动失败**（BEH-01，须人类介入）
+          route=${ROUTE_RC} spec=${SPEC_RC}
+          run：${RUN_URL}
+          状态已停于当前态；修复后 owner 评论 /start 或重打 state:ir-signed 重试。" \
+            && echo "AUDIT | issue=#$ISSUE | verdict=failure-notified"
