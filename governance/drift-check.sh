@@ -640,7 +640,9 @@ else
     while :; do
       CHUNK=$(api "https://api.github.com/repos/$ORG/$r/labels?per_page=100&page=$RL_PAGE")
       if ! jq -e 'type == "array"' <<<"$CHUNK" >/dev/null 2>&1; then
-        drift "repo '$r' 标签清单拉取失败（$(jq -r '.message // "非数组"' <<<"$CHUNK" 2>/dev/null || echo 传输失败)）——标签对账跳过（fail-closed）"
+        CHUNK_MSG=$(jq -r '.message // "非数组"' <<<"$CHUNK" 2>/dev/null || true)
+        [[ -z "$CHUNK" ]] && CHUNK_MSG="传输失败（空响应）"
+        drift "repo '$r' 标签清单拉取失败（$CHUNK_MSG）——标签对账跳过（fail-closed）"
         LBL_DRIFT=1; RL_ERR=1; break
       fi
       RL_N=$(jq 'length' <<<"$CHUNK"); [[ "$RL_N" -eq 0 ]] && break

@@ -16,6 +16,7 @@
       "exclude": []
     }
   },
+  "bypass_actors": [],
   "rules": [
     {
       "type": "workflows",
