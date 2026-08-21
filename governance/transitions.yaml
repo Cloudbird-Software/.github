@@ -15,8 +15,11 @@ version: 1
 states: [ir-draft, ir-signed, spec, redteam, wave-planned, ready, in-progress, quarantine, needs-human, done]
 
 transitions:
-  - id: T1  # 主通路：owner/agent 打签署标签 → 进 spec 阶段（BEH-01）
-    from_state: ir-draft
+  - id: T1  # 主通路：owner/agent 打签署标签 → 进 spec 阶段（BEH-01）。
+    # from_state=ir-signed：label 事件送达时签署标签已生效（当前态即 ir-signed）——
+    # 首版误写 ir-draft 导致必然 no-op（#143 实测 AUDIT: from=ir-signed verdict=noop）。
+    # 守卫不过=回退该标签（退回 ir-draft）；幂等：已在 spec 态则无匹配=no-op。
+    from_state: ir-signed
     event: label:state:ir-signed
     to_state: spec
     action: invoke:spec-author
