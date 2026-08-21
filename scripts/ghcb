@@ -33,7 +33,7 @@ case "$CMD" in
   next)
     REPO_ARG="${2:-$(origin_repo)}"
     [[ -n "$REPO_ARG" ]] || { echo "错误：不在 git 仓内且未指定仓（用法: ghcb next [repo]）" >&2; exit 2; }
-    gh issue list --repo "$REPO_ARG" --label state:ready --state open       --json number,title --jq '.[] | "#\(.number) \(.title)"'       || { echo "查询失败：检查 gh 凭据（gh auth login）与仓权限" >&2; exit 2; }
+    gh issue list --repo "$(norm_repo "$REPO_ARG")" --label state:ready --state open       --json number,title --jq '.[] | "#\(.number) \(.title)"'       || { echo "查询失败：检查 gh 凭据（gh auth login）与仓权限" >&2; exit 2; }
     ;;
   claim)
     # 参数序 <issue#> [repo]（首版误把 $1 当 repo，PR#157 修正）
@@ -43,7 +43,7 @@ case "$CMD" in
     # MSYS 路径转换豁免：Git Bash 会把以 / 开头的参数改写成 Windows 路径
     # （实测 "/claim"→"D:/development/Git/claim"，conductor 白名单不认）；
     # 非 MSYS 环境该 env 为无害空设
-    MSYS2_ARG_CONV_EXCL='/claim' MSYS_NO_PATHCONV=1       gh issue comment "$N" --repo "$REPO_ARG" --body "/claim" >/dev/null
+    MSYS2_ARG_CONV_EXCL='/claim' MSYS_NO_PATHCONV=1       gh issue comment "$N" --repo "$(norm_repo "$REPO_ARG")" --body "/claim" >/dev/null
     echo "已评论 /claim（#$N @$REPO_ARG）——conductor 转介 arbiter CAS 裁决并置 state:in-progress；确认：ghcb status $N"
     ;;
   release)
@@ -51,7 +51,7 @@ case "$CMD" in
     N="${2:?用法: ghcb release <issue#> [repo]}"
     REPO_ARG="${3:-$(origin_repo)}"
     [[ -n "$REPO_ARG" ]] || { echo "错误：不在 git 仓内且未指定仓" >&2; exit 2; }
-    MSYS2_ARG_CONV_EXCL='/release' MSYS_NO_PATHCONV=1       gh issue comment "$N" --repo "$REPO_ARG" --body "/release" >/dev/null
+    MSYS2_ARG_CONV_EXCL='/release' MSYS_NO_PATHCONV=1       gh issue comment "$N" --repo "$(norm_repo "$REPO_ARG")" --body "/release" >/dev/null
     echo "已评论 /release（#$N @$REPO_ARG）——conductor 转介 arbiter 释放租约（仅 holder/owner）；确认：ghcb status $N"
     ;;
   status)
@@ -63,14 +63,17 @@ case "$CMD" in
     gh issue view "$N" --repo "$FULL" --json number,title,state,labels,assignees \
       --jq '"#\(.number) \(.title)\n  状态: \(.state) | 标签: \([.labels[].name] | join(", ")) | assignee: \([.assignees[].login] | join(", "))"' \
       || { echo "查询失败：检查 gh 凭据与仓权限" >&2; exit 2; }
-    REF="refs/leases/${ORG}__${NAME}__${N}"
-    if SHA=$(gh api "repos/$LEAS_REPO/git/ref/$REF" --jq '.object.sha' 2>/dev/null); then
+    # GET /git/ref/{ref} 的 ref 参数不带 refs/ 前缀（heads/main 而非 refs/heads/main；
+    # 带 refs/ 前缀恒 404——实测），展示仍用完整 ref 名符合 git 语义
+    REF_FULL="refs/leases/${ORG}__${NAME}__${N}"
+    REF_API="leases/${ORG}__${NAME}__${N}"
+    if SHA=$(gh api "repos/$LEAS_REPO/git/ref/$REF_API" --jq '.object.sha' 2>/dev/null); then
       MSG=$(gh api "repos/$LEAS_REPO/git/commits/$SHA" --jq '.message' 2>/dev/null || true)
       HOLDER=$(grep -o '"holder": *"[^"]*"' <<<"$MSG" | head -1 | sed 's/.*"holder": *"//; s/"$//' || true)
       EXP=$(grep -o '"expires_at": *"[^"]*"' <<<"$MSG" | head -1 | sed 's/.*"expires_at": *"//; s/"$//' || true)
-      echo "  租约: holder=${HOLDER:-?} expires_at=${EXP:-?}（ref $REF）"
+      echo "  租约: holder=${HOLDER:-?} expires_at=${EXP:-?}（ref $REF_FULL）"
     else
-      echo "  租约: 无活跃租约（ref $REF 不存在）"
+      echo "  租约: 无活跃租约（ref $REF_FULL 不存在）"
     fi
     ;;
   card-meta)

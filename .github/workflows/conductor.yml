@@ -86,6 +86,11 @@ jobs:
           E = os.environ
           ORG, REPO = "Cloudbird-Software", E["REPO"]
           ISSUE = E["ISSUE_NUMBER"]
+          # issue 输出最先落盘：后续任何失败路径（读 issue 失败/仲裁 infra/状态写失败）
+          # 都会触发 on-failure，届时 needs.route.outputs.issue 必须非空（BEH-01 通知要求）
+          if E.get("GITHUB_OUTPUT"):
+              with open(E["GITHUB_OUTPUT"], "a", encoding="utf-8") as _o:
+                  _o.write(f"issue={ISSUE}\n")
           def api(token, path, method="GET", body=None):
               data = json.dumps(body).encode() if body is not None else None
               req = urllib.request.Request(f"https://api.github.com{path}", data=data, method=method,
@@ -184,10 +189,15 @@ jobs:
               audit(f"verdict=abort guard 求值失败 {t['id']}: {e}"); raise SystemExit(1)
 
           def swap_state(frm, to):
-              enc_from = urllib.parse.quote(f"state:{frm}", safe="")
-              api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3A{frm}", "DELETE")
-              api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels",
-                  "POST", {"labels": [f"state:{to}"]})
+              # 写结果逐项检查（ADR-0055）：标签写失败=状态面失真——不许“路由记 allow
+              # 但卡未变更”静默成功，抛 WriteFail 交上层 fail-closed/租约补偿
+              st_del, _ = api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3A{frm}", "DELETE")
+              if st_del not in (200, 204):
+                  raise WriteFail(f"删标签 state:{frm} HTTP {st_del}")
+              st_add, _ = api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels",
+                              "POST", {"labels": [f"state:{to}"]})
+              if st_add not in (200, 201):
+                  raise WriteFail(f"加标签 state:{to} HTTP {st_add}")
 
           if not ok:
               # 静默丢弃（AC-11）：回退标签、不评论、不启动
@@ -212,28 +222,50 @@ jobs:
               audit(f"event={ev} transition={t['id']} sender_role={role} arbiter=allow "
                 f"（租约已建——T3 落地；TTL 到期由下一 /claim 原子接管，ADR-0054）")
 
-          # ---- 执行转移（状态标签写=App 身份，INV-02）----
+          # ---- 执行转移（状态标签写=App 身份，INV-02；写失败=fail-closed，
+          # /claim 已建租约时先补偿回滚——杜绝“租约在、卡未变”的不一致面，ADR-0055）----
+          class WriteFail(Exception):
+              pass
+
           out = open(E["GITHUB_OUTPUT"], "a", encoding="utf-8")
-          action = t["action"]
-          if action == "invoke:spec-author":
-              m = re.match(r"(IR-\d+)", iss.get("title") or "")
-              task_id = m.group(1) if m else f"ISSUE-{ISSUE}"
-              swap_state(t["from_state"], t["to_state"])
-              out.write(f"invoke=spec-author\nissue={ISSUE}\nir_ref={task_id} {REPO}#{ISSUE}\n")
-              audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
-                    f"{t['from_state']}->{t['to_state']} action=invoke:spec-author")
-          elif action == "claim":
-              swap_state(t["from_state"], t["to_state"])
-              api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/assignees", "POST", {"assignees": [actor]})
-              out.write("invoke=none\n")
-              audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
-                    f"claim->in-progress assignee={actor}")
-          else:
-              swap_state(t["from_state"], t["to_state"])
-              out.write("invoke=none\n")
-              audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
-                    f"{t['from_state']}->{t['to_state']} action=noop")
-          out.close()
+          try:
+              action = t["action"]
+              if action == "invoke:spec-author":
+                  m = re.match(r"(IR-\d+)", iss.get("title") or "")
+                  task_id = m.group(1) if m else f"ISSUE-{ISSUE}"
+                  swap_state(t["from_state"], t["to_state"])
+                  out.write(f"invoke=spec-author\nir_ref={task_id} {REPO}#{ISSUE}\n")
+                  audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
+                        f"{t['from_state']}->{t['to_state']} action=invoke:spec-author")
+              elif action == "claim":
+                  lease_created = ev == "comment:/claim"  # 裁决 allow 时租约已建
+                  try:
+                      swap_state(t["from_state"], t["to_state"])
+                      st_as, _ = api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/assignees",
+                                     "POST", {"assignees": [actor]})
+                      if st_as not in (200, 201):
+                          raise WriteFail(f"置 assignee HTTP {st_as}")
+                  except WriteFail as e:
+                      if lease_created:
+                          # 补偿：同 sender 裁决 /release（holder 本人可成）→ 租约回滚，
+                          # 卡回到可重试态；随后 fail-closed 退出，delivery 幂等可安全重投
+                          audit(f"event={ev} transition={t['id']} write-fail {e}"
+                                f"——补偿回滚刚建的租约（adjudicate /release）")
+                          adjudicate("/release")
+                      raise
+                  out.write("invoke=none\n")
+                  audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
+                        f"claim->in-progress assignee={actor}")
+              else:
+                  swap_state(t["from_state"], t["to_state"])
+                  out.write("invoke=none\n")
+                  audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
+                        f"{t['from_state']}->{t['to_state']} action=noop")
+          except WriteFail as e:
+              audit(f"event={ev} verdict=ABORT 状态写失败 {e}（fail-closed；delivery 幂等可安全重投）")
+              raise SystemExit(1)
+          finally:
+              out.close()
           PYEOF
       - name: 幂等键落盘（{issue, from, to}——重复投递复核凭据）
         if: steps.route.outputs.invoke == 'spec-author'

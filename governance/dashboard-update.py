@@ -45,13 +45,20 @@ NOW = _dt.datetime.now(_dt.timezone.utc)
 TRIGGER = os.environ.get("BUTLER_TRIGGER") or "manual"
 APP_BOT = "cloudbrid-agent[bot]"
 JSON_MARK = "<!-- dashboard-json -->"
+FENCE = "`" * 8  # 长于任何合理用户输入的 fence（标题可含 ```——防截断机器可读区）
+
+
+def _safe_text(s):
+    """剥离用户可控文本里可破坏 fence / 伪造区标记的字面量（标题进 body 的必经清洗）。"""
+    return (str(s or "").replace("`", "'")
+            .replace("<!--", "<! --").replace("-->", "-- >"))
 
 
 class Infra(Exception):
     pass
 
 
-def _req(url, body=None, method=None, ok_codes=(200, 201)):
+def _req(url, body=None, method=None):  # 状态码判定归调用方（send/显式检查）——不设 ok_codes 形参以免“声明了却不用”
     headers = {"Authorization": f"Bearer {TOKEN}", "User-Agent": "dashboard-update",
                "Accept": "application/vnd.github+json"}
     data = json.dumps(body).encode() if body is not None else None
@@ -80,7 +87,7 @@ def get(path):
 
 
 def send(method, path, body, ok_codes=(200, 201)):
-    st, payload = _req(f"{GH_API}{path}", body, method, ok_codes)
+    st, payload = _req(f"{GH_API}{path}", body, method)
     if st not in ok_codes:
         raise Infra(f"{method} {path} HTTP {st}: {str(payload.get('message'))[:160]}")
     return payload
@@ -112,10 +119,14 @@ def scan_cards(repos):
             for it in batch:
                 if "pull_request" in it:
                     continue
-                sl = [l["name"] for l in it.get("labels", []) if str(l.get("name", "")).startswith("state:")]
+                sl = sorted(l["name"] for l in it.get("labels", [])
+                            if str(l.get("name", "")).startswith("state:"))
                 if not sl:
                     continue
-                cards.append({"repo": repo, "number": it["number"], "title": it["title"],
+                if len(sl) > 1:  # 真相源唯一性被破坏（宪法 §12）——排序取首保证两投影一致
+                    print(f"WARN multi-state {repo}#{it['number']}: {sl}"
+                          f"——多 state 标签并存，本轮取 {sl[0]}，请修标签")
+                cards.append({"repo": repo, "number": it["number"], "title": _safe_text(it["title"]),
                               "state": sl[0][len("state:"):],
                               "assignee": (it.get("assignees") or [{}])[0].get("login", ""),
                               "url": it["html_url"], "updated_at": it.get("updated_at") or "",
@@ -175,8 +186,13 @@ def sli_stuck(repos):
     cutoff = NOW - _dt.timedelta(hours=24)
     stuck = 0
     for repo in repos:
-        prs = get(f"/repos/{ORG}/{repo}/pulls?state=open&per_page=100")
-        stuck += sum(1 for pr in prs if _iso(pr.get("created_at")) < cutoff)
+        page = 1  # 分页拉全量（>100 open PR 单页漏计——与 scan_cards 同教训）
+        while True:
+            prs = get(f"/repos/{ORG}/{repo}/pulls?state=open&per_page=100&page={page}")
+            stuck += sum(1 for pr in prs if _iso(pr.get("created_at")) < cutoff)
+            if len(prs) < 100:
+                break
+            page += 1
     return stuck
 
 
@@ -219,9 +235,9 @@ def render_body(payload):
 ## 机器可读区（agent 一次读取全局；历史留痕=本 issue 编辑历史）
 
 {JSON_MARK}
-```json
+{FENCE}json
 {json.dumps(payload, ensure_ascii=False, indent=2)}
-```
+{FENCE}
 
 ## 人类一屏摘要
 
@@ -236,21 +252,29 @@ def render_body(payload):
 
 
 def ensure_issue(body):
-    """幂等找到/创建账本 issue；返回 (number, created)。"""
+    """幂等找到/创建账本 issue；返回 (number, created)。
+
+    查找范围 state=all（含已关闭：账本被人工关闭后复用之，不得重复创建——
+    否则账本分裂、编辑历史散落）；/issues 端点混入 PR，须按 "pull_request"
+    键排除后再匹配标题。
+    """
     found = None
     page = 1
     while True:
-        batch = get(f"/repos/{ORG}/{HOME_REPO}/issues?state=open&per_page=100&page={page}")
-        found = next((i for i in batch if i["title"] == ISSUE_TITLE), None)
+        batch = get(f"/repos/{ORG}/{HOME_REPO}/issues?state=all&per_page=100&page={page}")
+        found = next((i for i in batch
+                      if "pull_request" not in i and i["title"] == ISSUE_TITLE), None)
         if found or len(batch) < 100:
             break
         page += 1
     if found:
         return found["number"], False
-    # 幂等建 label（422=已存在，容忍）
-    _req(f"{GH_API}/repos/{ORG}/{HOME_REPO}/labels",
-         {"name": LABEL["name"], "color": LABEL["color"], "description": LABEL["description"]},
-         "POST", ok_codes=(201, 422))
+    # 幂等建 label（201=新建，422=已存在；其余=真故障——fail-closed 不静默）
+    st, payload = _req(f"{GH_API}/repos/{ORG}/{HOME_REPO}/labels",
+                       {"name": LABEL["name"], "color": LABEL["color"],
+                        "description": LABEL["description"]}, "POST")
+    if st not in (201, 422):
+        raise Infra(f"POST labels HTTP {st}: {str(payload.get('message'))[:160]}")
     if DRY_RUN:
         print(f"[dry-run] 将创建 dashboard 账本 issue「{ISSUE_TITLE}」")
         return None, True
@@ -260,18 +284,37 @@ def ensure_issue(body):
 
 
 def project_url():
-    """只读取 factory-floor 项目链接（board-sync 已建；失败不阻塞账本——置空）。"""
+    """只读取 factory-floor 项目链接（board-sync 已建；失败不阻塞账本——置空）。
+
+    projectsV2 游标翻页（与 board-sync.ensure_project 同判据）：org 项目 >100 时
+    目标不在首页，不翻页会把“存在”误判为“不存在”。
+    """
     try:
-        st, payload = _req(f"{GH_API}/graphql", {
-            "query": "query($o:String!){ organization(login:$o){ projectsV2(first:100){ nodes{ title url } } } }",
-            "variables": {"o": ORG}}, "POST")
-        if st == 200 and not payload.get("errors"):
-            for p in payload["data"]["organization"]["projectsV2"]["nodes"]:
+        cur = None
+        while True:
+            st, payload = _req(f"{GH_API}/graphql", {
+                "query": "query($o:String!,$cur:String){ organization(login:$o){"
+                         " projectsV2(first:100, after:$cur){ nodes{ title url }"
+                         " pageInfo{ hasNextPage endCursor } } } }",
+                "variables": {"o": ORG, "cur": cur}}, "POST")
+            if st != 200 or payload.get("errors"):
+                break
+            conn = payload["data"]["organization"]["projectsV2"]
+            for p in conn["nodes"]:
                 if p["title"] == "factory-floor":
                     return p["url"]
+            if not conn["pageInfo"]["hasNextPage"]:
+                break
+            cur = conn["pageInfo"]["endCursor"]
     except Exception:
         pass
     return ""
+
+
+def _stable(body):
+    """剥离每轮必变的时间戳再比对（generated_at 精度到秒——不剥离则“内容相同
+    跳过写”永不生效，每 15min 一条无意义编辑淹没 issue 历史）。"""
+    return re.sub(r'"generated_at":\s*"[^"]*"', '"generated_at":"-"', body).strip()
 
 
 def main():
@@ -294,7 +337,7 @@ def main():
             return 0
         if not created:
             cur = get(f"/repos/{ORG}/{HOME_REPO}/issues/{num}")
-            if (cur.get("body") or "").strip() == body.strip():
+            if _stable(cur.get("body") or "") == _stable(body):
                 stats["unchanged"] = 1
             elif DRY_RUN:
                 print(f"[dry-run] 将编辑 issue #{num} body（{len(body)} 字节）")
