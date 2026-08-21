@@ -98,7 +98,8 @@
   "org_secrets_required": [
     "CB_APP_ID",
     "AGENT_APP_SECRET",
-    "GOVERNANCE_TOKEN"
+    "GOVERNANCE_TOKEN",
+    "LLM_API_KEY"
   ],
   "github_app": {
     "name": "cloudbrid-agent",
