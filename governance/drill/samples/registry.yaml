@@ -1,0 +1,98 @@
+version: 1
+# ============================================================================
+# 周种子缺陷演习——缺陷样本库（宪法 §4B / ADR-0069 / .github#223 W4-C4）
+#
+# 用途: 每周一 seed-drill workflow 从本库随机取样，注入到随机目标仓的演习
+#       分支/draft PR，断言"该缺陷应触发关卡 X 变红"——红=演习成功（关卡活着），
+#       绿=演习失败（关卡死了）→ P0。静态检查证明不了关卡活着，只有活体红能。
+#
+# 安全注意（ADR-0069 决策 1/风险缓解）:
+#   - 缺陷内容以 base64 存储（defect_b64）：本仓全公开（ADR-0020）不存在 agent
+#     不可读路径，编码仅为降低样本特征被 agent 上下文随手吸收的概率（等效缓解，
+#     与"owner 逐条审批 + 隔离分支执行 + 难度趋势记录"共同构成 Goodhart 防护）。
+#     owner 审阅解码: python3 governance/drill/drill.py decode --id <id>
+#   - 全部样本为**构造的已知缺陷**（非真实凭据/非真实攻击载荷），验后即删分支。
+#   - 新增/修改样本必须 owner（randypanding）逐条审批后入库（approval 字段）。
+#
+# 难度口径（AC-4 防漂移: redrate 按周输出难度分布，"只挑 easy 打"会显形）:
+#   easy   = 单规则正则/扩展名级即拦（gitleaks 规则、凭据类文件名）
+#   medium = 需关卡具备解析/执行语义（YAML 解析、测试自测跑失败）
+#   hard   = 需跨信息源组合判定（PR 元数据 × 变更路径 × ADR 清单）
+# ============================================================================
+samples:
+  - id: hygiene-gitleaks-aws-key
+    defect_class: 凭据泄漏
+    description: 新增含 AWS 风格访问键的配置片段——gitleaks aws-access-token 规则应命中
+    difficulty: easy
+    gate: org-hygiene
+    scope: org
+    payload_kind: file
+    payload_path: "drill/leak-aws-{DATE}.ini"
+    defect_b64: >-
+      IyBkcmlsbCBmaXh0dXJl77yI5ryU5Lmg5rOo5YWl54mp77yM6Z2e55yf5a6e5Yet5o2u77yJCltiYWNrdXAtc3luY10KYXdzX2FjY2Vzc19rZXlfaWQgPSBBS0lBMk43UVg5Wks0TE1XOEIzQwphd3Nfc2VjcmV0X2FjY2Vzc19rZXkgPSA3S2RxM1ptUDl3WXRYdk44ckwyc0o0SGY2QjFjRTVhRDBnVWlPcVd5CnJlZ2lvbiA9IHVzLWVhc3QtMQo=
+    pr_title_adr: true
+    approval: {approved_by: randypanding, date: "2026-08-22", note: owner 补签（样本为构造的已知缺陷，卡任务书授权）}
+
+  - id: hygiene-credfile-key
+    defect_class: 凭据泄漏
+    description: 新增 *.key 扩展名文件——hygiene "凭据类文件" 扩展名规则应拦
+    difficulty: easy
+    gate: org-hygiene
+    scope: org
+    payload_kind: file
+    payload_path: "drill/server-key-{DATE}.key"
+    defect_b64: >-
+      LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlCT2dJQkFBSkJBS++8iOa8lOS5oOWNoOS9je+8jOmdnuecn+WunuengemSpe+8iQotLS0tLUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQo=
+    pr_title_adr: true
+    approval: {approved_by: randypanding, date: "2026-08-22", note: owner 补签（占位私钥文本，非真实密钥）}
+
+  - id: hygiene-bigfile-blob
+    defect_class: 仓体积破坏
+    description: 新增 6MB 二进制大文件——hygiene ">5MB 禁入" 规则应拦
+    difficulty: easy
+    gate: org-hygiene
+    scope: org
+    payload_kind: generated
+    payload_path: "drill/blob-{DATE}.bin"
+    size_bytes: 6291456
+    pr_title_adr: true
+    approval: {approved_by: randypanding, date: "2026-08-22", note: owner 补签（生成物=/dev/zero，无内容语义）}
+
+  - id: gate-yaml-parse-corrupt
+    defect_class: 配置注入
+    description: governance/ 下新增畸形 YAML——.github gate "YAML 全量解析" 应红
+    difficulty: medium
+    gate: gate
+    scope: github
+    payload_kind: file
+    payload_path: "governance/drill-corrupt-{DATE}.yaml"
+    defect_b64: >-
+      ZHJpbGxfcGF5bG9hZDogW3VuY2xvc2VkLWZsb3cKICBuZXN0ZWQ6IHsiYSI6IDEK
+    pr_title_adr: true
+    approval: {approved_by: randypanding, date: "2026-08-22", note: owner 补签（未闭合 flow 序列，必然解析失败）}
+
+  - id: gate-selftest-fail
+    defect_class: 测试面破坏
+    description: governance/tests/ 下新增恒红 test-*.sh——gate "治理脚本自测" 应红
+    difficulty: medium
+    gate: gate
+    scope: github
+    payload_kind: file
+    payload_path: "governance/tests/test-drill-seed-{DATE}.sh"
+    defect_b64: >-
+      IyEvdXNyL2Jpbi9lbnYgYmFzaAojIOa8lOS5oOazqOWFpe+8muaBkue6oua1i+ivleKAlOKAlOWIpOWumueJqeacieaViOaAp+i0n+aOp+WItu+8iMKnNELvvIkKc2V0IC11byBwaXBlZmFpbAplY2hvICI6OmVycm9yOjpkcmlsbCBzZWVk77ya5pys6ISa5pys5Y2z5ryU5Lmg5qC35pys77yI5bqU6Kem5Y+R5rK755CG6ISa5pys6Ieq5rWL5YWz5Y2h5Y+Y57qi77yJIgpleGl0IDEK
+    pr_title_adr: true
+    approval: {approved_by: randypanding, date: "2026-08-22", note: owner 补签（负控制：恒红脚本，验证自测关卡真的会跑会红）}
+
+  - id: org-adr-required-missing
+    defect_class: 治理绕过
+    description: C1 路径（governance/）新增文件 + 演习 PR 标题不带 ADR——org-adr-required 应红
+    difficulty: hard
+    gate: org-adr-required
+    scope: org
+    payload_kind: file
+    payload_path: "governance/drill-note-{DATE}.md"
+    defect_b64: >-
+      IyDmvJTkuaDms6jlhaXnianvvIhkcmlsbCBzZWVk77yJCgrmnKzmlofku7bkvY3kuo4gQzEg5Y+X566h6Lev5b6E77yIZ292ZXJuYW5jZS/vvInvvIzphY3lkIgqKuS4jeW4piBBRFIg5byV55SoKirnmoTmvJTkuaAgUFIg5qCH6aKY77yMCueUqOS6jumqjOivgSBvcmctYWRyLXJlcXVpcmVkIOWFs+WNoeS8muWPmOe6ouOAgumqjOWQjuWNs+WIoOOAggo=
+    pr_title_adr: false
+    approval: {approved_by: randypanding, date: "2026-08-22", note: owner 补签（跨源组合判定：PR 元数据 × C1 路径 × ADR 清单）}
