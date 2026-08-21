@@ -206,3 +206,5 @@ if [[ "$ESCALATE" == "ESCALATE" ]]; then
     && exit 1
 fi
 exit 0
+
+# retrigger（ADR-0059 已合并，org-gate 需新事件）
