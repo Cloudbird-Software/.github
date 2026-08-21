@@ -126,19 +126,45 @@ def scan_cards(repos):
     return cards
 
 
+Q_MERGED_PRS = """query($o:String!,$r:String!,$cur:String){
+  repository(owner:$o,name:$r){
+    pullRequests(states:MERGED, first:100, after:$cur,
+                 orderBy:{field:UPDATED_AT,direction:DESC}){
+      pageInfo{ hasNextPage endCursor }
+      nodes{ mergedAt updatedAt mergedBy{ login } } } } }"""
+
+
 def sli_automerge(repos):
-    """近 7 天 merged PR 中 App 身份合并占比（proxy；零分母→null N/A，#98 T2）。"""
+    """近 7 天 merged PR 中 App 身份合并占比（proxy；零分母→null N/A，#98 T2）。
+
+    GraphQL 批量取 mergedBy（REST 列表端点不含该字段、逐 PR detail 在 15min
+    节奏下配额浪费——ADR-0055 决策 8 的诚实轻量实现）。
+    """
     since = NOW - _dt.timedelta(days=7)
     merged, auto = 0, 0
     for repo in repos:
-        prs = get(f"/repos/{ORG}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=30")
-        for pr in prs:
-            if not pr.get("merged_at") or _iso(pr["merged_at"]) < since:
-                continue
-            merged += 1
-            detail = get(f"/repos/{ORG}/{repo}/pulls/{pr['number']}")
-            if (detail.get("merged_by") or {}).get("login") == APP_BOT:
-                auto += 1
+        cur = None
+        while True:
+            body = {"query": Q_MERGED_PRS,
+                    "variables": {"o": ORG, "r": repo, "cur": cur}}
+            st, payload = _req(f"{GH_API}/graphql", body, "POST")
+            if st != 200 or payload.get("errors"):
+                raise Infra(f"GraphQL merged PRs {repo} HTTP {st}: "
+                            + json.dumps(payload.get("errors", payload), ensure_ascii=False)[:200])
+            conn = payload["data"]["repository"]["pullRequests"]
+            page_min_updated = min((_iso(n["updatedAt"]) for n in conn["nodes"]),
+                                   default=_dt.datetime(1970, 1, 1, tzinfo=_dt.timezone.utc))
+            for n in conn["nodes"]:
+                if not n.get("mergedAt") or _iso(n["mergedAt"]) < since:
+                    continue
+                merged += 1
+                if (n.get("mergedBy") or {}).get("login") == APP_BOT:
+                    auto += 1
+            # 按 UPDATED_AT 倒序翻页：页内最小 updatedAt 已出窗即止——后续页
+            # updatedAt 更旧，而 mergedAt<=updatedAt，不可能再有 7 天内合并
+            if page_min_updated < since or not conn["pageInfo"]["hasNextPage"]:
+                break
+            cur = conn["pageInfo"]["endCursor"]
     if merged == 0:
         return None, 0
     return round(auto / merged, 4), merged

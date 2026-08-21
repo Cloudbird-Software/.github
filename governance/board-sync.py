@@ -67,7 +67,13 @@ def _req(url, body=None, method=None, graphql=False):
 def gql(query, variables):
     st, payload = _req(f"{GH_API}/graphql", {"query": query, "variables": variables}, "POST")
     if st != 200 or payload.get("errors"):
-        raise Infra(f"GraphQL HTTP {st}: {json.dumps(payload.get('errors', payload), ensure_ascii=False)[:300]}")
+        # 报 message+problems，不回显 input value（含 id 等噪音）
+        msgs = []
+        for e in (payload.get("errors") or [payload])[:3]:
+            m = e.get("message", str(e))[:200]
+            probs = "; ".join(f"{p.get('path')}: {p.get('explanation')}" for p in (e.get("extensions") or {}).get("problems") or [])
+            msgs.append(m + (f" [{probs}]" if probs else ""))
+        raise Infra(f"GraphQL HTTP {st}: " + " | ".join(msgs))
     return payload["data"]
 
 
@@ -87,14 +93,54 @@ def api_send(method, path, body, ok_codes=(200, 201)):
 
 # ---------- 期望状态（state 全集与颜色唯一来源：expected-state.json#labels.items） ----------
 
+def _hex_to_option_color(hexs):
+    """expected-state 的 label hex → ProjectV2 单选选项颜色枚举（仅 8 色）。
+
+    确定性映射（HSV 色相分桶 + 低饱和→GRAY）——真源仍是 expected-state.json，
+    板选项颜色是其最近似展示，不参与任何判定。
+    """
+    try:
+        h = hexs.lstrip("#")
+        r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except Exception:
+        return "GRAY"
+    mx, mn = max(r, g, b), min(r, g, b)
+    if mx <= 0:  # 黑就近 GRAY（枚举无黑）
+        return "GRAY"
+    d = mx - mn
+    s = 0 if mx == 0 else d / mx
+    if s < 0.10:  # 阈值须放过淡彩（BFD4F2 类 pastel 蓝 s≈0.21）
+        return "GRAY"
+    if mx == r:
+        hue = 60 * ((g - b) / d) % 360
+    elif mx == g:
+        hue = 60 * ((b - r) / d) + 120
+    else:
+        hue = 60 * ((r - g) / d) + 240
+    if hue < 15 or hue >= 345:
+        return "RED"
+    if hue < 45:
+        return "ORANGE"
+    if hue < 70:
+        return "YELLOW"
+    if hue < 170:
+        return "GREEN"
+    if hue < 250:
+        return "BLUE"
+    return "PURPLE"
+
+
 def load_states():
     try:
         with open(os.path.join(DIR, "expected-state.json"), encoding="utf-8") as f:
             items = json.load(f)["labels"]["items"]
     except Exception as e:
         raise Infra(f"expected-state.json 读取失败: {e}") from e
-    states = [{"name": it["name"][len("state:"):], "color": "#" + it["color"]}
-              for it in items if it.get("name", "").startswith("state:")]
+    states = [{
+        "name": it["name"][len("state:"):],
+        "color": _hex_to_option_color(str(it.get("color", ""))),
+        "description": str(it.get("description") or it["name"][len("state:"):])[:256],
+    } for it in items if it.get("name", "").startswith("state:")]
     if not states:
         raise Infra("expected-state.json 无 state:* 标签——期望状态缺失（fail-closed，同 drift §16）")
     return states
@@ -149,8 +195,9 @@ def scan_cards(repos):
 Q_ORG = """query($org:String!){ organization(login:$org){
   id projectsV2(first:100){ nodes{ id title url } } } }"""
 Q_FIELDS = """query($pid:ID!){ node(id:$pid){ ... on ProjectV2 {
-  fields(first:50){ nodes{ __typename id name
-    ... on ProjectV2SingleSelectField{ options{ id name } } } } } } }"""
+  fields(first:50){ nodes{ __typename
+    ... on ProjectV2Field{ id name dataType }
+    ... on ProjectV2SingleSelectField{ id name options{ id name } } } } } } }"""
 Q_ITEMS = """query($pid:ID!,$cur:String){ node(id:$pid){ ... on ProjectV2 {
   items(first:100, after:$cur){ pageInfo{ hasNextPage endCursor } nodes{
     id content{ __typename ... on Issue{ id number url state updatedAt
@@ -163,16 +210,19 @@ Q_ITEMS = """query($pid:ID!,$cur:String){ node(id:$pid){ ... on ProjectV2 {
 M_CREATE_PROJECT = """mutation($i:CreateProjectV2Input!){
   createProjectV2(input:$i){ projectV2{ id url } } }"""
 M_CREATE_FIELD = """mutation($i:CreateProjectV2FieldInput!){
-  createProjectV2Field(input:$i){ projectV2Field{ id } } }"""
+  createProjectV2Field(input:$i){ projectV2Field{
+    ... on ProjectV2Field{ id } ... on ProjectV2SingleSelectField{ id } } } }"""
 M_UPDATE_FIELD = """mutation($i:UpdateProjectV2FieldInput!){
-  updateProjectV2Field(input:$i){ projectV2Field{ id } } }"""
-M_ADD_ITEM = """mutation($i:AddProjectV2ItemByContentIdInput!){
-  addProjectV2ItemByContentId(input:$i){ item{ id } } }"""
+  updateProjectV2Field(input:$i){ projectV2Field{
+    ... on ProjectV2Field{ id } ... on ProjectV2SingleSelectField{ id } } } }"""
+M_ADD_ITEM = """mutation($i:AddProjectV2ItemByIdInput!){
+  addProjectV2ItemById(input:$i){ item{ id } } }"""  # 本 API 版本无 ByContentId 变体（键 projectId/contentId）
 M_SET_VALUE = """mutation($i:UpdateProjectV2ItemFieldValueInput!){
-  updateProjectV2ItemFieldValue(input:$i){ projectV2Item{ id } } }"""
+  updateProjectV2ItemFieldValue(input:$i){ projectV2Item{ id } } }"""  # 输入键=projectId/itemId/fieldId
 
-FIELD_SPEC = [  # (字段名, 类型)——State 特殊（单选，选项=state 全集）
-    ("State", "SINGLE_SELECT"), ("Repo", "TEXT"), ("Assignee", "TEXT"),
+FIELD_SPEC = [  # (字段名, 类型)——State 单选（选项=state 全集）；中文仓/认领者避开
+    # GitHub 保留名（"Repo"/"Assignee" 会撞内建 Repository/Assignees → reserved 拒绝）
+    ("State", "SINGLE_SELECT"), ("仓", "TEXT"), ("认领者", "TEXT"),
     ("卡号", "NUMBER"), ("停留天数", "NUMBER"), ("AC 进度", "TEXT"),
 ]
 
@@ -204,19 +254,31 @@ def ensure_fields(pid, states):
                 print(f"[dry-run] 将创建字段 {name}({dtype})")
                 out[name] = None
                 continue
-            inp = {"projectID": pid, "name": name, "dataType": dtype}
+            inp = {"projectId": pid, "name": name, "dataType": dtype}
             if dtype == "SINGLE_SELECT":
+                # 选项 color=枚举（8 色）+description 必填（均来自 expected-state）
                 inp["singleSelectOptions"] = [
-                    {"name": s["name"], "color": s["color"]} for s in states]
+                    {"name": s["name"], "color": s["color"], "description": s["description"]}
+                    for s in states]
             f = gql(M_CREATE_FIELD, {"i": inp})["createProjectV2Field"]["projectV2Field"]
-        elif dtype == "SINGLE_SELECT":
+        elif dtype == "SINGLE_SELECT" and f.get("__typename") != "ProjectV2SingleSelectField":
+            raise Infra(f"字段 {name} 已存在但类型={f.get('__typename')}（期望单选）——人工核板")
+        elif dtype != "SINGLE_SELECT" and f.get("dataType") != dtype:
+            raise Infra(f"字段 {name} 已存在但 dataType={f.get('dataType')}（期望 {dtype}）——人工核板")
+        if dtype == "SINGLE_SELECT":
             have = {o["name"]: o["id"] for o in f.get("options") or []}
             missing = [s for s in states if s["name"] not in have]
             if missing:
-                merged = [{"name": n, "id": i} for n, i in have.items()] + [
-                    {"name": s["name"], "color": s["color"]} for s in missing]
+                # updateProjectV2Field 的 options 输入按名字匹配保留既有选项（不删
+                # 不重置），仅补缺失项；既有项 description/color 须回填（必填字段）
+                desc = {s["name"]: s["description"] for s in states}
+                color = {s["name"]: s["color"] for s in states}
+                merged = [{"name": n, "description": desc.get(n, n), "color": color.get(n, "GRAY")}
+                          for n in have] + [
+                    {"name": s["name"], "color": s["color"], "description": s["description"]}
+                    for s in missing]
                 if not DRY_RUN:
-                    gql(M_UPDATE_FIELD, {"i": {"projectID": pid, "fieldID": f["id"],
+                    gql(M_UPDATE_FIELD, {"i": {"projectId": pid, "fieldId": f["id"],
                                                "singleSelectOptions": merged}})
                 else:
                     print(f"[dry-run] State 单选补选项: {[s['name'] for s in missing]}")
@@ -257,8 +319,8 @@ def set_field(pid, item_id, field_id, kind, value):
     """单字段写入；value 形态按 kind：text/number/singleSelectOptionId。"""
     val = {kind: value}
     if not DRY_RUN:
-        gql(M_SET_VALUE, {"i": {"projectID": pid, "itemID": item_id,
-                                "fieldID": field_id, "value": val}})
+        gql(M_SET_VALUE, {"i": {"projectId": pid, "itemId": item_id,
+                                "fieldId": field_id, "value": val}})
 
 
 def main():
@@ -291,34 +353,44 @@ def main():
                 print(f"WARN unknown-state {c['repo']}#{c['number']}: label 态 {c['state']} "
                       f"不在 expected-state 全集——字段照设为文本态名，请修标签")
             entry = board.get(key)
+            preexisting = entry is not None  # 报警面只认"板上有旧值"的漂移（新增不算）
             if entry is None:
                 if DRY_RUN:
                     print(f"[dry-run] 将新增条目 {c['repo']}#{c['number']} "
                           f"State={c['state']} assignee={c['assignee'] or '-'}")
                     stats["added"] += 1
                     continue
-                item = gql(M_ADD_ITEM, {"i": {"projectID": pid, "contentID": c["node_id"]}})\
-                    ["addProjectV2ItemByContentId"]["item"]
+                item = gql(M_ADD_ITEM, {"i": {"projectId": pid, "contentId": c["node_id"]}})\
+                    ["addProjectV2ItemById"]["item"]
                 entry = {"item_id": item["id"], "fields": {}}
                 stats["added"] += 1
-            want = {"Repo": c["repo"], "Assignee": c["assignee"] or "",
+            want = {"仓": c["repo"], "认领者": c["assignee"] or "",
                     "卡号": c["number"], "停留天数": c["days_idle"],
                     "AC 进度": c["ac_progress"]}
             have = entry["fields"]
-            # State 先比对（漂移报警面 = 宪法 §12 人工改动将被纠正）
+            # State 先比对（漂移报警面 = 宪法 §12 人工改动将被纠正；仅对板上
+            # 既有条目报警——新增条目无旧值，不算人工改动）
             if have.get("State") != c["state"]:
-                print(f"WARN board-drift {c['repo']}#{c['number']}: "
-                      f"board={have.get('State')} label={c['state']}"
-                      f"（人工改动将被纠正，宪法 §12）")
-                stats["warned"] += 1
-                stats["corrected"] += 1
+                if preexisting:
+                    print(f"WARN board-drift {c['repo']}#{c['number']}: "
+                          f"board={have.get('State')} label={c['state']}"
+                          f"（人工改动将被纠正，宪法 §12）")
+                    stats["warned"] += 1
+                    stats["corrected"] += 1
                 if c["state"] in opt_ids:
                     set_field(pid, entry["item_id"], fields["State"],
                               "singleSelectOptionId", opt_ids[c["state"]])
                 else:  # 未知态兜底：文本写不进单选——报警留观，不 crash
                     print(f"WARN unknown-state {c['repo']}#{c['number']}: "
                           f"{c['state']} 无单选选项，跳过 State 写入")
-            diff = [k for k, v in want.items() if have.get(k) != v]
+            # 空值归一：板上未设(None/键缺失)与期望空串等价（空文本 GitHub 不落值）
+            diff = []
+            for k, v in want.items():
+                hv = have.get(k)
+                if hv is None and v == "":
+                    continue
+                if hv != v:
+                    diff.append(k)
             for k in diff:
                 kind = "number" if k in ("卡号", "停留天数") else "text"
                 set_field(pid, entry["item_id"], fields[k], kind, want[k])
