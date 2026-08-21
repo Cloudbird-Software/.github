@@ -26,7 +26,10 @@ case "$CMD" in
     N="${2:?用法: ghcb claim <issue#> [repo]}"
     REPO_ARG="${3:-$(origin_repo)}"
     [[ -n "$REPO_ARG" ]] || { echo "错误：不在 git 仓内且未指定仓" >&2; exit 2; }
-    gh issue comment "$N" --repo "$REPO_ARG" --body "/claim" >/dev/null
+    # MSYS 路径转换豁免：Git Bash 会把以 / 开头的参数改写成 Windows 路径
+    # （实测 "/claim"→"D:/development/Git/claim"，conductor 白名单不认）；
+    # 非 MSYS 环境该 env 为无害空设
+    MSYS2_ARG_CONV_EXCL='/claim' MSYS_NO_PATHCONV=1       gh issue comment "$N" --repo "$REPO_ARG" --body "/claim" >/dev/null
     echo "已评论 /claim（#$N @$REPO_ARG）——conductor 校验先到先得并置 state:in-progress；确认：gh issue view $N -R $REPO_ARG"
     ;;
   *)
