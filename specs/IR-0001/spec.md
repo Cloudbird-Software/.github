@@ -1,6 +1,6 @@
 ---
 taskId: IR-0001
-specVersion: 2
+specVersion: 3
 title: agent 自治生产系统（意图→实现闭环）
 irRef: "Cloudbird-Software/.github#128（签署 2026-08-20）"
 acceptanceCriteria:
@@ -80,10 +80,10 @@ dataMigration: false
 rollback: "全部设施新增式落地；删除 conductor workflow 与 state 标签即整体停用，现有 rulesets 语义不变"
 ---
 
-# Spec IR-0001：条款（v2，红队清零版）
+# Spec IR-0001：条款（v3，owner 裁决版）
 
-> v2 变更：16 处歧义热点清零；新增 INV-08/09/10、BEH-10/11、IFACE-09、AC-11/12、DECISION-06；
-> 修订 INV-03/04/05/06、BEH-01/02/03/04/05/06/07/08、IFACE-03/07、BUDGET-04、ASSUMPTION-03。
+> v2：16 处歧义热点清零；新增 INV-08/09/10、BEH-10/11、IFACE-09、AC-11/12、DECISION-06。
+> v3（owner 裁决）：ceiling 初值 40；AC-11/12 保留；DECISION-06③ 修订（PAT bootstrap 全程 PR 流程，不构成破玻璃）。
 > 红队报告见 PR #129 评论。
 
 ## INV 不变量（每条绑定可执行断言）
@@ -107,7 +107,7 @@ rollback: "全部设施新增式落地；删除 conductor workflow 与 state 标
 - BEH-04 When 卡的前置卡全部合并（conductor 监听卡 PR merge 事件后回查 tasklist），conductor shall 将其置 `state:ready`；前置集为空的卡在开出时即置 `state:ready`。
 - BEH-05 When 卡 PR 打开，gate workflow shall 解析 PR body 卡元数据（IFACE-09），与卡 issue 登记内容 hash 对账，不符或缺失 → exit 3 升级；对账通过则自动选中该卡 AC 对应测试集运行。
 - BEH-06 If 关卡失败，系统 shall 按 gate report 的 ownerRole 路由修复角色。两套计数器：perStage maxAttempts=3（单次 stage 会话内重试上限）；sameGateFailureLimit=3（同一（卡ID, gateID) 键下跨 PR 持久累计，存 artifact），触限 → 回滚最后绿点 + `needs-human` + assign owner。最后绿点 = 任务分支上最近一次全部 blocking 关卡绿（有 gate 记录 artifact 为凭）的 commit；回滚动作须产出 diff 证据。
-- BEH-07 When verdict（BEH-11）通过且 riskScore < ceiling，系统 shall 以 cloudbrid-agent 身份 squash auto-merge；否则推 quarantine 分支 + `needs-human`。quarantine 回流：owner 评论 `/retry` 或重打 `state:ready` 触发重判。ceiling 初值 20，每两周零逃逸缺陷 +10，硬上限 40，每次渐升落 ADR。
+- BEH-07 When verdict（BEH-11）通过且 riskScore < ceiling，系统 shall 以 cloudbrid-agent 身份 squash auto-merge；否则推 quarantine 分支 + `needs-human`。quarantine 回流：owner 评论 `/retry` 或重打 `state:ready` 触发重判。ceiling 初值 40（owner 裁决），后续调整一律 C1+ADR。
 - BEH-08 When 本地 agent 打开任一产品仓，AGENTS.md shall 提供找活三命令：`ghcb next`（查 state:ready 卡）、`ghcb claim <n>`（认领 = 评论 /claim，conductor 校验后置 `state:in-progress`，先到先得）、`make gates-pr`（本地跑 CI 同一套关卡）。
 - BEH-09 When 任一阶段产物落盘，系统 shall 记录 model/prompt 版本/seed/采样参数/产物 hash；nightly 抽样重放并对 hash 漂移报警（承认 provider 侧非确定性，重放一致性只做漂移监控不做硬断言）。
 - BEH-10 Every 6h（schedule），conductor shall reconcile：扫描各仓 state 标签与实际产物，不一致（卡死/跳态/丢失事件）→ 开 `needs-human` issue。
@@ -137,10 +137,10 @@ rollback: "全部设施新增式落地；删除 conductor workflow 与 state 标
 
 - DECISION-01 第一期模型接入直连 provider API（org secret `LLM_API_KEY` + 计量 wrapper），不使用 llm-gateway。理由：gateway（LiteLLM，ADR-0002）必须常驻一台机器，GitHub 内无免费托管持久服务的途径，owner 裁定运维成本大于第一期收益。后果：违反 AR-3 字面——须以 ADR 修订（草案随本 spec：`specs/IR-0001/ADR-draft-ar3-phase1-direct-api.md`，正式落到 agent-registry/decisions/ 后本条生效）。回切触发条件：需要 per-team 配额 / 多 provider failover / 按角色成本归账 / 组织有了事实上的常驻机器。可逆：是。
 - DECISION-02 holdout 仓为公开仓（owner 已裁：agent 读公开仓是不确定风险，私有化的运维是确定支出）。隔离机制 = cloudbrid-agent 不安装到该仓 + 详情写 token 仅 verdict workflow 可用 + 日志计数化。可逆：转私有 = 一次仓设置变更 + ADR。
-- DECISION-03 自动合并为常态（owner 已裁）：riskScoreCeiling 初值 20，按"零逃逸渐升"演进，硬上限 40（数值锚定，INV-08）。可逆：改一个阈值（C1）。
+- DECISION-03 自动合并为常态（owner 已裁）：riskScoreCeiling 初值 40（owner 裁决，INV-08 锚定）；后续调整一律 C1+ADR。可逆：改一个阈值（C1）。
 - DECISION-04 状态机以 label 为载体，不建 Projects v2（对齐 BP-4）。可逆：看板随时可加，纯展示层。
 - DECISION-05 不新建编排仓：conductor 与 transitions.yaml 放 .github 仓、阶段可复用 workflow 放 CI-Workflows；接受每次变更走 C1（PR+ADR+owner-merge）。可逆：迁出即建仓流程。
-- DECISION-06（基建期补偿控制）① W0 降级期 conductor 每次实际触发，owner 须在 24h 内事后确认审计日志；② 本 spec 的红队在 W2 设施建成后必须 retro 补跑一次自动红队并归档报告（本次人工红队记录为首次）；③ bootstrap 凭据破玻璃记录：IR-0001 的落地（issue #128、PR #129）使用 owner PAT 执行，属一次性破玻璃；此后一切机器写入经 cloudbrid-agent App，禁用 PAT；④ W0-C3 验收必须包含负向测试（AC-11），不得以正向通路绿为验收。可逆：条款①随 W0 退出判据自动失效。
+- DECISION-06（基建期补偿控制）① W0 降级期 conductor 每次实际触发，owner 须在 24h 内事后确认审计日志；② 本 spec 的红队在 W2 设施建成后必须 retro 补跑一次自动红队并归档报告（本次人工红队记录为首次）；③ bootstrap 凭据记录（owner 裁决修订）：IR-0001 的落地（issue #128、PR #129）由 owner PAT 执行，全程经 PR 流程、无默认分支直推，按 GM-2 定义不构成破玻璃；此后一切机器写入经 cloudbrid-agent App，禁用 PAT；④ W0-C3 验收必须包含负向测试（AC-11），不得以正向通路绿为验收。可逆：条款①随 W0 退出判据自动失效。
 
 ## ASSUMPTION（每条绑定监控）
 
