@@ -19,6 +19,7 @@ AI agent 进入本仓的工作契约（索引型，CG-1；细节按需读引用�
 - 漂移修复：`GH_TOKEN=<org admin> bash governance/apply.sh`（幂等；失败 loud 退出）
 - 新仓初始化：`bash scripts/new-repo-init.sh <name>`（失败 loud 退出）
 - 取 App 令牌：`GH_TOKEN=$(scripts/ghcb <repo>)`（缓存命中零网络；`--refresh` 强刷；Windows Git Bash 开箱可用——ADR-0044）
+- 找活/认领（ADR-0051）：`scripts/ghcb next`（列 state:ready 卡）→ `scripts/ghcb claim <n>`（评论 /claim，conductor 置 state:in-progress）→ `make gates-pr`（本地复现关卡，W1-C5 落地）
 
 ## 索引
 
