@@ -159,7 +159,9 @@ jobs:
           #   200  → 索引世界（迁移后）：decisions/ 只留同名墓碑（文件名保留正是为了
           #          让本步骤的存在性清单与 org-gate v1.4.2 按文件名校验零改动兼容），
           #          正本在 archive 仓 adr/。被引 ADR-NNNN 必须在 INDEX entries 且
-          #          archive_path 非空，并 HEAD 校验 archive 正本可达（raw 200）。
+          #          archive_path 非空，并 HEAD 校验 archive 正本可达（raw 200）；
+          #          lifecycle=archived 的编号不入有效映射——历史回填不可作为新
+          #          决策依据（#164 交付 3：archived 不可被新 PR 引用为新决策依据）。
           #   404  → 旧世界（迁移未发生/已回滚）：现有 decisions/ 清单逻辑原样。
           #   其他 → fail-closed（检测器失明不得伪装通过）。
           # 两世界共通不变量：引用不存在的编号一律 fail（防幽灵 ADR 语义不回归，#164 AC-2）。
@@ -168,17 +170,18 @@ jobs:
             ADR_WORLD="index"
             base64 -d <<<"$(jq -r .content /tmp/adr_index.json)" >/tmp/adr_index.yaml 2>/dev/null
             # entry → "NNNN archive_path" 行（pyyaml 已随本 job 前置步骤安装）；
-            # archive_path 为空的 entry 不入 map（#96 扩展点：后续 substantive 字段
-            # 不影响本映射——number/archive_path 是本关卡唯一消费的键）
-            # python -c 代码体须与本 run 块基准缩进对齐（10 空格，YAML 剥离后
-            # 才是第 0 列）——#174 引入时多缩 2 格，INDEX 世界首跑即 IndentationError
-            python3 -c '
-          import yaml
-          d = yaml.safe_load(open("/tmp/adr_index.yaml", encoding="utf-8"))
-          for e in d.get("entries") or []:
-              p = e.get("archive_path")
-              if p:
-                  print(str(int(e["number"])).zfill(4), p)' >/tmp/adr_map.txt
+            # 解析抽成 scripts/adr_index_map.py——workflow 内联 `python3 -c '…'`
+            # 多行代码继承 YAML 缩进，首语句带缩进即 IndentationError（#174 引入、
+            # 索引世界上线后首个 C1 PR 实测暴露，本 PR 修复）；脚本产出：
+            #   adr_map.txt      lifecycle != archived 的 "NNNN archive_path"
+            #   adr_archived.txt lifecycle == archived 的 "NNNN"（引用即拒——
+            #                     #164 交付 3：历史回填不可作新决策依据）
+            RC=0
+            python3 scripts/adr_index_map.py || RC=$?
+            if [[ $RC -ne 0 ]]; then
+              echo "::error::INDEX.yaml 存在但 entries 为空/解析失败——索引世界不可判定，fail-closed"
+              exit 1
+            fi
             if [[ ! -s /tmp/adr_map.txt ]]; then
               echo "::error::INDEX.yaml 存在但 entries 为空/解析失败——索引世界不可判定，fail-closed"
               exit 1
@@ -201,6 +204,11 @@ jobs:
             num="${ref#ADR-}"
             if [[ "$ADR_WORLD" == "index" ]]; then
               # 索引世界：编号→archive_path→正本可达性（raw HEAD 200；网络/5xx 视同失败）
+              if grep -qx "$num" /tmp/adr_archived.txt 2>/dev/null; then
+                echo "::error::引用的 ${ref} 生命周期=archived（历史回填，不可作为新决策依据——#164 交付 3：引现行/superseding ADR 或补新 ADR）"
+                MISSING=1
+                continue
+              fi
               paths=$(awk -v n="$num" '$1 == n {print $2}' /tmp/adr_map.txt)
               if [[ -z "$paths" ]]; then
                 echo "::error::引用的 ${ref} 不在 INDEX entries（幽灵 ADR——C1 决策背书不成立）"
@@ -223,6 +231,6 @@ jobs:
             fi
           done
           if [[ $MISSING -eq 0 ]]; then
-            echo "OK adr-required[${ADR_WORLD}]: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')（存在性+正本可达性已验；实体性后验：drift-check §10）"
+            echo "OK adr-required[${ADR_WORLD}]: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')（存在性+正本可达性已验，archived 不可引；实体性后验：drift-check §10）"
           fi
           exit $MISSING
