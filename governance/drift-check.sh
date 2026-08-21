@@ -466,11 +466,14 @@ REQ_CHECKS=$(jq -rs '[.[].rules[]? | select(.type == "required_status_checks")
 epoch_of() { date -u -d "$1" +%s; }   # ISO8601 → epoch（runner GNU date）
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
+  HAS_PR_ACTIVITY=1   # 有（已合并/打开的）PR head 可采样=强证据形态
   PRS_RECENT=$(api "https://api.github.com/repos/$ORG/$r/pulls?state=all&sort=updated&direction=desc&per_page=20")
   if jq -e 'type == "array"' <<<"$PRS_RECENT" >/dev/null 2>&1; then
     HEADS=$(jq -r '[.[] | select(.state == "open" or .merged_at != null) | .head.sha][0:3] | .[]' <<<"$PRS_RECENT")
     if [[ -z "$HEADS" ]]; then
-      # 无（已合并/打开的）PR 活动 → 退化为默认分支 HEAD
+      # 无（已合并/打开的）PR 活动 → 退化为默认分支 HEAD（§12 采样处于最弱证据
+      # 形态：degenerate 模式标记——缺失判定走 IR-0002 (a) 待接入分支）
+      HAS_PR_ACTIVITY=0
       DBR=$(api "https://api.github.com/repos/$ORG/$r" | jq -r '.default_branch // "main"')
       HEADS=$(api "https://api.github.com/repos/$ORG/$r/git/ref/heads/$DBR" | jq -r '.object.sha // empty')
       [[ -n "$HEADS" ]] || { drift "repo '$r' 无 PR 活动且默认分支 HEAD 不可读，活体验证无载体（fail-closed）"; continue; }
@@ -530,6 +533,11 @@ for r in $REPOS; do
         # IR-0002 (a) 形态：org-gate ruleset 生效后该仓无 PR 活动——从未接入，
         # 非裸奔（待接入清单；本地 gate 的活体验证不受影响，照常执行）
         echo "OK    required-check-live '$r'：'$ctx' 待接入（ruleset 生效后无 PR 活动——IR-0002 (a) 形态）"
+      elif [[ "${HAS_PR_ACTIVITY:-1}" -eq 0 ]]; then
+        # IR-0002 (a) 泛化：无 PR 仓的 degenerate 采样下任意 required check 缺失=
+        # 从未接线（如新建 L1 记忆层仓无本地 gate workflow）——PR 面仍受 org
+        # ruleset 的 org-gate 保护；接线后自然转绿。有 PR 的仓不适用（保 (b) 检出）
+        echo "OK    required-check-live '$r'：'$ctx' 待接入（无 PR 活动，degenerate 采样——IR-0002 (a) 形态）"
       else
         drift "repo '$r' required check '$ctx' 活体缺失：最近 $N_CONCL 个已完结 CI 的 head 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12；IR-0002 (b) 形态）"
         LIVE_MISS=1
