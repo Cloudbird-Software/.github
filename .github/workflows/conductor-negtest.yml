@@ -1,0 +1,25 @@
+name: conductor-negtest
+# AC-11 负向测试工具（ADR-0049 / .github#132）——只存在于分支 conductor-negtest-tool，
+# 以 workflow_dispatch --ref 运行；不进 main。用 GITHUB_TOKEN（github-actions[bot]，
+# 非授权身份：非 org admin 非 App）给目标 issue 打签署标签，验证 conductor 静默回退。
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number: { type: number, required: true }
+
+permissions:
+  issues: write
+
+jobs:
+  negtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: 以非授权身份打 state:ir-signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          N: ${{ inputs.issue_number }}
+        run: |
+          gh api "repos/Cloudbird-Software/.github/issues/$N/labels" \
+            --input - <<< '{"labels":["state:ir-signed"]}' >/dev/null
+          echo "已以 $(gh api user --jq .login 2>/dev/null || echo github-actions[bot]) 身份打标签——等待 conductor 裁决"
