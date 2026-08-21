@@ -24,5 +24,7 @@ gates-pr: ## 本地等价关卡清单（gate.yml 语义）：make gates-pr
 	  governance/apply.sh governance/drift-check.sh governance/cost-check.sh \
 	  governance/auto-fix-limit.sh governance/butler-reconcile.sh governance/butler-audit.sh \
 	  && echo "OK   bash -n 治理脚本"
+	@for t in governance/tests/test-*.sh; do bash "$$t"; done \
+	  && echo "OK   治理自测（governance/tests；需 jq）"
 	@python3 -c "import glob,yaml;[yaml.safe_load(open(f,encoding='utf-8')) for f in glob.glob('governance/**/*.yaml',recursive=True)+glob.glob('standards/**/*.yaml',recursive=True)+glob.glob('.github/workflows/*.yml')];print('OK   yaml 解析（governance/standards/workflows）')"
 	@echo "== 开 PR 前检查单（机器不可判部分）：PR body 引用 ADR-NNNN（C1）/ body 带 Card: 元数据行 / diff<400 行 =="
