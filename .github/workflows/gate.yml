@@ -90,6 +90,18 @@ jobs:
           && bash -n governance/auto-fix-limit.sh && bash -n governance/cost-check.sh \
           && bash -n governance/butler-reconcile.sh && bash -n governance/butler-audit.sh
           echo "OK scripts"
+      - name: 治理脚本自测（governance/tests）
+        run: |
+          # IR-0002 #143 收口：§12 (a)/(b) 分类器 fixture 自测入 CI——(b) 检出
+          # 灵敏度（INV-4）自此有机器证据，改分类器不连带过测即红。目录内新增
+          # test-*.sh 自动纳入；目录为空=测试面丢失，fail-closed。
+          shopt -s nullglob
+          tests=(governance/tests/test-*.sh)
+          shopt -u nullglob
+          if [[ ${#tests[@]} -eq 0 ]]; then
+            echo "::error::governance/tests 无 test-*.sh——测试面丢失（fail-closed）"; exit 1
+          fi
+          for t in "${tests[@]}"; do echo "-- $t"; bash "$t"; done
       - name: REPOS.yaml 引用自检（无重名仓）
         run: |
           python3 - <<'EOF'

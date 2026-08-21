@@ -501,10 +501,42 @@ fi
 # 生效时刻 = org-required-workflows ruleset 创建时刻（API 实测）。
 ORG_GATE_EFFECTIVE="2026-08-20T07:43:21Z"
 
+# @ir0002-s12-classify-begin —— IR-0002（spec PR#152）(a)/(b) 缺失形态分类器。
+# governance/tests/test-ir0002.sh 按本标记对提取函数体做 fixture 自测（(b) 检出
+# 灵敏度是 INV-4 铁律：改动本函数必须连带跑自测，红即不得合并）。
+# 入参：$1=repo $2=check 名 $3=QUERY_FAIL(0/1) $4=HAS_PR_ACTIVITY(0/1)
+#       $5=PRS_RECENT（PR 数组 JSON）$6=org-gate 生效 ISO 时戳 $7=N_CONCL（采样数）
+# 返回：0=(a) 待接入（OK 行，非漂移） 1=(b) 裸奔（drift 报警） 2=fail-closed（drift 报警）
+s12_classify() {
+  local r="$1" ctx="$2" QUERY_FAIL="$3" HAS_PR_ACTIVITY="$4" PRS_RECENT="$5" eff="$6" n_concl="$7"
+  if [[ $QUERY_FAIL -eq 1 ]]; then
+    drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
+    return 2
+  elif [[ "$ctx" == "org-gate" ]] && ! jq -e --arg eff "$eff" \
+      '[.[] | select((.state == "open" or .merged_at != null) and (.updated_at >= $eff))] | length > 0' \
+      <<<"$PRS_RECENT" >/dev/null 2>&1; then
+    # IR-0002 (a) 形态：org-gate ruleset 生效后该仓无 PR 活动——从未接入，
+    # 非裸奔（待接入清单；本地 gate 的活体验证不受影响，照常执行）
+    echo "OK    required-check-live '$r'：'$ctx' 待接入（ruleset 生效后无 PR 活动——IR-0002 (a) 形态）"
+    return 0
+  elif [[ "${HAS_PR_ACTIVITY:-1}" -eq 0 ]]; then
+    # IR-0002 (a) 泛化：无 PR 仓的 degenerate 采样下任意 required check 缺失=
+    # 从未接线（如新建 L1 记忆层仓无本地 gate workflow）——PR 面仍受 org
+    # ruleset 的 org-gate 保护；接线后自然转绿。有 PR 的仓不适用（保 (b) 检出）
+    echo "OK    required-check-live '$r'：'$ctx' 待接入（无 PR 活动，degenerate 采样——IR-0002 (a) 形态）"
+    return 0
+  else
+    drift "repo '$r' required check '$ctx' 活体缺失：最近 $n_concl 个已完结 CI 的 head 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12；IR-0002 (b) 形态）"
+    return 1
+  fi
+}
+# @ir0002-s12-classify-end
+
 REQ_CHECKS=$(jq -rs '[.[].rules[]? | select(.type == "required_status_checks")
                       | .parameters.required_status_checks[].context] | unique | .[]' "$DIR"/rulesets/*.json)
 [[ -n "$REQ_CHECKS" ]] || { echo "FATAL: rulesets 未声明任何 required check——§12 活体验证失去判据"; exit 2; }
 epoch_of() { date -u -d "$1" +%s; }   # ISO8601 → epoch（runner GNU date）
+S12_PENDING=0   # §12 全仓 (a) 待接入累计（IR-0002 spec AC-3 汇总信息行）
 for r in $REPOS; do
   jq -e --arg r "$r" '($r as $x | . | index($x)) != null' <<<"$EXCLUDES" >/dev/null && continue
   HAS_PR_ACTIVITY=1   # 有（已合并/打开的）PR head 可采样=强证据形态
@@ -560,6 +592,7 @@ for r in $REPOS; do
     continue
   fi
   LIVE_MISS=0
+  REPO_PENDING=0   # 本仓 (a) 待接入计数（IR-0002 spec AC-3：待接入须计数可见）
   for ctx in $REQ_CHECKS; do
     FOUND=0
     while IFS= read -r sha; do
@@ -568,25 +601,28 @@ for r in $REPOS; do
       jq -e --arg c "$ctx" '[.check_runs[] | select(.name == $c and .conclusion != null)] | length > 0' <<<"$CRS" >/dev/null 2>&1 && { FOUND=1; break; }
     done <<<"$CONCL_SHAS"
     if [[ $FOUND -ne 1 ]]; then
-      if [[ $QUERY_FAIL -eq 1 ]]; then
-        drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
-      elif [[ "$ctx" == "org-gate" ]] && ! jq -e --arg eff "$ORG_GATE_EFFECTIVE"            '[.[] | select((.state == "open" or .merged_at != null) and (.updated_at >= $eff))] | length > 0'            <<<"$PRS_RECENT" >/dev/null 2>&1; then
-        # IR-0002 (a) 形态：org-gate ruleset 生效后该仓无 PR 活动——从未接入，
-        # 非裸奔（待接入清单；本地 gate 的活体验证不受影响，照常执行）
-        echo "OK    required-check-live '$r'：'$ctx' 待接入（ruleset 生效后无 PR 活动——IR-0002 (a) 形态）"
-      elif [[ "${HAS_PR_ACTIVITY:-1}" -eq 0 ]]; then
-        # IR-0002 (a) 泛化：无 PR 仓的 degenerate 采样下任意 required check 缺失=
-        # 从未接线（如新建 L1 记忆层仓无本地 gate workflow）——PR 面仍受 org
-        # ruleset 的 org-gate 保护；接线后自然转绿。有 PR 的仓不适用（保 (b) 检出）
-        echo "OK    required-check-live '$r'：'$ctx' 待接入（无 PR 活动，degenerate 采样——IR-0002 (a) 形态）"
-      else
-        drift "repo '$r' required check '$ctx' 活体缺失：最近 $N_CONCL 个已完结 CI 的 head 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12；IR-0002 (b) 形态）"
-        LIVE_MISS=1
-      fi
+      rc=0
+      s12_classify "$r" "$ctx" "$QUERY_FAIL" "${HAS_PR_ACTIVITY:-1}" "$PRS_RECENT" "$ORG_GATE_EFFECTIVE" "$N_CONCL" || rc=$?
+      case $rc in
+        0) REPO_PENDING=$((REPO_PENDING+1)); S12_PENDING=$((S12_PENDING+1)) ;;
+        1) LIVE_MISS=1 ;;
+        2) : ;;
+      esac
     fi
   done
+  [[ $REPO_PENDING -gt 0 ]] \
+    && echo "INFO  required-check-live '$r'：$REPO_PENDING 项待接入计入汇总（IR-0002 (a)——不阻断）" \
+    || true
   [[ $LIVE_MISS -eq 0 ]] && ok "required-check-live '$r'（最近 $N_CONCL 个已完结 head 上 required check 齐备）"
 done
+# IR-0002 spec AC-3：§12 汇总信息行——(a) 待接入非漂移但必须计数可见（防"静默豁免"
+# 演变为检测盲区；§17 协议块对账同款"可见即治理"原则）。零待接入时也打 OK 行，
+# 让"本节确实跑过"成为可审计事实。
+if [[ ${S12_PENDING:-0} -gt 0 ]]; then
+  echo "INFO  §12 required-check 活体汇总：待接入 $S12_PENDING 项（IR-0002 (a) 形态——ruleset 生效后无 PR 活动，接线后自然转绿；非漂移）"
+else
+  ok "§12 required-check 活体汇总：0 项待接入（全部受管仓要么齐备要么显式 SKIP）"
+fi
 
 # ---------- 13. PR liveness 侦测（P1-4，ADR-0034）----------
 # 治理不漂移但流水线死了的三类形态（#81 §6——无人值守下卡死 PR 是最隐形的
