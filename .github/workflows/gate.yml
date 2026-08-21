@@ -170,22 +170,18 @@ jobs:
             ADR_WORLD="index"
             base64 -d <<<"$(jq -r .content /tmp/adr_index.json)" >/tmp/adr_index.yaml 2>/dev/null
             # entry → "NNNN archive_path" 行（pyyaml 已随本 job 前置步骤安装）；
-            # archive_path 为空的 entry 不入 map（#96 扩展点：后续 substantive 字段
-            # 不影响本映射——number/archive_path/lifecycle 是本关卡消费的键）；
-            # lifecycle=archived 的编号另记 adr_archived.txt（引用即拒——#164 交付 3）
-            python3 -c '
-            import yaml
-            d = yaml.safe_load(open("/tmp/adr_index.yaml", encoding="utf-8"))
-            with open("/tmp/adr_map.txt", "w") as m, open("/tmp/adr_archived.txt", "w") as a:
-                for e in d.get("entries") or []:
-                    p = e.get("archive_path")
-                    if not p:
-                        continue
-                    num = f"{int(e[\"number\"]):04d}"
-                    if e.get("lifecycle") == "archived":
-                        print(num, file=a)
-                    else:
-                        print(num, p, file=m)'
+            # 解析抽成 scripts/adr_index_map.py——workflow 内联 `python3 -c '…'`
+            # 多行代码继承 YAML 缩进，首语句带缩进即 IndentationError（#174 引入、
+            # 索引世界上线后首个 C1 PR 实测暴露，本 PR 修复）；脚本产出：
+            #   adr_map.txt      lifecycle != archived 的 "NNNN archive_path"
+            #   adr_archived.txt lifecycle == archived 的 "NNNN"（引用即拒——
+            #                     #164 交付 3：历史回填不可作新决策依据）
+            RC=0
+            python3 scripts/adr_index_map.py || RC=$?
+            if [[ $RC -ne 0 ]]; then
+              echo "::error::INDEX.yaml 存在但 entries 为空/解析失败——索引世界不可判定，fail-closed"
+              exit 1
+            fi
             if [[ ! -s /tmp/adr_map.txt ]]; then
               echo "::error::INDEX.yaml 存在但 entries 为空/解析失败——索引世界不可判定，fail-closed"
               exit 1
