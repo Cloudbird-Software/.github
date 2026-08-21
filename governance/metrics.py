@@ -62,7 +62,7 @@ def _guard_status(name, inp, policy):
         val = {"current": cur, "previous": prev}
         if cur > 0 and prev > 0:
             return "red", f"逃逸持续：上一窗 {prev} + 本窗 {cur}（[auto-revert]+post-merge P0）"
-        return "green", f"双窗逃逸 {prev}/{cur}"
+        return "green", f"双窗逃逸：上一窗 {prev} · 本窗 {cur}"
     if name == "revert_rate":
         if not isinstance(inp, dict) or not inp.get("denom"):
             return "pending", "零分母（窗口内无 merged PR——不除零，#98 T2）"
