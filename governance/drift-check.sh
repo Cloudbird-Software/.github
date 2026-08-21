@@ -284,11 +284,15 @@ for r in $REPOS; do
 done
 
 # ---------- 10. ADR 引用存在性+实体性后验（adr-required 的补充防线，评审项 + RB-D5）----------
-# gate.yml 的 adr-required 在 PR 上下文只能做语法检查：agent-registry 是私有仓，
-# PR 上下文的 GITHUB_TOKEN 无跨仓读权，注入 org secret 又会向 PR 控制的代码暴露
-# 凭据。存在性在本节后验：窗口内合并 PR 的 ADR-NNNN 引用必须真实存在于
-# agent-registry/decisions/——伪造/幽灵 ADR 最长 24h 内被检出（与 §8 直推检测
-# 同为 post-hoc 防线；C1 的权威人类门禁仍是 owner-only review）。
+# gate.yml 的 adr-required 已在 PR 时点做存在性校验（ADR-0021：全仓公开后 PR 上下文
+# GITHUB_TOKEN 可读公开仓——早期"agent-registry 是私有仓、PR 时点无跨仓读权"的前提
+# 已随 ADR-0020 全仓公开政策失效，注记修正）；ADR-0053（W1-C1 .github#164）索引世界
+# 起进一步校验 archive 正本可达性。本节后验实体性（防空壳）并独立复核存在性：
+# 窗口内合并 PR 的 ADR-NNNN 引用必须有实质决策结构——伪造/幽灵 ADR 最长 24h 内
+# 检出（与 §8 直推检测同为 post-hoc 防线；C1 的权威人类门禁仍是 owner-only review）。
+# 内容源双世界（ADR-0053）：agent-registry/decisions/INDEX.yaml（墓碑索引）存在 →
+# decisions/ 只剩同名墓碑（无实质结构），实体性改验 INDEX 指向的 archive 仓正本
+# （字节保真原件）；INDEX 404（迁移前/回滚）→ 旧逻辑对 decisions/ 本体验证。
 ADR_RE='ADR-[0-9]{4}'
 # 实体性判定（评审项：size 字节数可被空白/注释/填充绕过——100B 阈值挡不住
 # RB-D5 意义上的空壳）：拉取被引 ADR 全文做结构校验，H1 编号行、status 行、
@@ -299,16 +303,26 @@ declare -A ADR_VERDICT_CACHE
 adr_substantive() { # $1=四位编号 → stdout: missing|ok|shell|unreadable
   local num="$1" matches apath content decoded verdict
   [[ -n "${ADR_VERDICT_CACHE[$num]:-}" ]] && { echo "${ADR_VERDICT_CACHE[$num]}"; return; }
-  matches=$(jq -r --arg p "ADR-${num}-" '.[] | select((.name | startswith($p)) and (.type == "file")) | .path' <<<"$ADR_DIR_LISTING")
+  if [[ -n "${ADR_INDEX_MODE:-}" ]]; then
+    # 索引世界（ADR-0053）：编号→archive 正本路径（可多条：ADR-0011 双档先例）
+    matches=$(awk -v n="$num" '$1 == n {print $2}' <<<"$ADR_INDEX_MAP")
+  else
+    matches=$(jq -r --arg p "ADR-${num}-" '.[] | select((.name | startswith($p)) and (.type == "file")) | .path' <<<"$ADR_DIR_LISTING")
+  fi
   if [[ -z "$matches" ]]; then
     verdict="missing"
   else
     verdict="unreadable"
     while IFS= read -r apath; do
       [[ -n "$apath" ]] || continue
-      content=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/$apath" | jq -r '.content // empty')
-      [[ -z "$content" ]] && continue
-      decoded=$(base64 -d <<<"$content" 2>/dev/null || true)
+      if [[ -n "${ADR_INDEX_MODE:-}" ]]; then
+        # 索引世界：archive raw 正本（公开仓，字节保真原件）；拉取失败留空→按不可判定处理
+        decoded=$(curl -sSf --max-time 20 "https://raw.githubusercontent.com/$ORG/archive/main/${apath}" 2>/dev/null || true)
+      else
+        content=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/$apath" | jq -r '.content // empty')
+        [[ -z "$content" ]] && continue
+        decoded=$(base64 -d <<<"$content" 2>/dev/null || true)
+      fi
       [[ -z "$decoded" ]] && continue
       if grep -qE "^#[[:space:]]*ADR-${num}([^0-9]|$)" <<<"$decoded" \
          && grep -qE "^-[[:space:]]*(status|状态):[[:space:]]*[^[:space:]]" <<<"$decoded" \
@@ -330,6 +344,28 @@ ADR_DIR_LISTING=$(api "https://api.github.com/repos/$ORG/agent-registry/contents
 if ! jq -e 'type == "array"' <<<"$ADR_DIR_LISTING" >/dev/null 2>&1; then
   drift "ADR 真源 agent-registry/decisions 读取失败，引用存在性无法后验（fail-closed）: $(jq -r '.message // "非数组"' <<<"$ADR_DIR_LISTING" 2>/dev/null || echo 传输失败)"
 else
+  # 墓碑索引探测（ADR-0053）：200 → 索引世界（map：编号→archive 正本路径）；
+  # 404 → 旧世界；其他失败 → 报漂移（fail-closed：检测器失明不得伪装无漂移），
+  # 并降级旧世界继续跑完本节（漂移行已置红，后续节不受影响）。
+  ADR_INDEX_MODE=""
+  ADR_INDEX_MAP=""
+  ADR_INDEX_JSON=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/decisions/INDEX.yaml")
+  if jq -e '.content' <<<"$ADR_INDEX_JSON" >/dev/null 2>&1; then
+    ADR_INDEX_MAP=$(base64 -d <<<"$(jq -r '.content' <<<"$ADR_INDEX_JSON")" 2>/dev/null | awk '
+      /^[[:space:]]*-[[:space:]]*number:/ { n=$3; gsub(/[^0-9]/, "", n); cur=sprintf("%04d", n+0); ap="" }
+      /^[[:space:]]*archive_path:/ {
+        line=$0; sub(/^[[:space:]]*archive_path:[[:space:]]*/, "", line); gsub(/"/, "", line)
+        if (cur != "" && line != "") { print cur " " line; cur="" }
+      }')
+    if [[ -n "$ADR_INDEX_MAP" ]] && grep -qE '^[0-9]{4} adr/.+\.md$' <<<"$ADR_INDEX_MAP"; then
+      ADR_INDEX_MODE=1
+      ok "adr-index（ADR-0053 索引世界：$(wc -l <<<"$ADR_INDEX_MAP") entries，实体性改验 archive 正本）"
+    else
+      drift "decisions/INDEX.yaml 存在但解析为空/畸形——索引世界不可判定（fail-closed，按旧世界降级继续）"
+    fi
+  elif ! grep -q '"message"[[:space:]]*:[[:space:]]*"Not Found"' <<<"$ADR_INDEX_JSON"; then
+    drift "decisions/INDEX.yaml 探测失败（非 404 的 API 错误）——索引世界判定失败（fail-closed，按旧世界降级继续）"
+  fi
   ADR_FILES=$(jq -r '.[].name' <<<"$ADR_DIR_LISTING")
   GHOST=0
   for r in $REPOS; do
@@ -347,10 +383,15 @@ else
         case "$(adr_substantive "$num")" in
           ok) : ;;
           missing)
-            drift "repo '$r' PR#$pnum 引用幽灵 ADR ${ref}（agent-registry/decisions/ 无 ADR-${num}-*.md——C1 变更的决策背书不成立）"
+            if [[ -n "$ADR_INDEX_MODE" ]]; then
+              where="INDEX entries 无此编号"
+            else
+              where="agent-registry/decisions/ 无 ADR-${num}-*.md"
+            fi
+            drift "repo '$r' PR#$pnum 引用幽灵 ADR ${ref}（${where}——C1 变更的决策背书不成立）"
             GHOST=1 ;;
           shell)
-            drift "repo '$r' PR#$pnum 引用空壳 ADR ${ref}（文件存在但缺实质结构：H1 编号行/status/背景/决策章节须齐备且决策节有正文——红队 RB-D5：字节数填充不再能绕过）"
+            drift "repo '$r' PR#$pnum 引用空壳 ADR ${ref}（正本存在但缺实质结构：H1 编号行/status/背景/决策章节须齐备且决策节有正文——红队 RB-D5：字节数填充不再能绕过）"
             GHOST=1 ;;
           unreadable)
             drift "repo '$r' PR#$pnum 引用的 ADR ${ref} 全部同名文件内容读取失败，实体性无法判定（fail-closed）"
@@ -731,6 +772,69 @@ for r in $PROTO_REPOS; do
   fi
 done
 [[ $PROTO_OK -eq 0 ]] && ok "统一入口协议块一致（真源 template-service × $PROTO_N 个 entry_protocol 仓，逐字节比对）"
+
+# ---------- 18. holdout 隔离断言（DECISION-02：App 安装差异隔离，W1-C4/ADR-0056）----------
+# 试卷层 holdout 的读隔离不靠保密（公开仓，ADR-0056/DECISION-02），靠两条：
+# cloudbrid-agent App 不安装到该仓（agent 的组织级凭据通道物理不可达）+ 泄漏诱饵
+# 周检（.github 仓 holdout-canary-sweep，宪法 §6/§11）。本节断言第一条：
+# App installation 的仓清单不得包含 holdout——在清单 = P0（隔离失效，agent 可持
+# 组织凭据读考卷）。正向对照防检测器失明假绿（§4 同思想）：installation 清单必须
+# 非空且包含 .github——连 .github 都不在清单 = 端点读法错/权限变了 → 按漂移报错，
+# 绝不把"看不见"当"没有"。API 任何失败 = fail-closed 报漂移。
+# §17 编号预留给并行卡 W1-C3（多代理并行修改本文件，编号互不占段）。
+# 端点注（2026-08-21 实测）：installation id 走 /orgs/<org>/installations（admin
+# 端点，new-repo-init.sh §3 同款）——/user/installations 要求 GitHub App 令牌，
+# 经典 PAT 一律 403；仓清单走 /user/installations/<id>/repositories（经典 PAT 可读）。
+HOLDOUT_REPO="holdout"
+HOLDOUT_INST=$(api "https://api.github.com/orgs/$ORG/installations?per_page=100")
+if ! jq -e 'type == "object" and (.installations | type == "array")' <<<"$HOLDOUT_INST" >/dev/null 2>&1; then
+  drift "holdout 隔离断言失败：org installations 拉取失败（fail-closed——检测器失明不得伪装通过，ADR-0056 §18）: $(jq -r '.message // "非 JSON 响应"' <<<"$HOLDOUT_INST" 2>/dev/null || echo 传输失败)"
+else
+  # app 名取 expected-state 单一真源（与 §6 一致），不重复硬编码
+  HOLDOUT_APP=$(jq -r .github_app.name "$EXPECTED")
+  INST_ID=$(jq -r --arg s "$HOLDOUT_APP" '.installations[]? | select(.app_slug == $s) | .id' <<<"$HOLDOUT_INST" | head -1)
+  if [[ -z "$INST_ID" || "$INST_ID" == "null" ]]; then
+    drift "app '$HOLDOUT_APP' 的 installation 未找到——holdout 隔离断言无法执行（fail-closed，ADR-0056 §18）"
+  else
+    # 全分页列出该 installation 下的仓（>100 仓单页漏检——§1/§4 同教训）
+    INST_TMP=$(mktemp)
+    INST_FAIL=0
+    INST_PAGE=1
+    while :; do
+      CHUNK=$(api "https://api.github.com/user/installations/$INST_ID/repositories?per_page=100&page=$INST_PAGE")
+      if ! jq -e 'type == "object" and (.repositories | type == "array")' <<<"$CHUNK" >/dev/null 2>&1; then
+        INST_FAIL=1; break
+      fi
+      INST_N=$(jq '.repositories | length' <<<"$CHUNK")
+      [[ "$INST_N" -eq 0 ]] && break
+      jq -r '.repositories[].name' <<<"$CHUNK" >>"$INST_TMP"
+      [[ "$INST_N" -lt 100 ]] && break
+      INST_PAGE=$((INST_PAGE+1))
+    done
+    if [[ $INST_FAIL -ne 0 ]]; then
+      drift "installation#$INST_ID 仓清单拉取失败，holdout 隔离断言无法执行（fail-closed，ADR-0056 §18）"
+      rm -f "$INST_TMP"
+    else
+      INST_REPOS=$(sort -u "$INST_TMP")
+      rm -f "$INST_TMP"
+      HOLDOUT_HIT=0
+      grep -qx "$HOLDOUT_REPO" <<<"$INST_REPOS" && HOLDOUT_HIT=1
+      # 正向对照（防失明）：清单非空且含 .github，否则断言结论不可信
+      if [[ -z "$INST_REPOS" ]]; then
+        drift "installation#$INST_ID 仓清单为空——正向对照失败（端点读法或权限已变），不得把看不见当没有（fail-closed，ADR-0056 §18）"
+        HOLDOUT_HIT=-1
+      elif ! grep -qx ".github" <<<"$INST_REPOS"; then
+        drift "installation#$INST_ID 仓清单不含 .github——正向对照失败（端点读法或权限已变），holdout 隔离结论不可信（fail-closed，ADR-0056 §18）"
+        HOLDOUT_HIT=-1
+      fi
+      if [[ $HOLDOUT_HIT -eq 1 ]]; then
+        drift "holdout 出现在 app '$HOLDOUT_APP' installation#$INST_ID 仓清单——P0：App 挂上 holdout = 试卷层隔离失效（DECISION-02/ADR-0056 §18；立即在 App 设置页移除该仓访问并追查何时挂载）"
+      elif [[ $HOLDOUT_HIT -eq 0 ]]; then
+        ok "holdout 隔离成立（installation#$INST_ID 共 $(grep -c . <<<"$INST_REPOS") 仓不含 holdout；正向对照 .github 在清单）"
+      fi
+    fi
+  fi
+fi
 
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then

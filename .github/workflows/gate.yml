@@ -154,22 +154,73 @@ jobs:
             echo "::error::C1 路径变更（governance/standards/scripts/.github/CODEOWNERS）但 PR 未引用任何 ADR-NNNN（GOVERNANCE flows.governance_change C1：无 ADR 不合并）"
             exit 1
           fi
-          # 存在性校验（ADR-0021）：被引 ADR 须存在于公开仓 agent-registry/decisions/
-          #（GITHUB_TOKEN 读公开仓；API 失败 fail-closed——检测器失明不得伪装通过）
-          ADR_LISTING=$(gh api "repos/Cloudbird-Software/agent-registry/contents/decisions?per_page=100" --paginate --jq '.[].name' 2>/dev/null)
-          if [[ -z "$ADR_LISTING" ]]; then
-            echo "::error::agent-registry/decisions 清单拉取失败——ADR 引用存在性无法校验（fail-closed）"
+          # 存在性校验（ADR-0021）+ 索引世界（ADR-0053/W1-C1 .github#164）双世界兼容：
+          # 先试拉 agent-registry decisions/INDEX.yaml（墓碑索引）——
+          #   200  → 索引世界（迁移后）：decisions/ 只留同名墓碑（文件名保留正是为了
+          #          让本步骤的存在性清单与 org-gate v1.4.2 按文件名校验零改动兼容），
+          #          正本在 archive 仓 adr/。被引 ADR-NNNN 必须在 INDEX entries 且
+          #          archive_path 非空，并 HEAD 校验 archive 正本可达（raw 200）。
+          #   404  → 旧世界（迁移未发生/已回滚）：现有 decisions/ 清单逻辑原样。
+          #   其他 → fail-closed（检测器失明不得伪装通过）。
+          # 两世界共通不变量：引用不存在的编号一律 fail（防幽灵 ADR 语义不回归，#164 AC-2）。
+          ADR_INDEX_JSON=$(gh api "repos/Cloudbird-Software/agent-registry/contents/decisions/INDEX.yaml" 2>&1 >/tmp/adr_index.json; echo "rc=$?")
+          if jq -e '.content' /tmp/adr_index.json >/dev/null 2>&1; then
+            ADR_WORLD="index"
+            base64 -d <<<"$(jq -r .content /tmp/adr_index.json)" >/tmp/adr_index.yaml 2>/dev/null
+            # entry → "NNNN archive_path" 行（pyyaml 已随本 job 前置步骤安装）；
+            # archive_path 为空的 entry 不入 map（#96 扩展点：后续 substantive 字段
+            # 不影响本映射——number/archive_path 是本关卡唯一消费的键）
+            python3 -c '
+            import yaml
+            d = yaml.safe_load(open("/tmp/adr_index.yaml", encoding="utf-8"))
+            for e in d.get("entries") or []:
+                p = e.get("archive_path")
+                if p:
+                    print(f"{int(e[\"number\"]):04d} {p}")' >/tmp/adr_map.txt
+            if [[ ! -s /tmp/adr_map.txt ]]; then
+              echo "::error::INDEX.yaml 存在但 entries 为空/解析失败——索引世界不可判定，fail-closed"
+              exit 1
+            fi
+          elif grep -q "Not Found" <<<"$ADR_INDEX_JSON"; then
+            ADR_WORLD="legacy"
+          else
+            echo "::error::agent-registry decisions/INDEX.yaml 拉取失败（非 404）——索引世界判定失败，fail-closed"
             exit 1
+          fi
+          if [[ "$ADR_WORLD" == "legacy" ]]; then
+            ADR_LISTING=$(gh api "repos/Cloudbird-Software/agent-registry/contents/decisions?per_page=100" --paginate --jq '.[].name' 2>/dev/null)
+            if [[ -z "$ADR_LISTING" ]]; then
+              echo "::error::agent-registry/decisions 清单拉取失败——ADR 引用存在性无法校验（fail-closed）"
+              exit 1
+            fi
           fi
           MISSING=0
           for ref in $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u ); do
             num="${ref#ADR-}"
-            if ! grep -q "^ADR-${num}-" <<<"$ADR_LISTING"; then
+            if [[ "$ADR_WORLD" == "index" ]]; then
+              # 索引世界：编号→archive_path→正本可达性（raw HEAD 200；网络/5xx 视同失败）
+              paths=$(awk -v n="$num" '$1 == n {print $2}' /tmp/adr_map.txt)
+              if [[ -z "$paths" ]]; then
+                echo "::error::引用的 ${ref} 不在 INDEX entries（幽灵 ADR——C1 决策背书不成立）"
+                MISSING=1
+                continue
+              fi
+              reachable=0
+              while IFS= read -r apath; do
+                code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+                  "https://raw.githubusercontent.com/Cloudbird-Software/archive/main/${apath}" || echo 000)
+                [[ "$code" == "200" ]] && reachable=1 && break
+              done <<<"$paths"
+              if [[ $reachable -ne 1 ]]; then
+                echo "::error::${ref} 的 archive 正本不可达（${paths//$'\n'/，}——raw 非 200）：INDEX 与 archive 仓漂移或归档未落位"
+                MISSING=1
+              fi
+            elif ! grep -q "^ADR-${num}-" <<<"$ADR_LISTING"; then
               echo "::error::引用的 ${ref} 在 agent-registry/decisions/ 无对应文件（幽灵 ADR——C1 决策背书不成立）"
               MISSING=1
             fi
           done
           if [[ $MISSING -eq 0 ]]; then
-            echo "OK adr-required: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')（存在性已验；实体性后验：drift-check §10）"
+            echo "OK adr-required[${ADR_WORLD}]: $( { echo "$PR_TITLE"; echo "$PR_BODY"; } | grep -oE "$ADR_RE" | sort -u | tr '\n' ' ')（存在性+正本可达性已验；实体性后验：drift-check §10）"
           fi
           exit $MISSING

@@ -1,0 +1,243 @@
+name: holdout-canary-sweep
+# W1-C4（ADR-0056，宪法 §4B/§6 + §11 cron 每周行）：holdout 泄漏诱饵巡检。
+# holdout 内容（canary marker）出现在任何受管仓 workflow 日志 = 违规读取，报警：
+#   - 命中非 drill marker → P0：开 issue（label holdout-leak，幂等）+ run 变红
+#   - 命中 drill marker → 演习正控在场：treat_drill_as_leak=false 报"检测通道健康"
+#     （绿）；=true（演习模式）同样开 P0——证明报警通道真的会触发（AC-3 演习路径）
+#   - 全部未命中 → "正控缺失" P1 变红（fail-closed：正控必须在场——检测器失明
+#     不得伪装成无泄漏，宪法 §6 缺席触发思想）
+# 扫描面：REPOS.yaml 全部 active 仓（含 holdout 自身——无豁免，隔离不变量对全仓
+# 一致执法）；每仓窗口内上限 50 个 run，超限 ::warning 注记（P1 覆盖注记）。
+# 注意：本 workflow 自身日志在扫描范围内——一切输出必须掩码 marker（只允许
+# entry id + 末 4 位），否则检测器自己就是泄漏源。
+on:
+  schedule:
+    - cron: "31 3 * * 1" # 每周一 03:31 UTC（错峰：避开整点 drift 洪峰与 flaky-sweep）
+  workflow_dispatch:
+    inputs:
+      treat_drill_as_leak:
+        description: "演习模式：drill marker 命中按真泄漏开 P0（AC-3 演习用）"
+        type: boolean
+        default: false
+      since_days:
+        description: "扫描窗口（天；演习时须覆盖 drill run 的产生时间）"
+        type: number
+        default: 7
+
+permissions: {}
+
+concurrency:
+  group: holdout-canary-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read # checkout 读 REPOS.yaml
+      issues: write # P0 泄漏 issue（GITHUB_TOKEN；API 读走 GOVERNANCE_TOKEN env）
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: 拉取 holdout canary registry（钉 commit，审计记录 sha）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA=$(gh api "repos/Cloudbird-Software/holdout/commits?path=canary/registry.yaml&per_page=1" --jq '.[0].sha')
+          if [[ -z "$SHA" || "$SHA" == "null" ]]; then
+            echo "::error::holdout canary/registry.yaml commit sha 拉取失败——扫描失去判据（fail-closed）"; exit 2
+          fi
+          curl -sSfL "https://raw.githubusercontent.com/Cloudbird-Software/holdout/$SHA/canary/registry.yaml" -o registry.snapshot.yaml
+          python3 -c 'import yaml; d=yaml.safe_load(open("registry.snapshot.yaml",encoding="utf-8")); assert d.get("markers"), "registry 无 markers（fail-closed）"; print("registry markers:", len(d["markers"]))'
+          echo "REG_SHA8=${SHA:0:8}" >> "$GITHUB_ENV"
+          echo "registry pinned @ ${SHA:0:8}"
+      - name: 扫描全部 active 仓 workflow 日志
+        env:
+          GOVERNANCE_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          RUN_ID: ${{ github.run_id }}
+          SWEEP_TRIGGER: ${{ github.event_name }}
+          SINCE_DAYS: ${{ inputs.since_days || 7 }}
+          TREAT_DRILL_AS_LEAK: ${{ inputs.treat_drill_as_leak == true }}
+        run: |
+          python3 - <<'EOF'
+          import io, json, os, sys, time, urllib.error, urllib.parse, urllib.request, zipfile
+          from datetime import datetime, timedelta, timezone
+          import yaml
+
+          TOKEN = os.environ["GOVERNANCE_TOKEN"]
+          ORG = os.environ["ORG"]
+          SELF_RUN_ID = int(os.environ["RUN_ID"])
+          SINCE_DAYS = int(os.environ["SINCE_DAYS"])
+          TREAT_DRILL = os.environ["TREAT_DRILL_AS_LEAK"] == "true"
+          MAX_RUNS_PER_REPO = 50
+
+          def fail_closed(msg):
+              print(f"::error::{msg}（fail-closed——检测器失明不得伪装通过）")
+              sys.exit(2)
+
+          repos = [r["name"] for r in yaml.safe_load(open("governance/REPOS.yaml", encoding="utf-8"))["repos"]
+                   if r.get("status") == "active"]
+          if not repos:
+              fail_closed("REPOS.yaml 无 active 仓")
+          reg = yaml.safe_load(open("registry.snapshot.yaml", encoding="utf-8"))
+          markers = {m["marker"]: {"id": m["id"], "drill": m.get("drill") is True} for m in reg["markers"]}
+          if not markers:
+              fail_closed("registry 无 markers")
+
+          def api(path):
+              req = urllib.request.Request(f"https://api.github.com{path}",
+                  headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json",
+                           "User-Agent": "holdout-canary-sweep"})
+              with urllib.request.urlopen(req) as r:
+                  return json.loads(r.read() or b"{}")
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              # 日志下载端点 302 → 签名 URL；手动跟随，避免把 GOVERNANCE_TOKEN 发给重定向目标
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          _noredir = urllib.request.build_opener(NoRedirect)
+
+          def fetch_logs_blob(repo, run_id):
+              req = urllib.request.Request(
+                  f"https://api.github.com/repos/{ORG}/{repo}/actions/runs/{run_id}/logs",
+                  headers={"Authorization": f"Bearer {TOKEN}", "User-Agent": "holdout-canary-sweep"})
+              try:
+                  try:
+                      resp = _noredir.open(req)
+                      loc, body = resp.headers.get("Location"), resp.read()
+                  except urllib.error.HTTPError as e:
+                      if e.code != 302:
+                          return None
+                      loc, body = e.headers.get("Location"), None
+                  if body is None:
+                      if not loc:
+                          return None
+                      with urllib.request.urlopen(loc) as r:  # 签名 URL，无需凭据
+                          body = r.read()
+                  z = zipfile.ZipFile(io.BytesIO(body))
+                  return b"".join(z.read(n) for n in z.namelist())
+              except Exception:
+                  return None  # 单 run 日志缺失不废整轮——正控缺失判据兜底（见下）
+
+          since = (datetime.now(timezone.utc) - timedelta(days=SINCE_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+          hits, runs_scanned, capped = [], 0, []
+          for repo in repos:
+              page, runs = 1, []
+              while True:
+                  q = urllib.parse.urlencode({"per_page": 100, "page": page, "created": ">" + since})
+                  try:
+                      data = api(f"/repos/{ORG}/{repo}/actions/runs?{q}")
+                  except Exception as e:
+                      fail_closed(f"{repo} runs 清单拉取失败: {e}")
+                  batch = data.get("workflow_runs") if isinstance(data, dict) else None
+                  if not isinstance(batch, list):
+                      fail_closed(f"{repo} runs 清单响应异常: {type(batch).__name__}")
+                  runs.extend(batch)
+                  if len(batch) < 100:
+                      break
+                  page += 1
+              # 只扫已完结 run；跳过本轮 sweep 自身（日志未落全）
+              runs = [r for r in runs if r.get("status") == "completed" and r.get("id") != SELF_RUN_ID]
+              if len(runs) > MAX_RUNS_PER_REPO:
+                  print(f"::warning::{repo} 窗口内 {len(runs)} 个 run 超上限 {MAX_RUNS_PER_REPO}，只扫最近 {MAX_RUNS_PER_REPO}——P1 覆盖注记（人工核查或调窗口）")
+                  capped.append(f"{repo}:{len(runs)}")
+                  runs = runs[:MAX_RUNS_PER_REPO]
+              for r in runs:
+                  blob = fetch_logs_blob(repo, r["id"])
+                  time.sleep(0.15)  # 二级限流礼貌间隔
+                  if blob is None:
+                      continue
+                  runs_scanned += 1
+                  for marker, meta in markers.items():
+                      if marker.encode() in blob:
+                          hits.append({"repo": repo, "run_id": r["id"], "url": r["html_url"],
+                                       "entry": meta["id"], "drill": meta["drill"]})
+
+          real_leaks = [h for h in hits if not h["drill"]]
+          drill_hits = [h for h in hits if h["drill"]]
+          result = {"real_leaks": real_leaks, "drill_hits": drill_hits,
+                    "treat_drill_as_leak": TREAT_DRILL, "repos_scanned": len(repos),
+                    "runs_scanned": runs_scanned, "capped": capped}
+          json.dump(result, open("sweep-result.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          print(f"AUDIT trigger={os.environ['SWEEP_TRIGGER']} registry={os.environ.get('REG_SHA8', 'unset')} "
+                f"repos={len(repos)} runs={runs_scanned} capped={capped or '无'} "
+                f"hits_real={len(real_leaks)} hits_drill={len(drill_hits)} since={since}")
+          # 输出一律掩码（entry id + drill 与否；完整 marker 绝不进日志）
+          for h in hits:
+              print(f"HIT {'drill' if h['drill'] else 'REAL-BAIT'} {h['repo']} run#{h['run_id']} ← {h['entry']}（marker 全文不进日志，见 registry 对应条目）")
+          EOF
+      - name: 结论与报警（P0 开 issue 幂等 / 正控缺失 P1 变红 / 正控在场绿）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REG_SHA8: ${{ env.REG_SHA8 }}
+        run: |
+          set -euo pipefail
+          VERDICT=$(python3 - <<'EOF'
+          import json
+          r = json.load(open("sweep-result.json", encoding="utf-8"))
+          if r["real_leaks"] or (r["drill_hits"] and r["treat_drill_as_leak"]):
+              print("LEAK")
+          elif r["drill_hits"]:
+              print("HEALTHY")
+          else:
+              print("NO-CONTROL")
+          EOF
+          )
+          echo "verdict=$VERDICT"
+          if [[ "$VERDICT" == "HEALTHY" ]]; then
+            echo "演习正控命中 ✓ 检测通道健康（drill marker 在窗口内日志中被检出且无真饵命中——ADR-0056 决策 5/6）"
+            exit 0
+          fi
+          if [[ "$VERDICT" == "NO-CONTROL" ]]; then
+            echo "::error::正控缺失 P1——窗口内未检出任何 drill marker，检测通道可能坏了（列表/下载/grep 任一环失效都会呈现为此形态）。处置：手动 dispatch holdout-canary-drill 注入正控 → dispatch 本 sweep（treat_drill_as_leak=false）复核；仍缺失则排查 Actions API 权限/限流（fail-closed，宪法 §6 缺席触发，ADR-0056）"
+            exit 1
+          fi
+          # LEAK：P0 issue（幂等——已有 open 同 label 不重复开，追加评论）
+          python3 - <<'EOF' > issue-body.md
+          import json, os
+          r = json.load(open("sweep-result.json", encoding="utf-8"))
+          rows = r["real_leaks"] + ([h for h in r["drill_hits"]] if r["treat_drill_as_leak"] else [])
+          treat = r["treat_drill_as_leak"]
+          lines = [
+              "## holdout 泄漏诱饵命中（P0" + ("——演习模式 treat_drill_as_leak=true" if treat else "") + "）",
+              "",
+              f"- 运行：{os.environ['REPO']}/actions/runs/{os.environ['RUN_ID']}",
+              f"- registry 钉点：{os.environ['REG_SHA8']}",
+              f"- 扫描面：{r['repos_scanned']} 仓 / {r['runs_scanned']} runs" + (f"（覆盖注记：{r['capped']}）" if r['capped'] else ""),
+              "",
+              "命中明细（marker 已掩码，全文见 holdout canary/registry.yaml 对应 entry）：",
+          ]
+          for h in rows:
+              kind = "drill（演习正控）" if h["drill"] else "真饵（违规读取）"
+              lines.append(f"- **{h['entry']}**（{kind}）→ {h['repo']} run #{h['run_id']}：{h['url']}")
+          lines += [
+              "",
+              "处置（宪法 §6 / ADR-0056）：定位该 run 的触发者与日志来源；确认真饵命中时审查对应 agent 的上下文来源，",
+              "确认隔离不变量是否被绕过（drift-check §18 的 App 安装面）；处置完成后手动关闭本 issue。",
+              "",
+              "@randypanding",
+          ]
+          print("\n".join(lines))
+          EOF
+          LABEL="holdout-leak"
+          gh label create "$LABEL" --repo "$REPO" --description "holdout 泄漏诱饵命中（canary sweep 自动报警，勿手工使用）" --color b60205 >/dev/null 2>&1 || true
+          EXISTING=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq 'length')
+          if [[ "$EXISTING" != "0" ]]; then
+            NUM=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq '.[0].number')
+            gh issue comment "$NUM" --repo "$REPO" --body-file issue-body.md
+            echo "已有 open $LABEL issue #$NUM，已追加本轮命中明细（幂等）"
+          else
+            gh issue create --repo "$REPO" --title "[P0] holdout 泄漏诱饵命中：canary marker 出现在 workflow 日志" --body-file issue-body.md --label "$LABEL"
+          fi
+          echo "::error::P0 泄漏命中——已开 issue（label holdout-leak）。明细见上方 HIT 行（marker 掩码）"
+          exit 1

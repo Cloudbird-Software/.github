@@ -43,6 +43,15 @@ repos:
                                       # 门禁，ADR-0015）此前不在组织地图——门禁自身逃逸治理地图
     policies: [agent_runtime]
 
+  - name: archive
+    layer: L1
+    visibility: public
+    status: active
+    role: 记忆层——ADR 归档正本（append-only，字节保真）+规划回归集+事件 JSONL+红队报告
+      落位（宪法 §1/§13 推论二，W1-C1 .github#164/ADR-0053）；ADR 状态真源=agent-registry
+      decisions/INDEX.yaml 墓碑索引（ADR-0053）
+    key_paths: [adr/, scripts/verify_migration.py]
+
   - name: template-service
     layer: L2
     visibility: public
@@ -114,6 +123,14 @@ repos:
       Python 基线为一次性存量导入豁免——仅作重写参照与 golden fixtures 来源，重写合并后
       语言面收敛为 Go+BAML）
     key_paths: [src/mutual/, spec/, tests/golden/]
+
+  - name: holdout
+    layer: L1
+    visibility: public
+    status: active
+    role: 试卷层——封存验收场景+golden+泄漏诱饵（宪法 §1/§4B，IR-0003 W1-C4 .github#167，
+      ADR-0056）；owner 直管；App 不挂载（DECISION-02 隔离不变量，drift-check §18 断言）
+    key_paths: [entries/, schema/, canary/]
 
 # 上游依赖（不属于本组织；不 fork、不 submodule）
 # 治理方式：声明于此 + 部署渲染时 clone 并 pin tag（ADR-0002 rev1）

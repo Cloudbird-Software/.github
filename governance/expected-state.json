@@ -118,15 +118,15 @@
     ]
   },
   "direct_push_exemptions": {
-    "comment": "§8 直推检测豁免——两类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃；arbiter 建仓 bootstrap 同理（W1-C2 .github#165/ADR-0054）。",
+    "comment": "§8 直推检测豁免——两类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃；arbiter 建仓 bootstrap 同理（W1-C2 .github#165/ADR-0054）。archive（W1-C1 .github#164/ADR-0053）：bootstrap README commit 同属 (b) 类——注意 ADR-0046 后 org-required-workflows ruleset 无 bypass，空仓首推被 required workflow 拦截，豁免操作=对 org ruleset 的 archive 仓库做秒级临时 exclude 后经 contents API 建 commit 并即刻还原（全程约 5 秒，已留痕于 #164）；ruleset 最终态与落盘定义一致（drift-check §1 不受影响）。",
     ".github": [
       "9b056b3a925038484a8f6655ea45f81f071d5df6",
       "416f5f57fd459f6ece3587f3aa20b772148ad335"
     ],
     "Shorts_Director": [
       "f63baf264291670aa33f4a599779dd5c84678433",
-      "d81fea9db47e065fd2bd0e254449862fc4a3c91b6",
-      "014f38986ee5335fe0d7e3ea260a9a4f2899fa1"
+      "d81fea9db47e065fd2bd5211dd1a8e3c26589f41",
+      "014f38986ee5338fe0d7e3ea260c9a4f289af401"
     ],
     "agent-tools": [
       "1050459443ce0373cffff7788c668d6f5dec0048"
@@ -148,8 +148,14 @@
       "60bd1557481fa89d0358302e150a8f7d9381309c",
       "e9424d220ded331c221b37135faa9d6e9cd1ecac"
     ],
+    "holdout": [
+      "63360c581524510ef37150dd7540cb333d283014"
+    ],
     "arbiter": [
       "7b1a65234b1697bde11cea2ebdacd8ee0efc44c4"
+    ],
+    "archive": [
+      "a32f0fcea2bc7b422ad8ad1463a8ad4a92cbeb60"
     ]
   },
   "merge_queue": {
