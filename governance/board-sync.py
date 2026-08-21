@@ -160,6 +160,65 @@ def active_repos():
 
 # ---------- 卡扫描（REST，真相源=issue label） ----------
 
+# @w5c4-board-pure-begin —— 板字段纯函数区（governance/tests/test-board-fields.sh
+# 按标记对提取本块离线单测——不复制实现，防"测试测影子"；标记对缺失=测试红）
+
+# PR body 卡元数据行（入口协议 v1：body 必带 Card: Cloudbird-Software/<repo>#<n>）
+CARD_REF_RE = re.compile(r"Card:\s*Cloudbird-Software/([A-Za-z0-9_.\-]+)#(\d+)")
+
+
+def pr_refs_from_prs(prs):
+    """open PR 列表（含 body）→ {(卡 repo, 卡号): head_sha}——卡↔PR 关联唯一判据。"""
+    out = {}
+    for pr in prs or []:
+        m = CARD_REF_RE.search(str(pr.get("body") or ""))
+        if not m:
+            continue
+        out[(m.group(1), int(m.group(2)))] = pr.get("head", {}).get("sha")
+    return out
+
+
+# check-runs 结论 → 关卡状态文案（fail-closed 方向：任一失败即红，未完成不算绿）
+_GATE_RED = ("failure", "timed_out", "startup_failure", "cancelled")
+
+
+def gate_status_text(check_runs):
+    """head sha 的 check-runs → 绿/红/等待/无 CI（W5-C4 AC-3 字段：关卡状态）。
+
+    判序：红 > 等待 > 绿（一个失败即红，其余绿不遮红；completed 无 conclusion
+    的畸形态归等待——不冒充绿）；零 run=无 CI（区分"还没跑"与"跑挂了"）。
+    """
+    runs = list(check_runs or [])
+    if not runs:
+        return "无 CI"
+    for r in runs:
+        if str(r.get("conclusion") or "").lower() in _GATE_RED:
+            return "红"
+    for r in runs:
+        if r.get("status") != "completed" or not r.get("conclusion"):
+            return "等待"
+    return "绿"
+
+
+# 漂移报警面=人工可在板上改的字段（宪法 §12：人工改动将被纠正+报警）；
+# 停留天数/卡号是每轮必变的派生刷新（日增/不变），进漂移面=每天误报淹没信号
+BOARD_DRIFT_FIELDS = ("State", "认领者", "AC 进度", "关卡状态", "谓词状态")
+
+
+def board_drift_fields(have, want):
+    """板当前值 vs label/派生期望值 → 漂移字段名列表（空值与未设等价——GitHub
+    空文本不落值，board-sync v1 同归一）。"""
+    drifted = []
+    for k in BOARD_DRIFT_FIELDS:
+        hv, wv = have.get(k), want.get(k)
+        if hv is None and (wv == "" or wv is None):
+            continue
+        if hv != wv:
+            drifted.append(k)
+    return drifted
+# @w5c4-board-pure-end
+
+
 def scan_cards(repos):
     """全部 active 仓 open issue 且带 state:* 标签 → 卡列表（label 是唯一判据）。"""
     cards = []
@@ -191,6 +250,52 @@ def scan_cards(repos):
             if len(batch) < 100:
                 break
             page += 1
+    return cards
+
+
+def load_predicate_pending():
+    """谓词状态 pending 标注（policy/metrics.yaml board 节——W5-C2 信任门未落，
+    字段占位≠造数）。policy 缺失→内置同值（板字段不因 policy 读取失败而缺席）。"""
+    try:
+        with open(os.path.join(DIR, "policy", "metrics.yaml"), encoding="utf-8") as f:
+            v = yaml.safe_load(f).get("board", {}).get("predicate_status_pending")
+        if v:
+            return str(v)
+    except Exception:
+        pass
+    return "pending(W5-C2)"
+
+
+def enrich_cards(cards, repos):
+    """W5-C4 AC-3：卡补 关卡状态（卡 PR 的 head check-runs）与 谓词状态（pending）。
+
+    卡↔PR 关联=PR body 的 Card: 元数据行（入口协议 v1）；无 PR 的卡=「无 PR」。
+    check-runs 拉取失败→「未知」并 WARN（fail-closed 方向：未知≠绿）。
+    """
+    prs = []
+    for repo in repos:
+        page = 1
+        while True:
+            batch = api_get(f"/repos/{ORG}/{repo}/pulls?state=open&per_page=100&page={page}")
+            prs.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+    refs = pr_refs_from_prs(prs)
+    predicate = load_predicate_pending()
+    for c in cards:
+        sha = refs.get((c["repo"], c["number"]))
+        if not sha:
+            c["gate_status"] = "无 PR"
+        else:
+            try:
+                cr = api_get(f"/repos/{ORG}/{c['repo']}/commits/{sha}/check-runs")
+                c["gate_status"] = gate_status_text(cr.get("check_runs") or [])
+            except Infra as e:
+                print(f"WARN gate-status {c['repo']}#{c['number']}: check-runs 拉取失败 {e}"
+                      f"——关卡状态=未知（不冒充绿）")
+                c["gate_status"] = "未知"
+        c["predicate_status"] = predicate
     return cards
 
 
@@ -229,6 +334,9 @@ FIELD_SPEC = [  # (字段名, 类型)——State 单选（选项=state 全集）
     # GitHub 保留名（"Repo"/"Assignee" 会撞内建 Repository/Assignees → reserved 拒绝）
     ("State", "SINGLE_SELECT"), ("仓", "TEXT"), ("认领者", "TEXT"),
     ("卡号", "NUMBER"), ("停留天数", "NUMBER"), ("AC 进度", "TEXT"),
+    # W5-C4 AC-3（宪法 §12 字段清单）：关卡状态=卡 PR head check-runs 投影；
+    # 谓词状态=硬谓词信任门（ADR-0071 W5-C2 进行中）——pending 标注不造数
+    ("关卡状态", "TEXT"), ("谓词状态", "TEXT"),
 ]
 
 
@@ -346,7 +454,7 @@ def main():
         state_names = {s["name"] for s in states}
         repos = active_repos()
         stats["repos"] = len(repos)
-        cards = scan_cards(repos)
+        cards = enrich_cards(scan_cards(repos), repos)
         stats["cards"] = len(cards)
         pid, purl = ensure_project()
         if pid is None:  # dry-run 且项目尚不存在——计划已打印，无从对账
@@ -378,17 +486,31 @@ def main():
                 stats["added"] += 1
             want = {"仓": c["repo"], "认领者": c["assignee"] or "",
                     "卡号": c["number"], "停留天数": c["days_idle"],
-                    "AC 进度": c["ac_progress"]}
+                    "AC 进度": c["ac_progress"],
+                    "关卡状态": c["gate_status"], "谓词状态": c["predicate_status"]}
             have = entry["fields"]
-            # State 先比对（漂移报警面 = 宪法 §12 人工改动将被纠正；仅对板上
-            # 既有条目报警——新增条目无旧值，不算人工改动）
-            if have.get("State") != c["state"]:
-                if preexisting:
+            # 漂移报警面（宪法 §12 人工改动将被纠正+报警；W5-C4 AC-3 扩到全部
+            # 人工可改字段——State 之外认领者/AC 进度/关卡状态/谓词状态同报）；
+            # 仅对板上既有条目报警——新增条目无旧值，不算人工改动。
+            # State 只在可写选项内参与比对（未知态写不进单选——比对了也纠正不了）
+            if preexisting:
+                drift_want = {**want}
+                if c["state"] in opt_ids:
+                    drift_want["State"] = c["state"]
+                drifted = board_drift_fields(have, drift_want)
+                if "State" in drifted:
                     print(f"WARN board-drift {c['repo']}#{c['number']}: "
-                          f"board={have.get('State')} label={c['state']}"
+                          f"State board={have.get('State')} label={c['state']}"
                           f"（人工改动将被纠正，宪法 §12）")
+                for f in drifted:
+                    if f != "State":
+                        print(f"WARN board-drift {c['repo']}#{c['number']}: "
+                              f"{f} board={have.get(f)!r} 期望={want[f]!r}"
+                              f"（label/派生真源将被写回，宪法 §12）")
+                if drifted:
                     stats["warned"] += 1
                     stats["corrected"] += 1
+            # State 写入（单选；未知态兜底在下方）
                 if c["state"] in opt_ids:
                     set_field(pid, entry["item_id"], fields["State"],
                               "singleSelectOptionId", opt_ids[c["state"]])
