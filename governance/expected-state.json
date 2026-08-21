@@ -97,12 +97,12 @@
     }
   },
   "org_required_workflows": {
-    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本（path/ref/repository_id 任何改动即漂移）；§15 校验 tag 钉点的 commit 绑定（tag 指针被移而 ruleset 文本不变的情形）。 v1.4.1：org-adr-required 修 bash -e 下 false 灭脚本缺陷（CI-Workflows PR#27）。",
+    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本（path/ref/repository_id 任何改动即漂移）；§15 校验 tag 钉点的 commit 绑定（tag 指针被移而 ruleset 文本不变的情形）。 v1.4.1：org-adr-required 修 bash -e 下 false 灭脚本缺陷（CI-Workflows PR#27）。 v1.4.2：merge_group 下 org-adr-required 设计性 skip 配 EXPECTED_SKIP（#135，CI-Workflows PR#28）——修复 merge queue 全量弹回。",
     "ruleset": "org-required-workflows",
     "repository": "CI-Workflows",
     "repository_id": 1337911551,
     "path": ".github/workflows/org-gate.yml",
-    "ref": "refs/tags/v1.4.1",
-    "ref_commit": "edcb58d09afec2b50d5febfd33da53e01ff708fe"
+    "ref": "refs/tags/v1.4.2",
+    "ref_commit": "2d368c29f170eab43b83f6b866f76fad3774fba9"
   }
 }
