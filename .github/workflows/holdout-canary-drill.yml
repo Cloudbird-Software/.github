@@ -1,0 +1,72 @@
+name: holdout-canary-drill
+# W1-C4 演习（ADR-0056 决策 7；宪法 §4B"每周向系统注入已知缺陷、演习关卡与
+# holdout 是否真会变红"的 holdout 变体）：把一条已注册 drill marker 写进本 run
+# 日志，模拟"holdout 内容泄漏进 workflow 日志"。
+# 演习序列（owner 月度补给职责的一部分，手动触发留痕）：
+#   1. dispatch 本 workflow → 本 run 日志含 drill marker
+#   2. dispatch holdout-canary-sweep（treat_drill_as_leak=true，since_days 覆盖本 run）
+#   3. 断言 sweep 开出 P0 holdout-leak issue（报警通道端到端真的会触发——AC-3）
+#   4. 手动关闭该 issue 并留评论"演习"
+# 仅 workflow_dispatch（无 cron）：演习由 owner 手动执行，留审计痕迹。
+on:
+  workflow_dispatch:
+    inputs:
+      marker_entry:
+        description: "演习用条目 id（缺省=registry 第一条 drill: true；只允许 drill 条目——真饵进日志会触发真 P0）"
+        default: ""
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: holdout-canary-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: 选定 drill marker（公开仓 raw 读取，钉 commit 留审计）
+        env:
+          MARKER_ENTRY: ${{ inputs.marker_entry }}
+        run: |
+          set -euo pipefail
+          SHA=$(curl -sSf "https://api.github.com/repos/Cloudbird-Software/holdout/commits?path=canary/registry.yaml&per_page=1" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["sha"])')
+          curl -sSfL "https://raw.githubusercontent.com/Cloudbird-Software/holdout/$SHA/canary/registry.yaml" -o registry.snapshot.yaml
+          MARKER_ENTRY="$MARKER_ENTRY" SHA="$SHA" python3 - <<'EOF' >> drill.env
+          import os, sys, yaml
+          want = os.environ.get("MARKER_ENTRY", "").strip()
+          reg = yaml.safe_load(open("registry.snapshot.yaml", encoding="utf-8"))
+          rows = [m for m in reg["markers"] if m.get("drill") is True]
+          if not rows:
+              print("::error::registry 无 drill:true marker——正控缺失，先补 registry（ADR-0056 决策 5）", file=sys.stderr)
+              sys.exit(2)
+          if want:
+              row = next((m for m in reg["markers"] if m.get("id") == want), None)
+              if row is None:
+                  print(f"::error::registry 无条目 {want}", file=sys.stderr); sys.exit(2)
+              if row.get("drill") is not True:
+                  # 铁闸：真饵 marker 进日志 = 真实 P0 泄漏报警——绝不注入
+                  print(f"::error::{want} 不是 drill:true 条目，拒绝注入（真饵进日志会触发真 P0）", file=sys.stderr)
+                  sys.exit(2)
+          else:
+              row = rows[0]
+          print(f"DRILL_MARKER={row['marker']}")
+          print(f"DRILL_ENTRY={row['id']}")
+          print(f"REG_SHA8={os.environ['SHA'][:8]}")
+          EOF
+          cat drill.env >> "$GITHUB_ENV"
+      - name: 泄漏注入（演习——drill marker 写入本 run 日志）
+        run: |
+          echo "=== holdout 泄漏演习（ADR-0056 决策 7）==="
+          echo "（演习）模拟 holdout 内容泄漏进 workflow 日志：entry=$DRILL_ENTRY registry@$REG_SHA8"
+          echo "leaked-canary-marker=$DRILL_MARKER"
+          echo "（演习）后续：dispatch holdout-canary-sweep(treat_drill_as_leak=true, since_days 覆盖本 run) → 应开出 P0 holdout-leak issue → 关闭留评论'演习'"

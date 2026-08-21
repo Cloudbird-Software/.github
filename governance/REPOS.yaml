@@ -113,6 +113,14 @@ repos:
       语言面收敛为 Go+BAML）
     key_paths: [src/mutual/, spec/, tests/golden/]
 
+  - name: holdout
+    layer: L1
+    visibility: public
+    status: active
+    role: 试卷层——封存验收场景+golden+泄漏诱饵（宪法 §1/§4B，IR-0003 W1-C4 .github#167，
+      ADR-0056）；owner 直管；App 不挂载（DECISION-02 隔离不变量，drift-check §18 断言）
+    key_paths: [entries/, schema/, canary/]
+
 # 上游依赖（不属于本组织；不 fork、不 submodule）
 # 治理方式：声明于此 + 部署渲染时 clone 并 pin tag（ADR-0002 rev1）
 external_upstreams:
