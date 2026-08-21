@@ -1,16 +1,44 @@
 #!/usr/bin/env bash
-# ghcb —— 取 cloudbrid-agent 单仓安装令牌的便捷入口（ADR-0044，包 gh-app-token.sh）
+# ghcb —— cloudbrid-agent 便捷入口（ADR-0044 令牌 + ADR-0051 找活协议）
 #
-# 用法：
-#   GH_TOKEN=$(ghcb template-service)          # stdout=令牌，可直接命令替换
-#   ghcb template-service >/dev/null           # 仅预热缓存
-#   GH_TOKEN=$(ghcb template-service --refresh) # 强制刷新
+# 用法:
+#   GH_TOKEN=$(ghcb <repo> [--refresh])   # 铸 App 单仓安装令牌（ADR-0044，原用法不变）
+#   ghcb next [repo]                      # 找活：列出 <repo>（缺省=origin 所在仓）state:ready 的卡
+#   ghcb claim <n> [repo]                 # 认领：在卡 #n 评论 /claim——conductor 校验先到先得并置
+#                                        # state:in-progress（ADR-0049 T3）；ghcb 不持有状态写权
 #
-# 与 gh-app-token.sh 相同的契约：CB_APP_ID + AGENT_APP_SECRET_FILE/AGENT_APP_SECRET
-# 必须已设置；REPO 由第一个参数提供；ORG 可用环境变量覆盖（默认 Cloudbird-Software）。
+# next/claim 用调用方自己的 gh 凭据（gh auth login）；认领合法性单一真源=conductor guard。
 set -euo pipefail
-REPO="${1:?用法: GH_TOKEN=\$(ghcb <repo> [--refresh])}"
-shift || true
-export REPO
-DIR="$(cd "$(dirname "$0")" && pwd)"
-exec bash "$DIR/gh-app-token.sh" "$@"
+
+origin_repo() {  # 从 origin 远端推断 owner/name；非 git 仓则空
+  git remote get-url origin 2>/dev/null | sed -E 's#.*github\.com[:/]##; s#\.git$##' || true
+}
+
+CMD="${1:-}"
+case "$CMD" in
+  next|claim)
+    shift || true
+    REPO_ARG="${1:-$(origin_repo)}"
+    [[ -n "$REPO_ARG" ]] || { echo "错误：不在 git 仓内且未指定仓（用法: ghcb $CMD <repo>）" >&2; exit 2; }
+    case "$CMD" in
+      next)
+        # 只读查询；空列表是正常态（无卡可认领≠错误）
+        gh issue list --repo "$REPO_ARG" --label state:ready --state open \
+          --json number,title --jq '.[] | "#\(.number) \(.title)"' \
+          || { echo "查询失败：检查 gh 凭据（gh auth login）与仓权限" >&2; exit 2; }
+        ;;
+      claim)
+        N="${1:?用法: ghcb claim <issue#> [repo]}"
+        gh issue comment "$N" --repo "$REPO_ARG" --body "/claim" >/dev/null
+        echo "已评论 /claim（#$N @$REPO_ARG）——conductor 校验先到先得并置 state:in-progress；确认：gh issue view $N -R $REPO_ARG"
+        ;;
+    esac
+    ;;
+  *)
+    # 令牌模式：ghcb <repo> [--refresh]
+    export REPO="${1:?用法: GH_TOKEN=\$(ghcb <repo> [--refresh]) | ghcb next [repo] | ghcb claim <n> [repo]}"
+    shift || true
+    DIR="$(cd "$(dirname "$0")" && pwd)"
+    exec bash "$DIR/gh-app-token.sh" "$@"
+    ;;
+esac
