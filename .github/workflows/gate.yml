@@ -92,7 +92,9 @@ jobs:
           && bash -n governance/deadman-trip.sh && bash -n governance/butler-audit.sh \
           && bash -n governance/tests/test-drill.sh \
           && bash -n governance/drill/tests/test-samples.sh && bash -n governance/drill/tests/test-select.sh \
-          && bash -n governance/drill/tests/test-verify.sh
+          && bash -n governance/drill/tests/test-verify.sh \
+          && bash -n governance/drill/tests/test-history.sh && bash -n governance/drill/tests/test-failclose.sh \
+          && bash -n governance/drill/failclose-test.sh
           echo "OK scripts"
       - name: 治理脚本自测（governance/tests）
         run: |
