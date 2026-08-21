@@ -588,17 +588,57 @@ def collect_user_metrics():
     return out
 
 
-def build_payload(repos, cards, purl=""):
+def build_payload(repos, cards, purl="", prev=None):
+    """v2：v1 键全保留（cards/sli/sli_pending/sli_meta——agent 兼容）+ north_star/metrics。
+
+    prev=上一轮 issue body 的 JSON（成本快照 TTL 复用 + 逃逸 sustained 无状态化——
+    事件时戳直算双窗，ADR-0073 决策 1）。
+    """
+    prev = prev or {}
     rate, denom = sli_automerge(repos)
-    sli = {"automerge_rate": rate, "human_touch_per_pr": None, "escape_rate": None,
+    zero_touch = sum(1 for n in merged_prs(repos, days=7)
+                     if (n.get("mergedBy") or {}).get("login") == APP_BOT)
+    esc = collect_escape(repos)
+    drill_agg, drill_records = collect_drill()
+    allow, fd_lines = collect_false_decisions()
+    durations, in_flight, dwell, ir_month = collect_attention(cards)
+    minutes, tokens, snap_ts = collect_cost(prev.get("metrics", {}).get("cost", {}))
+    data = {
+        "now": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "zero_touch_merges_7d": zero_touch,
+        "escape_rate_sustained": esc,
+        "revert_rate": (None if esc is None else
+                        {"num": esc["reverts_current"], "denom": denom}),
+        "drill_red_rate": drill_agg,
+        "false_allow": allow,
+        "sign_durations_seconds": durations,
+        "sign_in_flight": in_flight,
+        "needs_human_dwell_hours": dwell,
+        "false_decision_lines": fd_lines,
+        "drill_records": drill_records,
+        "actions_minutes_month": minutes,
+        "llm_tokens_month": tokens,
+        "ir_count_month": ir_month,
+        "cost_snapshot_ts": snap_ts,
+        "user_metric_files": collect_user_metrics(),
+    }
+    v2 = metrics_lib.build_payload(data, METRICS_POLICY)
+    # SLI 块（#98 口径）：escape_rate v2 起有数（同北极星逃逸护栏分子，sli-report 口径）
+    esc_rate = None
+    if esc is not None and denom:
+        esc_rate = round(esc["current"] / denom, 4)
+    sli = {"automerge_rate": rate, "human_touch_per_pr": None, "escape_rate": esc_rate,
            "stuck_prs": sli_stuck(repos), "false_red_rate": None, "entropy_delta": None}
-    pending = {"human_touch_per_pr": "W5-C3", "escape_rate": "W5-C3",
-               "false_red_rate": "W5-C3", "entropy_delta": "W5-C3"}
+    pending = {"human_touch_per_pr": "W5-C3", "false_red_rate": "W5-C3", "entropy_delta": "W5-C3"}
     if rate is None:
         pending["automerge_rate"] = "N/A（近 7 天零 merged PR——分母陷阱 #98 T2，不造数）"
-    return {
+    if esc is None:
+        pending["escape_rate"] = "N/A（逃逸采集失败——北极星护栏同步 pending，盲区已上屏）"
+    elif esc_rate is None:
+        pending["escape_rate"] = "N/A（近 7 天零 merged PR——分母陷阱 #98 T2，不造数）"
+    payload = {
         "generated_at": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "schema": "dashboard-json v1（ADR-0055；#98 SLI 字段名兼容）",
+        "schema": "dashboard-json v2（ADR-0055 v1 键兼容 + ADR-0073 north_star/metrics）",
         "project": {"title": "factory-floor", "url": purl},
         "cards": cards,
         "sli": sli,
@@ -606,12 +646,17 @@ def build_payload(repos, cards, purl=""):
         "sli_meta": {
             "automerge_rate": f"近7天 merged PR 中 merged_by=={APP_BOT} 占比（proxy，W5-C3 换 timeline 事件）",
             "automerge_denominator_7d": denom,
+            "escape_rate": "（非演习 [auto-revert]+post-merge P0）/近7天 merged（ADR-0059 口径，v2 实算）",
             "stuck_prs": "open PR 停留>24h（active 仓求和）",
         },
+        "north_star": v2["north_star"],
+        "metrics": v2["metrics"],
     }
+    return payload
 
 
 def render_body(payload):
+    """正文顶部=北极星对（AC-1 同屏）→ 状态一览 → 机器可读 JSON（宪法 §8 人 30 秒读懂）。"""
     cards = payload["cards"]
     by_state = {}
     for c in cards:
@@ -622,7 +667,17 @@ def render_body(payload):
     sli, meta = payload["sli"], payload["sli_meta"]
     rate_txt = f"{sli['automerge_rate']*100:.0f}%（分母 {meta['automerge_denominator_7d']}）" \
         if sli["automerge_rate"] is not None else "N/A（零分母）"
-    human = f"""# 管家账本 dashboard（factory-floor 投影二，宪法 §12 / ADR-0055）
+    human = f"""# 管家账本 dashboard（factory-floor 投影二，宪法 §12 / ADR-0055+0073）
+
+{metrics_lib.render_brief({"north_star": payload["north_star"], "metrics": payload["metrics"]})}
+## 状态一览
+
+- 在制卡：**{len(cards)}** 张（active 仓 open+state:*）
+{state_lines}
+- factory-floor 板：{payload["project"]["url"] or "（board-sync 首轮后回填链接）"}
+- SLI（#98 口径）：自动合并率 {rate_txt} · 逃逸率 {sli['escape_rate'] if sli['escape_rate'] is not None else 'N/A'} · 卡死 PR（>24h）{sli['stuck_prs']}
+- 待补（W5-C3）：人类触碰/PR · 假红率 · 熵增——见 sli_pending 与 metrics 各 pending 字段
+- 刷新节奏：butler-ledger 每 15min（唤醒矩阵行 2）；手动：workflow_dispatch board-sync
 
 ## 机器可读区（agent 一次读取全局；历史留痕=本 issue 编辑历史）
 
@@ -630,28 +685,16 @@ def render_body(payload):
 {FENCE}json
 {json.dumps(payload, ensure_ascii=False, indent=2)}
 {FENCE}
-
-## 人类一屏摘要
-
-- 在制卡：**{len(cards)}** 张（active 仓 open+state:*）
-{state_lines}
-- factory-floor 板：{payload["project"]["url"] or "（board-sync 首轮后回填链接）"}
-- SLI（#98 口径，v1 子集）：自动合并率 {rate_txt} · 卡死 PR（>24h）{sli['stuck_prs']}
-- 待补（W5-C3）：人类触碰/PR · 门禁逃逸率 · 假红率 · 熵增——见 sli_pending
-- 刷新节奏：butler-ledger 每 15min（唤醒矩阵行 2）；手动：workflow_dispatch board-sync
 """
     return human
 
 
-def ensure_issue(body):
-    """幂等找到/创建账本 issue；返回 (number, created)。
+def find_issue():
+    """幂等查找账本 issue（ensure_issue 的查找半——main 需先读旧 body 取成本快照）。
 
-    查找范围 state=all（含已关闭：账本被人工关闭后复用之，不得重复创建——
-    否则账本分裂、编辑历史散落）；/issues 端点混入 PR，须按 "pull_request"
-    键排除；标题不唯一——复用已存在账本还须带 `dashboard` label（本脚本创建
-    即打标；同名无标 issue 不接管，防 body 覆盖写进无关 issue）。
+    查找范围 state=all（含已关闭：账本被人工关闭后复用之）；同名无 `dashboard`
+    label 的 issue 不接管（防 body 覆盖写进无关 issue，ADR-0055）。
     """
-    found = None
     page = 1
     while True:
         batch = get(f"/repos/{ORG}/{HOME_REPO}/issues?state=all&per_page=100&page={page}")
@@ -659,8 +702,13 @@ def ensure_issue(body):
                       if "pull_request" not in i and i["title"] == ISSUE_TITLE
                       and LABEL["name"] in [l.get("name") for l in i.get("labels", [])]), None)
         if found or len(batch) < 100:
-            break
+            return found
         page += 1
+
+
+def ensure_issue(body):
+    """幂等找到/创建账本 issue；返回 (number, created)。"""
+    found = find_issue()
     if found:
         return found["number"], False
     # 幂等建 label（201=新建，422=已存在；其余=真故障——fail-closed 不静默）
@@ -706,21 +754,45 @@ def project_url():
 
 
 def _stable(body):
-    """剥离每轮必变的时间戳再比对（generated_at 精度到秒——不剥离则“内容相同
-    跳过写”永不生效，每 15min 一条无意义编辑淹没 issue 历史）。"""
-    return re.sub(r'"generated_at":\s*"[^"]*"', '"generated_at":"-"', body).strip()
+    """剥离每轮必变的时戳再比对（generated_at 精度到秒；snapshot_age_minutes 每 15min
+    递增——不剥离则“内容相同跳过写”永不生效，每 15min 一条无意义编辑淹没 issue 历史；
+    snapshot_ts 每小时快照刷新会真变更——保留，那是实质内容变化）。"""
+    for key in ("generated_at", "snapshot_age_minutes"):
+        body = re.sub(rf'"{key}":\s*"[^"]*"', f'"{key}":"-"', body)
+        body = re.sub(rf'"{key}":\s*[0-9.]+', f'"{key}":0', body)
+    return body.strip()
+
+
+def _prev_payload(body_text):
+    """旧 issue body → 上轮 JSON（成本快照复用源）。解析失败→{}（快照自然过期）。"""
+    m = re.search(re.escape(JSON_MARK) + r".*?```+\s*json\s*\n(.*?)\n```+", body_text or "", re.S)
+    if not m:
+        return {}
+    try:
+        return json.loads(m.group(1))
+    except ValueError:
+        return {}
 
 
 def main():
     if not TOKEN:
         print("FATAL 需要环境变量 GH_TOKEN=GOVERNANCE_TOKEN", file=sys.stderr)
         return 2
-    stats = {"cards": 0, "issue": None, "created": 0, "edited": 0, "unchanged": 0}
+    stats = {"cards": 0, "issue": None, "created": 0, "edited": 0, "unchanged": 0,
+             "guards_red": 0, "zeroed": 0}
     try:
         repos = active_repos()
         cards = scan_cards(repos)
         stats["cards"] = len(cards)
-        payload = build_payload(repos, cards, project_url())
+        prev, cur = {}, None
+        found = find_issue()
+        if found:
+            cur = get(f"/repos/{ORG}/{HOME_REPO}/issues/{found['number']}")
+            prev = _prev_payload(cur.get("body") or "")
+        payload = build_payload(repos, cards, project_url(), prev)
+        ns = payload["north_star"]
+        stats["guards_red"] = len(ns["zero_touch_merges_7d"]["zeroed_reasons"])
+        stats["zeroed"] = 1 if ns["interlocked_zeroed"] else 0
         body = render_body(payload)
         num, created = ensure_issue(body)
         stats["created"] = 1 if created else 0
@@ -730,7 +802,8 @@ def main():
                   f"dry-run=1 | actions={json.dumps(stats, ensure_ascii=False)}")
             return 0
         if not created:
-            cur = get(f"/repos/{ORG}/{HOME_REPO}/issues/{num}")
+            if cur is None:  # find_issue 未命中但 ensure_issue 命中（并发创建）——重取
+                cur = get(f"/repos/{ORG}/{HOME_REPO}/issues/{num}")
             if _stable(cur.get("body") or "") == _stable(body):
                 stats["unchanged"] = 1
             elif DRY_RUN:
