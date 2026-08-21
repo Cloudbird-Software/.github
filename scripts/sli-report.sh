@@ -184,7 +184,7 @@ $REPORT
 BOD
 
 gh issue create --repo "$GOV_REPO" --title "SLI 周报 $WEEK（自动合并门禁自身指标）" \
-  --body-file "$TMP/body.md" --label sli-report || die "周报 issue 创建失败" \n  || gh issue create --repo "$GOV_REPO" --title "SLI 周报 $WEEK（自动合并门禁自身指标）" --body-file "$TMP/body.md"
+  --body-file "$TMP/body.md" || die "周报 issue 创建失败" \n  || gh issue create --repo "$GOV_REPO" --title "SLI 周报 $WEEK（自动合并门禁自身指标）" --body-file "$TMP/body.md"
 
 # 抽样审计 issue
 SAMPLES=$(grep '^SAMPLE=' "$TMP/metrics.txt" || true)
@@ -202,7 +202,7 @@ fi
 
 if [[ "$ESCALATE" == "ESCALATE" ]]; then
   gh issue create --repo "$GOV_REPO" --title "P1: 门禁逃逸率连续两周 >0（SLI 升级，$WEEK）" \
-    --body "escape_rate 上期=$PREV 本期=$CUR——按 #98 T5 阈值自动升级。需归因（被 revert 的 PR / P0 事件清单见周报）。" --label P1 \
+    --body "escape_rate 上期=$PREV 本期=$CUR——按 #98 T5 阈值自动升级。需归因（被 revert 的 PR / P0 事件清单见周报）。" \
     && exit 1
 fi
 exit 0
