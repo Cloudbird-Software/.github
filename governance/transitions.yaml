@@ -5,6 +5,8 @@ version: 1
 # schema：
 #   from_state  = 转移前状态（当前 issue 无 state:* 标签时视为 ir-draft）
 #   event       = label:state:<name> | comment:/start | comment:/claim | comment:/retry
+#                 | label:<非state判定标签>（W3-C1 Bug 流扩展：label:bug/label:reproduced
+#                 ——判定标签驱动的转移，见 B1/B2 注）
 #   to_state    = 转移后状态（conductor 以 App 身份换标签：移除 from、置上 to）
 #   action      = invoke:spec-author | claim | noop（W0 全集）
 #   guard       = 布尔表达式；变量白名单：sender_role（owner|agent|none）、
@@ -12,7 +14,13 @@ version: 1
 #                 label_set（当前标签名集合）
 # 未列出的 (from_state, event) 组合 = 禁止转移（conductor no-op；重复投递/
 # 跳态/反向天然被 from_state 匹配拒绝——幂等键 {issue, from, to} 的落盘形态）。
-states: [ir-draft, ir-signed, spec, redteam, wave-planned, ready, in-progress, quarantine, needs-human, done]
+# W3-C1（ADR-0064）：append bug 流状态 bug/reproduced/fixed 与转移 B1-B5。
+# Bug 流与 Feature 流的差异：入口免签（bug 标签即 reproduce 阶段）、
+# 判定标签（reproduced/cannot-reproduce/inconclusive）是事实标签而非状态——
+# cannot-reproduce 不产生状态转移（保留人裁，ADR-0064 决策 4）；
+# bugflow 的状态写序=先移旧态再置新态（防双 state 并存窗口触发
+# conductor 多状态 abort）。
+states: [ir-draft, ir-signed, spec, redteam, wave-planned, ready, in-progress, quarantine, needs-human, done, bug, reproduced, fixed]
 
 transitions:
   - id: T1  # 主通路：owner/agent 打签署标签 → 进 spec 阶段（BEH-01）。
@@ -40,5 +48,45 @@ transitions:
     from_state: quarantine
     event: comment:/retry
     to_state: ready
+    action: noop
+    guard: "sender_role in ['owner', 'agent']"
+  # ---------- Bug 流（W3-C1 .github#218 / ADR-0064，宪法 §3）----------
+  # 执行者：CI-Workflows pipeline/bugflow（bug-reproduce.yml 以 App 身份写标签）。
+  # conductor 对 label:bug/label:reproduced 等非 state 标签事件静默 no-op——
+  # B1/B2 是状态机声明（唯一转移定义源原则：bug 流的合法转移也必须落表），
+  # 由 bugflow 执行转移本体；B5 的人工/流水线双路径均满足 from_state 幂等。
+  - id: B1  # Bug 流入口（免签——区别于 Feature 流签署前置）：bug form 落 bug
+    # 标签 → 进 reproduce 阶段（state:bug）。无 state 标签按约定视为 ir-draft。
+    from_state: ir-draft
+    event: label:bug
+    to_state: bug
+    action: noop
+    guard: "'bug' in label_set"
+  - id: B2  # 三值判定之【复现】：base 稳定 fail（+fix 候选 pass）→ reproduced
+    # 标签 + state:reproduced；reproduced 后产 failing repro test 待 owner 签
+    # （锁定 ADR-0061 → 修复 → 关卡 → 合并）。证伪（label:cannot-reproduce）
+    # 不在此列：不转移状态、不关单——保留人裁。
+    from_state: bug
+    event: label:reproduced
+    to_state: reproduced
+    action: noop
+    guard: "sender_role in ['owner', 'agent']"
+  - id: B3  # 修复合入：owner/agent 置 state:fixed（fix PR 的合并事实回写 bug 单）
+    from_state: reproduced
+    event: label:state:fixed
+    to_state: fixed
+    action: noop
+    guard: "sender_role in ['owner', 'agent']"
+  - id: B4  # 终态关单：fixed → done（owner/agent 置 state:done 后关单）
+    from_state: fixed
+    event: label:state:done
+    to_state: done
+    action: noop
+    guard: "sender_role in ['owner', 'agent']"
+  - id: B5  # 三值判定之【不可判定】兜底：环境错/超时/翻转，换新环境重试一次仍
+    # 不可判定 → label:inconclusive + state:needs-human（转人裁）
+    from_state: bug
+    event: label:state:needs-human
+    to_state: needs-human
     action: noop
     guard: "sender_role in ['owner', 'agent']"
