@@ -453,6 +453,13 @@ fi
 #   - 已完结 CI 的 PR head 缺 gate 仍照报（PR 群体缺 required check = CI 结构性
 #     异常或改名注入——T1 的检测对象；main HEAD 仅在无 PR 活动时作退化载体，
 #     不作为豁免来源）。查询失败维持 fail-closed。
+# IR-0002（spec PR#152）(a)/(b) 形态区分（2026-08-21）：org-gate 是 PR/merge_group
+# 触发的 required workflow（org-gate.yml 的 on:），其活体证据只能来自 ruleset
+# 生效后的 PR head——push-only / 生效前 PR 的 head 缺失属 (a)「从未接入」
+# （OK/INFO 计数，非漂移）；仅 (b) 生效后 PR head 缺失才报裸奔。
+# 生效时刻 = org-required-workflows ruleset 创建时刻（API 实测）。
+ORG_GATE_EFFECTIVE="2026-08-20T07:43:21Z"
+
 REQ_CHECKS=$(jq -rs '[.[].rules[]? | select(.type == "required_status_checks")
                       | .parameters.required_status_checks[].context] | unique | .[]' "$DIR"/rulesets/*.json)
 [[ -n "$REQ_CHECKS" ]] || { echo "FATAL: rulesets 未声明任何 required check——§12 活体验证失去判据"; exit 2; }
@@ -519,10 +526,14 @@ for r in $REPOS; do
     if [[ $FOUND -ne 1 ]]; then
       if [[ $QUERY_FAIL -eq 1 ]]; then
         drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
+      elif [[ "$ctx" == "org-gate" ]] && ! jq -e --arg eff "$ORG_GATE_EFFECTIVE"            '[.[] | select((.state == "open" or .merged_at != null) and (.updated_at >= $eff))] | length > 0'            <<<"$PRS_RECENT" >/dev/null 2>&1; then
+        # IR-0002 (a) 形态：org-gate ruleset 生效后该仓无 PR 活动——从未接入，
+        # 非裸奔（待接入清单；本地 gate 的活体验证不受影响，照常执行）
+        echo "OK    required-check-live '$r'：'$ctx' 待接入（ruleset 生效后无 PR 活动——IR-0002 (a) 形态）"
       else
-        drift "repo '$r' required check '$ctx' 活体缺失：最近 $N_CONCL 个已完结 CI 的 head 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12）"
+        drift "repo '$r' required check '$ctx' 活体缺失：最近 $N_CONCL 个已完结 CI 的 head 均无该 check run——job 改名或 workflow 重构？裸奔窗口已开启（ADR-0034 §12；IR-0002 (b) 形态）"
+        LIVE_MISS=1
       fi
-      LIVE_MISS=1
     fi
   done
   [[ $LIVE_MISS -eq 0 ]] && ok "required-check-live '$r'（最近 $N_CONCL 个已完结 head 上 required check 齐备）"
