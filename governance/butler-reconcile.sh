@@ -142,6 +142,7 @@ repo_issue_rows() {  # <repo> <state(open|closed)>
 escalate() {  # <repo> <num> <kind(stale-in-progress|stale-quarantine)> <age_days> <body>
   local r="$1" n="$2" kind="$3" age="$4" body="$5" existing
   FINDINGS=$((FINDINGS+1))
+  label_ensure "$GOV_REPO" butler:needs-human fb8c04   # 幂等（已存在即成功）——create --label 前必须先保证标签存在
   local ttl="[butler] $kind: $r#$n （停滞 ${age}d 达阈值）"
   existing=$(needs_human_find "$r" "$n")
   if [[ -n "$existing" ]]; then
