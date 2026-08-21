@@ -42,7 +42,7 @@ diff_coverage:
                        .lock, .sql, .html, .css, .svg, .png, .jpg, .jpeg, .ico, .csv,
                        .baml, .mod, .sum, .tmpl, .j2, .env, .editorconfig]
   exempt_filenames: [LICENSE, CODEOWNERS, Makefile, Dockerfile, .gitignore, .dockerignore,
-                      .gitattributes, .env.example, conftest.py]
+                      .gitattributes, .env.example, conftest.py, .postmerge-smoke-marker]
   exempt_paths: [vendor/, node_modules/, dist/, build/, coverage/, reports/, .github/,
                  docs/, golden/, baml_client/, migrations/, alembic/, workspace/,
                  tests/, "*_test.go", "*_test.py", "*.test.ts", "*.test.tsx",
