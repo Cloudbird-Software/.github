@@ -16,7 +16,7 @@ origin_repo() {  # 从 origin 远端推断 owner/name；非 git 仓则空
 
 CMD="${1:-}"
 case "$CMD" in
-  next|claim)
+  next)
     shift || true
     REPO_ARG="${1:-$(origin_repo)}"
     [[ -n "$REPO_ARG" ]] || { echo "错误：不在 git 仓内且未指定仓（用法: ghcb $CMD <repo>）" >&2; exit 2; }
@@ -28,7 +28,9 @@ case "$CMD" in
           || { echo "查询失败：检查 gh 凭据（gh auth login）与仓权限" >&2; exit 2; }
         ;;
       claim)
+        # 参数序：<issue#> [repo]——与文档一致（首版误把 $1 当 repo，实测报错）
         N="${1:?用法: ghcb claim <issue#> [repo]}"
+        REPO_ARG="${2:-${REPO_ARG:-$(origin_repo)}}"
         gh issue comment "$N" --repo "$REPO_ARG" --body "/claim" >/dev/null
         echo "已评论 /claim（#$N @$REPO_ARG）——conductor 校验先到先得并置 state:in-progress；确认：gh issue view $N -R $REPO_ARG"
         ;;
