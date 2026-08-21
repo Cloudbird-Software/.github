@@ -163,7 +163,7 @@ domains:
         strength: enforced
         platform: {github: {mechanism: script, entry: agent-registry/scripts/validate.py}}
       - id: AR-3
-        intent: "模型接入一律经 LLM Gateway：声明只引用 alias；provider key 仅存 gateway secret store；任何仓库/agent 配置零明文 key"
+        intent: "模型接入一律经 LLM Gateway：声明只引用 alias；provider key 仅存 gateway secret store；任何仓库/agent 配置零明文 key。第一期形态（IR-0001 DECISION-01/ADR-0048）——无 gateway 时允许直连 provider API，key 仅存 org secret LLM_API_KEY（expected-state §5 登记存在性），一切调用经 CI-Workflows 计量 wrapper（scripts/llm-call.sh）落盘用量；alias 语义与 AR-8 不变，回切触发条件见 ADR-0048"
         strength: enforced
       - id: AR-4
         intent: "agent 凭据最小权限：per-agent/per-team 作用域 token（衔接 AG-1）；声明中只写 env 引用"
