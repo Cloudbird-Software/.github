@@ -290,5 +290,14 @@ agent 侧补盲（AGENTS.md）：派发前须确认无未决本 label issue。"
   exit 2
 fi
 
+# 基础设施恢复通道（ADR-0040）：本轮零 INFRA 且存在未决 cost-check cost-infra issue
+# → 自动关闭（与熔断复位确认对称——否则权限修复后告警单永久滞留，#201 实例）
+if gov_open_issues cost-infra | grep -q "cost-check"; then
+  for row in $(gov_open_issues cost-infra | grep "cost-check" | cut -f1); do
+    mutate "$GH" issue close "$row" --repo "$GOV_REPO" --comment       "基础设施恢复确认：本轮零 INFRA（billing 用量与 org 变量读写全通，$(date -u +%FT%TZ)）——自动关闭（对称于熔断复位确认）。"       >/dev/null 2>&1 || true
+    act "infra 恢复，关闭 issue #$row"
+  done
+fi
+
 [[ $TRIPPED -eq 1 ]] && exit 1
 exit 0
