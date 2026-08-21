@@ -1,0 +1,41 @@
+name: sli-weekly
+# P3-4（.github #98，ADR-0049）：自动合并门禁自身 SLI 周报 + 每周抽样审计。
+# 指标定义/阈值/抽样参数真源 = governance/policy/automation-limits.yaml#sli。
+# 执法前自测（T2/T3/T5 离线 7 断言）——工具自身算错比漏检更糟。
+on:
+  schedule:
+    - cron: "30 1 * * 1"   # 每周一 01:30 UTC
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "窗口天数覆盖（空=7）"
+        default: ""
+      sample_size:
+        description: "抽样数覆盖（空=3）"
+        default: ""
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  sli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 自测（T2/T3/T5 离线）
+        run: bash scripts/sli-report.sh --self-test
+      - name: SLI 采集 + 周报 + 抽样审计
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          SLI_WINDOW: ${{ inputs.window_days }}
+          SLI_SAMPLE_SIZE: ${{ inputs.sample_size }}
+        run: |
+          exit_code=0
+          bash scripts/sli-report.sh || exit_code=$?
+          # 0=正常 | 1=阈值升级触发（已开 P1——运行可见红）| 2=基础设施故障（fail-closed）
+          if [ "$exit_code" -eq 2 ]; then echo "::error::SLI 采集基础设施故障（fail-closed）"; exit 1; fi
+          exit 0
