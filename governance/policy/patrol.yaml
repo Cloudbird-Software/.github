@@ -1,0 +1,65 @@
+schema: patrol-policy/v1
+# ============================================================================
+# patrol.yaml —— patrol 巡逻服务政策（阈值唯一真源，W3-C2 .github#219）
+# 真源: 本文件（频控/降频/开单上限/权限声明集中此文件——改动=C1 变更须引用 ADR）
+# 执行: CI-Workflows pipeline/patrol/patrol.py（.github/workflows/patrol.yml
+#       每日 02:43 UTC 拉取本文件后巡逻；拉取失败 fail-closed 拒跑）
+# 决策: ADR-0065（patrol 巡逻服务——三源场景+指纹去重频控+毕业机制）
+# 宪法: §3 patrol（三源/observation 桶两次独立/毕业防刷熟）§8（patrol yield）
+# 注: targets 内的探针路径相对 CI-Workflows 仓根（patrol run --target-base）；
+#     新仓接入巡逻面=在 targets 追加条目（C1 变更）。
+# ============================================================================
+version: 1
+
+targets:
+  - repo: Cloudbird-Software/CI-Workflows
+    mode: demo-probe            # shadow 期只对仓内 demo 靶场巡逻（blastRadius 可控）
+    # 探针适配器契约：stdin 单 JSON payload → stdout JSON 包络 {ok,http_status,data}
+    # （包络可带 service_ms——perf oracle 优先消费，避免进程墙钟污染预算判定）
+    service: pipeline/patrol/demo-target/service.py
+    ac_registry: pipeline/patrol/demo-target/ac-registry.yaml   # 源(a) AC 注册表派生
+    escapes: pipeline/patrol/demo-target/escapes.yaml           # 源(b) 历史逃逸模式库
+
+rate_limit:
+  # 频控（AC-2 / ADR-0065 决策 3）：同指纹不重复开单之外的第二道闸——
+  # 突发缺陷潮也按仓限速，deferred 留待下一窗口再攻击
+  max_issues_per_repo_per_hour: 2
+  max_issues_per_repo_per_day: 6
+
+observation:
+  # 宪法 §3 钉死：LLM"看着不对"只进 observation 桶，两次独立出现才升级开单；
+  # 独立=不同 run 且不同 seed（防同 run 重复采样灌水）。值固定 2——放宽须先修 ADR
+  escalate_after_independent: 2
+
+yield:
+  # AC-4 / ADR-0065 决策 6：yield=每百次唯一真 bug 数；开单复现存活率=
+  # reproduced/opened；信噪比（真 bug/开单数，最近 snr_window_issues 张开单窗口）
+  # 低于阈值 → 自动降频（收敛到 downshift_daily_issue_cap 而非停巡）+ needs-human
+  # 复核标记。指标进宪法 §8 成本指标组 / ADR-0073 dashboard。
+  snr_threshold: 0.05
+  snr_window_issues: 20
+  downshift_daily_issue_cap: 1
+
+sources:
+  escape:
+    variants_per_pattern: 4     # 每 pattern 按 seed 确定性采样变体数
+  metamorphic:
+    pairs_per_run: 6
+  llm:
+    # 源(c) LLM 半边：经 metering wrapper（ADR-0062 一次 invoke 恰一条聚合记录）；
+    # 无 LLM_API_KEY 时诚实降级（skipped 计数，不伪装生成过）；metamorphic 半边恒跑
+    enabled: true
+    model: glm-4.5-air
+
+# 开单形态：draft=shadow 起步（bug issue 草稿落 artifact，零线上噪音——W3-C2
+# 演习即此形态）；切 gh（真开单+bug 标签）= C1 政策变更，由 owner 按演习 yield
+# 数据拍板。开单必附 trace+指纹（AC-1），复现判定走 ADR-0064 三值协议。
+issue_mode: draft
+
+# 权限声明（ADR-0065 决策 5 铁律：patrol 只读运行+开 issue）——执法面在
+# CI-Workflows patrol.yml job 级 permissions（contents:read + issues:write +
+# actions:read 状态恢复），本段为声明性复核（patrol.py 加载政策时断言，
+# 缺 forbidden 声明即 fail-closed 拒跑）。写状态标签归 arbiter（INV-02 一致）。
+permissions:
+  allowed: [read-run, open-issue]
+  forbidden: [push, pr-write, label-write, code-write]
