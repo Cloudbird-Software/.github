@@ -63,6 +63,14 @@ PYEOF
   t "T2 全人工周 auto_merge_rate=0" "0.0" "$(python3 -c "print(float('$AM'))")"
   t "T2 revert 周逃逸分子=3/1" "3.0" "$(python3 -c "print(float('$RW'))")"
 
+  # 演练数据过滤（分子排除且可见）
+  DF=$(python3 -c "
+def is_drill(p): return any(m in (p.get('title','')+p.get('body','')) for m in ('演练','[drill]'))
+all_rev=[{'title':'[auto-revert] #1','body':'x'},{'title':'[auto-revert] #2','body':'演练收尾'}]
+rev=[p for p in all_rev if not is_drill(p)]
+print(len(rev), len(all_rev)-len(rev))")
+  t "演练过滤：排除 1 留 1 且计数可见" "1 1" "$DF"
+
   # T3 抽样可复现 + 无偏粗检
   SAM=$(python3 - <<'PYEOF'
 import random
@@ -113,7 +121,7 @@ TMP=$(mktemp -d)
 for R in $REPOS; do
   gh api "repos/$ORG/$R/pulls?state=all&sort=updated&direction=desc&per_page=50" \
     --jq ".[] | select(.merged_at != null and .merged_at >= \"$SINCE\") | \
-      {repo:\"$R\", n:.number, title:.title, created:.created_at, merged:.merged_at, by:.merged_by.login, author:.user.login}" >> "$TMP/merged.jsonl" 2>/dev/null \
+      {repo:\"$R\", n:.number, title:.title, body:(.body // \"\"), created:.created_at, merged:.merged_at, by:.merged_by.login, author:.user.login}" >> "$TMP/merged.jsonl" 2>/dev/null \
     || infra "$R PR 列表拉取失败"
   gh api "repos/$ORG/$R/pulls?state=open&per_page=50" \
     --jq ".[] | select(.created_at != null) | {repo:\"$R\", n:.number, created:.created_at}" >> "$TMP/open.jsonl" 2>/dev/null || true
@@ -132,7 +140,12 @@ now = datetime.datetime.now(datetime.timezone.utc)
 stuck = [p for p in opens if (now - datetime.datetime.fromisoformat(p["created"].replace("Z","+00:00"))).total_seconds() > stuck_h*3600]
 durs = sorted((datetime.datetime.fromisoformat(p["merged"].replace("Z","+00:00")) - datetime.datetime.fromisoformat(p["created"].replace("Z","+00:00"))).total_seconds() for p in merged)
 p95 = f"{durs[int(0.95*len(durs))-1]/3600:.1f}h" if durs else "N/A"
-rev = sum(1 for p in merged if "[auto-revert]" in p["title"])
+DRILL = ("演练", "[drill]")
+def is_drill(p): return any(m in (p.get("title","") + p.get("body","")) for m in DRILL)
+all_rev = [p for p in merged if "[auto-revert]" in p["title"]]
+rev_list = [p for p in all_rev if not is_drill(p)]
+drills_excluded = len(all_rev) - len(rev_list)
+rev = len(rev_list)
 p0 = 0  # post-merge P0 issue 计数由调用侧注入文件（简化：占位 0 由下方覆盖）
 try: p0 = int(open(f"{tmp}/p0count").read().strip())
 except Exception: pass
@@ -142,7 +155,7 @@ isoweek = now.isocalendar()
 seed = int(f"{isoweek[0]}-W{isoweek[1]}".replace("-W","") ) if False else hash(f"{isoweek[0]}-W{isoweek[1]}") & 0xffffffff
 sample = random.Random(seed).sample(agent_merged, min(k, len(agent_merged))) if agent_merged else []
 print(f"auto_merge_rate={rate} ({len(agent_merged)}/{len(merged)})")
-print(f"escape_rate={esc} (reverts={rev}+p0={p0} / merged={len(merged)})")
+print(f"escape_rate={esc} (reverts={rev}+p0={p0} / merged={len(merged)}, drills_excluded={drills_excluded})")
 print(f"stuck_prs={len(stuck)} (>{stuck_h}h)")
 print(f"pr_duration_p95={p95}")
 print(f"flaky_rate=pending（#94 数据源滚动）")
@@ -154,7 +167,7 @@ PYEOF
 [[ -s "$TMP/metrics.txt" ]] || die "指标计算失败"
 
 # post-merge P0 计数（.github 与各仓 open/closed 窗口内）
-P0=$(gh api "search/issues?q=org:$ORG+%22post-merge+冒烟失败%22+created:>$SINCE&per_page=100" --jq '.total_count' 2>/dev/null || echo 0)
+P0=$(gh api "search/issues?q=org:$ORG+%22post-merge+冒烟失败%22+created:>$SINCE&per_page=100"   --jq '[.items[] | select((.title + (.body // "")) | test("演练|\[drill\]") | not)] | length' 2>/dev/null || echo 0)
 echo "$P0" > "$TMP/p0count"
 
 # 上一期 escape_rate（阈值升级 T5）
@@ -176,7 +189,7 @@ $REPORT
 
 ## 指标口径
 - auto_merge_rate：agent 身份（cloudbrid-agent）合并 / 全部合并（分母=窗口内合并 PR 数）
-- escape_rate：(合入的 [auto-revert] + post-merge P0 issue) / 合并 PR——有分母的风险指标
+- escape_rate：(合入的 [auto-revert] + post-merge P0 issue) / 合并 PR——有分母的风险指标；演练数据（title/body 含「演练」或「[drill]」约定标记）从分子排除且 drills_excluded 计数可见——过滤不可见=作弊通道
 - 人类触碰：agent 合并占比的反向锚点（逐评论/评审计数下版接入）
 - flaky_rate / entropy：pending（数据源 #94/#87/#90 滚动接入）
 
