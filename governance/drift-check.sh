@@ -623,6 +623,46 @@ if [[ -n "$ORW_CFG" ]]; then
   fi
 fi
 
+# ---------- 16. 治理标签（state:*/type:* 存在性与形状，W0-C2/ADR-0047）----------
+# expected-state.json#labels.items 为治理标签期望全集。只对账"应有哪些"（新增式），
+# 各仓自有业务标签不属治理面、不判漂移；缺失或 color/description 不符 = 漂移。
+# items 为空视为期望状态缺失（fail-closed——治理标签全集被误删不得静默通过）。
+LBL_ITEMS=$(jq -c '.labels.items // []' "$EXPECTED")
+LBL_N=$(jq 'length' <<<"$LBL_ITEMS")
+if [[ "$LBL_N" -eq 0 ]]; then
+  drift "expected-state.json#labels.items 为空——治理标签期望状态缺失（fail-closed，ADR-0047）"
+else
+  LBL_DRIFT=0
+  for r in $REPOS; do
+    jq -e --arg r "$r" 'index($r) != null' <<<"$EXCLUDES" >/dev/null && continue
+    # 分页拉全量标签（>100 标签的仓单页会漏——与 §1 同教训）
+    RL_TMP=$(mktemp); RL_ERR=0; RL_PAGE=1
+    while :; do
+      CHUNK=$(api "https://api.github.com/repos/$ORG/$r/labels?per_page=100&page=$RL_PAGE")
+      if ! jq -e 'type == "array"' <<<"$CHUNK" >/dev/null 2>&1; then
+        drift "repo '$r' 标签清单拉取失败（$(jq -r '.message // "非数组"' <<<"$CHUNK" 2>/dev/null || echo 传输失败)）——标签对账跳过（fail-closed）"
+        LBL_DRIFT=1; RL_ERR=1; break
+      fi
+      RL_N=$(jq 'length' <<<"$CHUNK"); [[ "$RL_N" -eq 0 ]] && break
+      jq -c '.[] | {name, color, description: (.description // "")}' <<<"$CHUNK" >>"$RL_TMP"
+      [[ "$RL_N" -lt 100 ]] && break
+      RL_PAGE=$((RL_PAGE+1))
+    done
+    if [[ $RL_ERR -eq 1 ]]; then rm -f "$RL_TMP"; continue; fi
+    while IFS= read -r want; do
+      wname=$(jq -r .name <<<"$want"); wcolor=$(jq -r .color <<<"$want"); wdesc=$(jq -r .description <<<"$want")
+      got=$(jq -r --arg n "$wname" 'select(.name == $n) | "\(.color)	\(.description)"' <"$RL_TMP" 2>/dev/null | head -1)
+      if [[ -z "$got" ]]; then
+        drift "repo '$r' 缺治理标签 '$wname'（修复：bash governance/apply.sh §7）"; LBL_DRIFT=1
+      elif [[ "$got" != "$(printf '%s	%s' "$wcolor" "$wdesc")" ]]; then
+        drift "repo '$r' 标签 '$wname' 形状不符：$got 期望 color=$wcolor（apply.sh §7 对齐）"; LBL_DRIFT=1
+      fi
+    done < <(jq -c '.[]' <<<"$LBL_ITEMS")
+    rm -f "$RL_TMP"
+  done
+  [[ $LBL_DRIFT -eq 0 ]] && ok "治理标签全集（$LBL_N 项 × 受管仓）一致"
+fi
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"
