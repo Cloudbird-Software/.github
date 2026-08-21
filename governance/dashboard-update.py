@@ -196,6 +196,165 @@ def sli_stuck(repos):
     return stuck
 
 
+# @w5c4-pure-begin —— 纯函数区（governance/tests/test-metrics-wiring.sh 按标记对
+# 提取本块离线单测——不复制实现，防"测试测影子"；标记对缺失=测试红）
+DRILL_MARKS = ("演练", "演习", "[drill]")  # 演习数据约定标记（sli-report"演练"+ADR-0069"演习"双词兼容）
+
+
+def _ts(s):
+    """ISO→datetime（失败 None）；本块自包含（不依赖模块级 _iso——提取测试可独立运行）。"""
+    try:
+        return _dt.datetime.fromisoformat(str(s or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _is_drill_text(*texts):
+    joined = " ".join(str(t or "") for t in texts)
+    return any(m in joined for m in DRILL_MARKS)
+
+
+def partition_escapes(prs, p0s, now):
+    """双窗逃逸事件：current=[now-7d,now)，previous=[now-14d,now-7d)。
+
+    prs=merged PR 节点（[auto-revert] 标题约定）；p0s=post-merge 冒烟 P0 issue。
+    演习数据（title/body 含约定标记）从分子排除且 drills_excluded 计数可见——
+    过滤不可见=作弊通道（sli-report 先例）。reverts_current 供回滚率护栏（分子
+    只算 revert，不含 P0）。
+    """
+    w = _dt.timedelta(days=7)
+    cur = prev = drills = reverts_cur = 0
+    for p in prs or []:
+        if "[auto-revert]" not in str(p.get("title") or ""):
+            continue
+        if _is_drill_text(p.get("title"), p.get("body")):
+            drills += 1
+            continue
+        ts = _ts(p.get("mergedAt"))
+        if ts and now - 2 * w < ts <= now:
+            if ts > now - w:
+                cur += 1
+                reverts_cur += 1
+            else:
+                prev += 1
+    for i in p0s or []:
+        if _is_drill_text(i.get("title"), i.get("body")):
+            drills += 1
+            continue
+        ts = _ts(i.get("created_at"))
+        if ts and now - 2 * w < ts <= now:
+            if ts > now - w:
+                cur += 1
+            else:
+                prev += 1
+    return {"current": cur, "previous": prev, "reverts_current": reverts_cur,
+            "drills_excluded": drills}
+
+
+def drill_redrate_lines(lines):
+    """drill history.jsonl 行→红率输入（kind=seed-drill，red/denom=red+green——
+    与 drill.py redrate 同口径，no-surface 与 failclose 演习不入分母；畸形行计入 bad 可见）。"""
+    red = denom = bad = 0
+    for ln in lines or []:
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        try:
+            rec = json.loads(ln)
+        except ValueError:
+            bad += 1
+            continue
+        if rec.get("kind") != "seed-drill":
+            continue
+        v = rec.get("verdict")
+        if v in ("red", "green"):
+            denom += 1
+            if v == "red":
+                red += 1
+    return {"red": red, "denom": denom, "bad_lines": bad}
+
+
+def false_decision_parse(text, now, window_days):
+    """arbiter 误放行台账文本→（窗内 false-allow 数, 窗内 false-deny 数, 全部行列表）。
+    `#` 注释行跳过（台账文件头约定）；date 出窗不计。"""
+    allow = deny = 0
+    lines = []
+    for ln in str(text or "").splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        try:
+            rec = json.loads(ln)
+        except ValueError:
+            continue
+        lines.append(rec)
+        ts = _ts(rec.get("date"))
+        if ts and (now - ts).days <= window_days:
+            if rec.get("kind") == "false-allow":
+                allow += 1
+            elif rec.get("kind") == "false-deny":
+                deny += 1
+    return allow, deny, lines
+
+
+def sign_durations(timelines):
+    """type:intent issue 的 timeline 事件列表→（签署耗时秒列表, 在途 draft 数）。
+
+    耗时=首个 labeled state:ir-signed 时刻 − 首个 labeled state:ir-draft 时刻
+    （宪法 §7：签署耗时如实计入判断预算）。无 draft 事件的已签 IR 不可算→跳过
+    （不造 0）；有 draft 无 signed→在途。"""
+    durations, in_flight = [], 0
+    for events in timelines or []:
+        draft = signed = None
+        for ev in events or []:
+            if ev.get("event") != "labeled":
+                continue
+            name = (ev.get("label") or {}).get("name")
+            ts = _ts(ev.get("created_at"))
+            if not ts:
+                continue
+            if name == "state:ir-draft" and draft is None:
+                draft = ts
+            elif name == "state:ir-signed" and signed is None and draft is not None:
+                signed = ts
+        if draft and signed and signed > draft:
+            durations.append(round((signed - draft).total_seconds()))
+        elif draft and not signed:
+            in_flight += 1
+    return durations, in_flight
+
+
+def dwell_hours(events, now, label="state:needs-human"):
+    """timeline 事件→进入 label 态至今停留小时数（取最近一次 labeled 时刻——
+    反复进出取当前段）。无该事件→None。"""
+    latest = None
+    for ev in events or []:
+        if ev.get("event") != "labeled":
+            continue
+        if (ev.get("label") or {}).get("name") != label:
+            continue
+        ts = _ts(ev.get("created_at"))
+        if ts and (latest is None or ts > latest):
+            latest = ts
+    if latest is None or latest > now:
+        return None
+    return round((now - latest).total_seconds() / 3600, 2)
+
+
+def user_metric_from(content_text):
+    """产品仓 user-result.yaml 文本→指标 dict（缺 metric_key/value=不完整→None）。
+    本地 import yaml——提取测试独立运行不依赖模块级导入。"""
+    import yaml
+    try:
+        d = yaml.safe_load(content_text)
+    except Exception:
+        return None
+    if isinstance(d, dict) and d.get("metric_key") and "value" in d:
+        return d
+    return None
+# @w5c4-pure-end
+
+
 def build_payload(repos, cards, purl=""):
     rate, denom = sli_automerge(repos)
     sli = {"automerge_rate": rate, "human_touch_per_pr": None, "escape_rate": None,
