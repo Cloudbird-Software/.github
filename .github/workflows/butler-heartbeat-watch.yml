@@ -45,7 +45,14 @@ jobs:
             echo "::error::缺 GOVERNANCE_TOKEN——陈旧度不可查，fail-closed 变红（不盲 trip）" >&2
             exit 2
           fi
-          STALE_H="${STALE_HOURS_OVERRIDE:-$(python3 -c 'import yaml; print(yaml.safe_load(open("governance/policy/butler.yaml", encoding="utf-8"))["deadman_stale_hours"])' | tr -d '\r')}"
+          # 阈值真源 = butler.yaml#thresholds.deadman_stale_hours（嵌套键——首版误读
+          # 顶层键 KeyError；且 Actions 默认 bash -e 会令 $( ) 失败直灭脚本 exit 1，
+          # 现显式捕获走 infra 通道 exit 2）
+          STALE_H="${STALE_HOURS_OVERRIDE:-}"
+          if [[ -z "$STALE_H" ]]; then
+            STALE_H=$(python3 -c 'import yaml; print(yaml.safe_load(open("governance/policy/butler.yaml", encoding="utf-8"))["thresholds"]["deadman_stale_hours"])' | tr -d '\r') || {
+              echo "::error::butler.yaml thresholds.deadman_stale_hours 读取失败" >&2; exit 2; }
+          fi
           [[ "$STALE_H" =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "::error::deadman_stale_hours 非数值: $STALE_H" >&2; exit 2; }
           # 最近一次成功 heartbeat run 的完成时间（workflow 文件名路由；无成功 run = 视为最陈旧）
           LAST=$(gh api "repos/Cloudbird-Software/.github/actions/workflows/butler-heartbeat.yml/runs?status=success&per_page=1" \
