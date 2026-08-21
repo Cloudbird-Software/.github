@@ -1,29 +1,36 @@
 #!/usr/bin/env python3
 """dashboard-update.py —— 管家账本 dashboard issue 刷新（宪法 §12 投影二 / ADR-0055 决策 8）
 
-幂等找到/创建 .github 仓 issue「管家账本 dashboard（factory-floor）」（label
-`dashboard` 幂等创建）；body 两区：
-- 机器可读区：`<!-- dashboard-json -->` 标记后 fenced JSON（generated_at、cards[]、
-  sli{automerge_rate, human_touch_per_pr, escape_rate, stuck_prs, false_red_rate,
-  entropy_delta}——字段名与 .github#98 SLI 口径对齐；v1 能算的算，算不了的置 null
-  并在 sli_pending 标 "W5-C3"）
-- 人类一屏摘要区：数字+链接
-更新=issue edit 覆盖 body（内容相同则跳过写）；历史靠 issue 编辑历史天然留痕。
-API 失败 exit 2（fail-closed）。驱动：butler-ledger.yml 每 15min；board-sync.yml 演习面。
+v2（W5-C4 .github#227，ADR-0073）：北极星对同屏互锁 + 四类指标全量。body 三区：
+- 人类一屏区（**北极星对置顶**——AC-1"同屏实时"）：零接触合并数 × 质量护栏；
+  护栏任一 red → 合并数显示归零+原因标注（呈现层归零，raw 保留 JSON——非数据删除）
+- 状态一览：在制卡/板链接/SLI（#98 口径兼容）
+- 机器可读区：`<!-- dashboard-json -->` 后 fenced JSON（v1 键全保留 + north_star/metrics）
+指标计算=governance/metrics.py（纯库，阈值真源 policy/metrics.yaml）；
+本脚本只做采集（GitHub API / drill 台账 / arbiter 误放行台账 / metering 归账）与呈现。
+
+失效语义（两层，ADR-0073 决策 7）：
+- 核心面（卡扫描/merged PR/账本 issue 写）API 失败 → exit 2 fail-closed（v1 不变）
+- 辅助指标源（arbiter 台账/billing/metering/产品指标文件）失败 → 该指标 pending
+  +原因可见，不冒充 0 也不拖垮整轮刷新（缺数据≠劣化，但盲区必须上屏）
+驱动：butler-ledger.yml 每 15min（唤醒矩阵行 2，无需改 workflow——最小侵入）。
 
 v1 SLI 口径（诚实标注，#98 T2 分母陷阱：零分母→null+N/A，不除零不出 100%）：
 - automerge_rate：近 7 天 merged PR 中 merged_by==cloudbrid-agent[bot] 占比
  （proxy：App 身份执行合并；timeline 级 auto-merge 事件归 W5-C3）
+- escape_rate（v2 起有数）：(非演习 [auto-revert] PR + post-merge P0)/merged（sli-report 同口径）
 - stuck_prs：open PR 停留 >24h 数（跨 active 仓求和）
-- 其余四项（human_touch_per_pr / escape_rate / false_red_rate / entropy_delta）：
-  需要 timeline/revert/flaky/熵事件流——置 null + pending W5-C3
+- 其余三项（human_touch_per_pr / false_red_rate / entropy_delta）：置 null + pending W5-C3
 """
+import base64
 import datetime as _dt
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 try:
@@ -46,6 +53,14 @@ TRIGGER = os.environ.get("BUTLER_TRIGGER") or "manual"
 APP_BOT = "cloudbrid-agent[bot]"
 JSON_MARK = "<!-- dashboard-json -->"
 FENCE = "`" * 8  # 长于任何合理用户输入的 fence（标题可含 ```——防截断机器可读区）
+
+sys.path.insert(0, DIR)  # W5-C4 计算库同目录（阈值真源 policy/metrics.yaml，ADR-0073）
+try:
+    import metrics as metrics_lib
+except ImportError:  # pragma: no cover
+    print("FATAL 缺少 governance/metrics.py（W5-C4 计算库——同 PR 落盘）", file=sys.stderr)
+    raise SystemExit(2)
+METRICS_POLICY = metrics_lib.load_policy(os.path.join(DIR, "policy", "metrics.yaml"))
 
 
 def _safe_text(s):
@@ -142,17 +157,16 @@ Q_MERGED_PRS = """query($o:String!,$r:String!,$cur:String){
     pullRequests(states:MERGED, first:100, after:$cur,
                  orderBy:{field:UPDATED_AT,direction:DESC}){
       pageInfo{ hasNextPage endCursor }
-      nodes{ mergedAt updatedAt mergedBy{ login } } } } }"""
+      nodes{ mergedAt updatedAt title body mergedBy{ login } } } } }"""
 
 
-def sli_automerge(repos):
-    """近 7 天 merged PR 中 App 身份合并占比（proxy；零分母→null N/A，#98 T2）。
-
-    GraphQL 批量取 mergedBy（REST 列表端点不含该字段、逐 PR detail 在 15min
-    节奏下配额浪费——ADR-0055 决策 8 的诚实轻量实现）。
+def merged_prs(repos, days=14):
+    """窗口内 merged PR 节点（GraphQL 批量——REST 列表端点无 mergedBy，15min
+    节奏下逐 PR detail 是配额浪费，ADR-0055 决策 8）。v2 取 14 天：北极星逃逸
+    护栏需要当前窗+上一窗双窗事件（sustained 判定事件时戳直算，ADR-0073 决策 1）。
     """
-    since = NOW - _dt.timedelta(days=7)
-    merged, auto = 0, 0
+    since = NOW - _dt.timedelta(days=days)
+    nodes = []
     for repo in repos:
         cur = None
         while True:
@@ -165,35 +179,24 @@ def sli_automerge(repos):
             conn = payload["data"]["repository"]["pullRequests"]
             page_min_updated = min((_iso(n["updatedAt"]) for n in conn["nodes"]),
                                    default=_dt.datetime(1970, 1, 1, tzinfo=_dt.timezone.utc))
-            for n in conn["nodes"]:
-                if not n.get("mergedAt") or _iso(n["mergedAt"]) < since:
-                    continue
-                merged += 1
-                if (n.get("mergedBy") or {}).get("login") == APP_BOT:
-                    auto += 1
+            nodes.extend(n for n in conn["nodes"]
+                         if n.get("mergedAt") and _iso(n["mergedAt"]) >= since)
             # 按 UPDATED_AT 倒序翻页：页内最小 updatedAt 已出窗即止——后续页
-            # updatedAt 更旧，而 mergedAt<=updatedAt，不可能再有 7 天内合并
+            # updatedAt 更旧，而 mergedAt<=updatedAt，不可能再有窗口内合并
             if page_min_updated < since or not conn["pageInfo"]["hasNextPage"]:
                 break
             cur = conn["pageInfo"]["endCursor"]
-    if merged == 0:
+    return nodes
+
+
+def sli_automerge(repos):
+    """近 7 天 merged PR 中 App 身份合并占比（proxy；零分母→null N/A，#98 T2）。"""
+    since = NOW - _dt.timedelta(days=7)
+    merged = [n for n in merged_prs(repos) if _iso(n["mergedAt"]) >= since]
+    auto = sum(1 for n in merged if (n.get("mergedBy") or {}).get("login") == APP_BOT)
+    if not merged:
         return None, 0
-    return round(auto / merged, 4), merged
-
-
-def sli_stuck(repos):
-    """open PR 停留 >24h 数。"""
-    cutoff = NOW - _dt.timedelta(hours=24)
-    stuck = 0
-    for repo in repos:
-        page = 1  # 分页拉全量（>100 open PR 单页漏计——与 scan_cards 同教训）
-        while True:
-            prs = get(f"/repos/{ORG}/{repo}/pulls?state=open&per_page=100&page={page}")
-            stuck += sum(1 for pr in prs if _iso(pr.get("created_at")) < cutoff)
-            if len(prs) < 100:
-                break
-            page += 1
-    return stuck
+    return round(auto / len(merged), 4), len(merged)
 
 
 # @w5c4-pure-begin —— 纯函数区（governance/tests/test-metrics-wiring.sh 按标记对
@@ -353,6 +356,236 @@ def user_metric_from(content_text):
         return d
     return None
 # @w5c4-pure-end
+
+
+def sli_stuck(repos):
+    """open PR 停留 >24h 数。"""
+    cutoff = NOW - _dt.timedelta(hours=24)
+    stuck = 0
+    for repo in repos:
+        page = 1  # 分页拉全量（>100 open PR 单页漏计——与 scan_cards 同教训）
+        while True:
+            prs = get(f"/repos/{ORG}/{repo}/pulls?state=open&per_page=100&page={page}")
+            stuck += sum(1 for pr in prs if _iso(pr.get("created_at")) < cutoff)
+            if len(prs) < 100:
+                break
+            page += 1
+    return stuck
+
+
+# ---------- v2 辅助指标源采集（失败→pending 盲区，不拖垮核心面——ADR-0073 决策 7） ----------
+
+def _raw_content(repo, path):
+    """仓文件原文（base64 解码）；失败→None（调用方落 pending）。"""
+    st, payload = _req(f"{GH_API}/repos/{repo}/contents/{path}")
+    if st != 200 or not payload.get("content"):
+        return None
+    try:
+        return base64.b64decode(payload["content"]).decode("utf-8")
+    except Exception:
+        return None
+
+
+def collect_escape(repos):
+    """逃逸双窗（[auto-revert] PR + post-merge P0）。任一源失败→None（护栏 pending）。"""
+    try:
+        prs = merged_prs(repos)
+        since = (NOW - _dt.timedelta(days=14)).strftime("%Y-%m-%d")
+        q = urllib.parse.quote(f'org:{ORG} "post-merge 冒烟失败" created:>={since}')
+        st, payload = _req(f"{GH_API}/search/issues?q={q}&per_page=100")
+        if st != 200:
+            print(f"WARN escape: P0 搜索失败 HTTP {st}——逃逸护栏 pending（盲区上屏）")
+            return None
+        return partition_escapes(prs, payload.get("items") or [], NOW)
+    except Infra as e:
+        print(f"WARN escape: 采集失败 {e}——逃逸护栏 pending（盲区上屏）")
+        return None
+
+
+def collect_drill():
+    """演习红率（本地台账——butler-ledger checkout 自带，零 API）。文件缺失→None。"""
+    path = os.path.join(DIR, "drill", "history.jsonl")
+    if not os.path.exists(path):
+        return None, None
+    with open(path, encoding="utf-8") as f:
+        agg = drill_redrate_lines(f.readlines())
+    records = None
+    if agg["denom"] or agg["bad_lines"]:
+        records = []  # security 组同口径透传（seed-drill 重放，避免二次读文件）
+        with open(path, encoding="utf-8") as f:
+            for ln in f:
+                ln = ln.strip()
+                if not ln or ln.startswith("#"):
+                    continue
+                try:
+                    rec = json.loads(ln)
+                except ValueError:
+                    continue
+                if rec.get("kind") == "seed-drill":
+                    records.append(rec)
+    return {"red": agg["red"], "denom": agg["denom"]}, records
+
+
+def collect_false_decisions():
+    """arbiter 误放行台账（ADR-0054 §7 落盘形态）。失败→(None, []) 护栏 pending。"""
+    text = _raw_content(f"{ORG}/arbiter", "tests/false_decision_ledger.jsonl")
+    if text is None:
+        print("WARN false-decisions: arbiter 台账不可读——误放行护栏 pending（盲区上屏）")
+        return None, []
+    win = METRICS_POLICY["security"]["false_decision_window_days"]
+    allow, deny, lines = false_decision_parse(text, NOW, win)
+    return allow, lines
+
+
+def _timeline(repo, number):
+    """issue timeline 事件（分页）。失败→[]（该样本跳过，不造 0）。"""
+    events, page = [], 1
+    while True:
+        batch = get(f"/repos/{ORG}/{repo}/issues/{number}/timeline?per_page=100&page={page}")
+        events.extend(batch)
+        if len(batch) < 100:
+            return events
+        page += 1
+
+
+def collect_attention(cards):
+    """签署耗时（type:intent timeline 差）+ needs-human 停留 + 当月 IR 数。"""
+    durations, in_flight, ir_month = [], 0, 0
+    intents, page = [], 1
+    while True:
+        batch = get(f"/repos/{ORG}/{HOME_REPO}/issues?labels=type:intent&state=all&per_page=100&page={page}")
+        intents.extend(i for i in batch if "pull_request" not in i)
+        if len(batch) < 100:
+            break
+        page += 1
+    timelines = []
+    for it in intents:
+        c = _iso(it.get("created_at"))
+        if c and c.year == NOW.year and c.month == NOW.month:
+            ir_month += 1
+        try:
+            timelines.append(_timeline(HOME_REPO, it["number"]))
+        except Infra as e:
+            print(f"WARN attention: #{it['number']} timeline 失败 {e}——样本跳过")
+    try:
+        durations, in_flight = sign_durations(timelines)
+    except Exception as e:  # 纯函数不该炸——防御面：注意力组降 pending
+        print(f"WARN attention: 签署统计失败 {e}")
+    dwell = []
+    for c in cards:
+        if c["state"] != "needs-human":
+            continue
+        try:
+            h = dwell_hours(_timeline(c["repo"], c["number"]), NOW)
+            if h is not None:
+                dwell.append(h)
+        except Infra as e:
+            print(f"WARN attention: {c['repo']}#{c['number']} timeline 失败 {e}——样本跳过")
+    return durations, in_flight, dwell, ir_month
+
+
+def _billing_minutes():
+    """当月 Actions 分钟（billing usage——cost-check 同端点）。失败→None。"""
+    st, payload = _req(f"{GH_API}/orgs/{ORG}/settings/billing/usage?year={NOW.year}&month={NOW.month}")
+    if st != 200:
+        return None
+    try:
+        return int(sum(i["quantity"] for i in payload["usageItems"]
+                       if i.get("product") == "actions" and i.get("unitType") == "Minutes"))
+    except Exception:
+        return None
+
+
+def _metering_config():
+    try:
+        with open(os.path.join(DIR, "policy", "automation-limits.yaml"), encoding="utf-8") as f:
+            m = yaml.safe_load(f)["cost"]["llm_tokens"]["metering"]
+        return m["repo"], m["branch"], m["code_path"]
+    except Exception:
+        return None, None, None
+
+
+def collect_cost(prev):
+    """成本快照（Actions 分钟 + metering 归账 token）。TTL 内复用上一快照——
+    15min 节奏每轮拉 tarball 是配额浪费（policy cost.snapshot_ttl_minutes）。"""
+    ttl = METRICS_POLICY["cost"]["snapshot_ttl_minutes"]
+    prev_ts = _ts(prev.get("cost_snapshot_ts"))
+    prev_min, prev_tok = prev.get("actions_minutes_month"), prev.get("llm_tokens_month")
+    if prev_ts and isinstance(prev_min, int) and isinstance(prev_tok, int):
+        age = (NOW - prev_ts).total_seconds() / 60
+        if 0 <= age < ttl:
+            return prev_min, prev_tok, prev.get("cost_snapshot_ts")
+    minutes = _billing_minutes()
+    tokens = _metering_tokens()
+    if minutes is None or tokens is None:
+        print("WARN cost: billing/metering 采集失败——成本指标部分 pending（盲区上屏）")
+        return minutes, tokens, (prev.get("cost_snapshot_ts") if minutes is None and tokens is None else NOW.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    return minutes, tokens, NOW.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _metering_tokens():
+    """CI-Workflows metering 归账（ADR-0062：先验链后归账；rc=2 无账本→0，
+    rc=3 链断→None 不可信不入账，与 cost-check llm_channel 契约一致）。"""
+    repo, branch, code = _metering_config()
+    if not repo:
+        print("WARN cost: automation-limits.yaml metering 定位缺失")
+        return None
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        for fn in ("metering.py", "record.schema.json"):
+            data = _raw_content(repo, f"{code}/{fn}")
+            if data is None:
+                print(f"WARN cost: 归账引擎 {fn} 拉取失败")
+                return None
+            with open(os.path.join(td, fn), "w", encoding="utf-8", newline="\n") as f:
+                f.write(data)
+        led = os.path.join(td, "ledger")
+        os.makedirs(led)
+        url = f"{GH_API}/repos/{repo}/tarball/{branch}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {TOKEN}",
+                                                   "User-Agent": "dashboard-update"})
+        try:
+            import io
+            import tarfile
+            with urllib.request.urlopen(req, timeout=120) as r:
+                raw = r.read()
+            with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
+                want = [m for m in tf.getmembers() if m.name.endswith(".jsonl")
+                        and f"/{code}/records-" in f"/{m.name}"]
+                for m in want:
+                    m.name = os.path.basename(m.name)
+                    tf.extract(m, led)
+        except Exception as e:
+            print(f"WARN cost: metering 账本拉取失败 {e}——token 指标 pending")
+            return None
+        if not os.path.isdir(td):
+            return None
+        since = NOW.strftime("%Y-%m-01")
+        try:
+            r = subprocess.run([sys.executable, os.path.join(td, "metering.py"), "aggregate",
+                                "--dir", led, "--since", since, "--json"],
+                               capture_output=True, text=True, timeout=180)
+        except Exception as e:
+            print(f"WARN cost: metering 归账执行失败 {e}")
+            return None
+        if r.returncode == 2:
+            return 0  # 账本分支已建但无周片=零用量（ZERO 契约）
+        if r.returncode != 0:
+            print(f"WARN cost: metering 验链/归账失败 rc={r.returncode}——不可信不入账")
+            return None
+        try:
+            return int(json.loads(r.stdout)["totals"]["total_tokens"])
+        except Exception:
+            return None
+
+
+def collect_user_metrics():
+    """各产品仓用户结果指标（读取位=policy user_results.read_path；缺失→None）。"""
+    out = {}
+    for p in METRICS_POLICY["user_results"]["products"]:
+        text = _raw_content(f"{ORG}/{p['repo']}", METRICS_POLICY["user_results"]["read_path"])
+        out[p["repo"]] = user_metric_from(text) if text else None
+    return out
 
 
 def build_payload(repos, cards, purl=""):
