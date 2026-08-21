@@ -27,7 +27,9 @@
     "squash_only": true,
     "delete_branch_on_merge": true,
     "allow_auto_merge": true,
-    "exclude_repos": []
+    "exclude_repos": [
+      "holdout"
+    ]
   },
   "pr_liveness_hours": 4,
   "labels": {
