@@ -88,7 +88,8 @@ jobs:
           # ADR-0040：生存护栏脚本纳入同一语法门（新增脚本不登记=语法检查盲区）
           bash -n governance/apply.sh && bash -n governance/drift-check.sh && bash -n scripts/new-repo-init.sh && bash -n scripts/gh-app-token.sh && bash -n scripts/ghcb \
           && bash -n governance/auto-fix-limit.sh && bash -n governance/cost-check.sh \
-          && bash -n governance/butler-reconcile.sh && bash -n governance/butler-audit.sh
+          && bash -n governance/butler-reconcile.sh \
+          && bash -n governance/deadman-trip.sh && bash -n governance/butler-audit.sh
           echo "OK scripts"
       - name: 治理脚本自测（governance/tests）
         run: |
