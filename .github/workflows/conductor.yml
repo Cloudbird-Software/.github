@@ -179,11 +179,12 @@ jobs:
     # spec-author 钉发布 tag 的 commit SHA（供应链；ADR-0049/0050）
     needs: route
     if: needs.route.outputs.invoke == 'spec-author'
-    uses: Cloudbird-Software/CI-Workflows/.github/workflows/spec-author.yml@8c84751b3048ea3dc713ca8150149d2112f25eac # spec-author 自引用钉点版
+    uses: Cloudbird-Software/CI-Workflows/.github/workflows/spec-author.yml@1cae5c815ed83356481e41976d7c819e1c09ee16 # spec-author ciw_ref 钉源版
     with:
       issue_number: ${{ fromJson(needs.route.outputs.issue) }}
       target_repo: 'Cloudbird-Software/.github'
       ir_ref: ${{ needs.route.outputs.ir_ref }}
+      ciw_ref: '1cae5c815ed83356481e41976d7c819e1c09ee16'   # 与上方 uses 钉点同值（ADR-0043 钉源）
     # 显式传递（zizmor secrets-inherit：调用方 secrets 必须显式点名）
     secrets:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
