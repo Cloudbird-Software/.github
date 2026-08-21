@@ -665,6 +665,69 @@ else
   [[ $LBL_DRIFT -eq 0 ]] && ok "治理标签全集（$LBL_N 项 × 受管仓）一致"
 fi
 
+# ---------- 18. holdout 隔离断言（DECISION-02：App 安装差异隔离，W1-C4/ADR-0056）----------
+# 试卷层 holdout 的读隔离不靠保密（公开仓，ADR-0056/DECISION-02），靠两条：
+# cloudbrid-agent App 不安装到该仓（agent 的组织级凭据通道物理不可达）+ 泄漏诱饵
+# 周检（.github 仓 holdout-canary-sweep，宪法 §6/§11）。本节断言第一条：
+# App installation 的仓清单不得包含 holdout——在清单 = P0（隔离失效，agent 可持
+# 组织凭据读考卷）。正向对照防检测器失明假绿（§4 同思想）：installation 清单必须
+# 非空且包含 .github——连 .github 都不在清单 = 端点读法错/权限变了 → 按漂移报错，
+# 绝不把"看不见"当"没有"。API 任何失败 = fail-closed 报漂移。
+# §17 编号预留给并行卡 W1-C3（多代理并行修改本文件，编号互不占段）。
+# 端点注（2026-08-21 实测）：installation id 走 /orgs/<org>/installations（admin
+# 端点，new-repo-init.sh §3 同款）——/user/installations 要求 GitHub App 令牌，
+# 经典 PAT 一律 403；仓清单走 /user/installations/<id>/repositories（经典 PAT 可读）。
+HOLDOUT_REPO="holdout"
+HOLDOUT_INST=$(api "https://api.github.com/orgs/$ORG/installations?per_page=100")
+if ! jq -e 'type == "object" and (.installations | type == "array")' <<<"$HOLDOUT_INST" >/dev/null 2>&1; then
+  drift "holdout 隔离断言失败：org installations 拉取失败（fail-closed——检测器失明不得伪装通过，ADR-0056 §18）: $(jq -r '.message // "非 JSON 响应"' <<<"$HOLDOUT_INST" 2>/dev/null || echo 传输失败)"
+else
+  # app 名取 expected-state 单一真源（与 §6 一致），不重复硬编码
+  HOLDOUT_APP=$(jq -r .github_app.name "$EXPECTED")
+  INST_ID=$(jq -r --arg s "$HOLDOUT_APP" '.installations[]? | select(.app_slug == $s) | .id' <<<"$HOLDOUT_INST" | head -1)
+  if [[ -z "$INST_ID" || "$INST_ID" == "null" ]]; then
+    drift "app '$HOLDOUT_APP' 的 installation 未找到——holdout 隔离断言无法执行（fail-closed，ADR-0056 §18）"
+  else
+    # 全分页列出该 installation 下的仓（>100 仓单页漏检——§1/§4 同教训）
+    INST_TMP=$(mktemp)
+    INST_FAIL=0
+    INST_PAGE=1
+    while :; do
+      CHUNK=$(api "https://api.github.com/user/installations/$INST_ID/repositories?per_page=100&page=$INST_PAGE")
+      if ! jq -e 'type == "object" and (.repositories | type == "array")' <<<"$CHUNK" >/dev/null 2>&1; then
+        INST_FAIL=1; break
+      fi
+      INST_N=$(jq '.repositories | length' <<<"$CHUNK")
+      [[ "$INST_N" -eq 0 ]] && break
+      jq -r '.repositories[].name' <<<"$CHUNK" >>"$INST_TMP"
+      [[ "$INST_N" -lt 100 ]] && break
+      INST_PAGE=$((INST_PAGE+1))
+    done
+    if [[ $INST_FAIL -ne 0 ]]; then
+      drift "installation#$INST_ID 仓清单拉取失败，holdout 隔离断言无法执行（fail-closed，ADR-0056 §18）"
+      rm -f "$INST_TMP"
+    else
+      INST_REPOS=$(sort -u "$INST_TMP")
+      rm -f "$INST_TMP"
+      HOLDOUT_HIT=0
+      grep -qx "$HOLDOUT_REPO" <<<"$INST_REPOS" && HOLDOUT_HIT=1
+      # 正向对照（防失明）：清单非空且含 .github，否则断言结论不可信
+      if [[ -z "$INST_REPOS" ]]; then
+        drift "installation#$INST_ID 仓清单为空——正向对照失败（端点读法或权限已变），不得把看不见当没有（fail-closed，ADR-0056 §18）"
+        HOLDOUT_HIT=-1
+      elif ! grep -qx ".github" <<<"$INST_REPOS"; then
+        drift "installation#$INST_ID 仓清单不含 .github——正向对照失败（端点读法或权限已变），holdout 隔离结论不可信（fail-closed，ADR-0056 §18）"
+        HOLDOUT_HIT=-1
+      fi
+      if [[ $HOLDOUT_HIT -eq 1 ]]; then
+        drift "holdout 出现在 app '$HOLDOUT_APP' installation#$INST_ID 仓清单——P0：App 挂上 holdout = 试卷层隔离失效（DECISION-02/ADR-0056 §18；立即在 App 设置页移除该仓访问并追查何时挂载）"
+      elif [[ $HOLDOUT_HIT -eq 0 ]]; then
+        ok "holdout 隔离成立（installation#$INST_ID 共 $(grep -c . <<<"$INST_REPOS") 仓不含 holdout；正向对照 .github 在清单）"
+      fi
+    fi
+  fi
+fi
+
 echo "----------------------------------------"
 if [[ $DRIFTS -gt 0 ]]; then
   echo "结果: $DRIFTS 项漂移。修复: bash governance/apply.sh 或手动改回"

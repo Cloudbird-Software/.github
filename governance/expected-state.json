@@ -144,6 +144,9 @@
     "agent-registry": [
       "60bd1557481fa89d0358302e150a8f7d9381309c",
       "e9424d220ded331c221b37135faa9d6e9cd1ecac"
+    ],
+    "holdout": [
+      "63360c581524510ef37150dd7540cb333d283014"
     ]
   },
   "merge_queue": {
