@@ -39,7 +39,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
         if [[ "$got" == "$want" ]]; then PASS=$((PASS+1)); echo "  PASS $name"; else FAIL=$((FAIL+1)); echo "  FAIL $name (want=$want got=$got)"; fi; }
 
   # T2 分母陷阱（python fixture 函数）
-  PY_CALC=$(python3 - "$SLI_SELFTEST_DIR" <<'PYEOF'
+  PY_CALC=$(python3 - "${SLI_SELFTEST_DIR:-.}" <<'PYEOF'
 import json, sys, os
 def calc(prs, merged_by_agent, reverts, p0s):
     merged = [p for p in prs if p.get("mergedAt")]
