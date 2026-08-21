@@ -2,6 +2,10 @@ name: conductor
 # 状态机路由器（IR-0001 W0-C3 / ADR-0049）。W0 事件面=本仓（issues.labeled +
 # issue_comment）；跨仓扩展随产品仓接入。全部状态标签写操作以 cloudbrid-agent
 # App 令牌执行（INV-02：GITHUB_TOKEN 身份不持有状态写权）。
+# W1-C3（ADR-0055 决策 6）：写入类 front-desk 命令（/claim /release）前置转介
+# arbiter 裁决（宪法 §11 唤醒矩阵事件行"仲裁请求处理（/claim 等，转 arbiter）"）；
+# 仲裁是叠加授权层，transitions.yaml 转移表语义不变。三态：0=allow 继续原动作、
+# 1=deny 审计 no-op（对齐 silent-drop）、2=infra run 红灯 fail-closed 不放行。
 on:
   issues:
     types: [labeled]
@@ -9,13 +13,16 @@ on:
     types: [created]
 
 # INV-09：每 issue 一个 concurrency group、cancel-in-progress=false——重复投递
-# 排队串行而非并发竞态；幂等由 from_state 匹配承担（重复事件=当前态已变=no-op）
+# 排队串行而非并发竞态；幂等由 from_state 匹配承担（重复事件=当前态已变=no-op）。
+# 同卡两次 /claim 并发的双层防线（ADR-0055）：本串行化使第二个 run 排队、届时
+# from_state 已不匹配=no-op（第一层）；事件乱序时 arbiter CAS（422=lost-race）
+# 兜底恰一胜者（第二层，ADR-0054）
 concurrency:
   group: conductor-issue-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 permissions:
-  contents: read   # checkout 本仓（transitions.yaml + gh-app-token.sh）
+  contents: read   # checkout 本仓（transitions.yaml + gh-app-token.sh）+ arbiter（adjudicate.sh，ADR-0055）
 
 jobs:
   route:
@@ -30,7 +37,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 铸 App 令牌（AG-2：本仓单仓作用域）
+      # arbiter 受信 checkout（ADR-0055）：conductor 只在 main 上下文运行事件路由，
+      # arbiter main 与本仓 transitions.yaml 同级信任——裁决内核不落本仓副本
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Cloudbird-Software/arbiter
+          path: arbiter
+          persist-credentials: false
+      - name: 铸 App 令牌（AG-2：本仓 + arbiter 各一枚单仓作用域）
         env:
           CB_APP_ID: ${{ secrets.CB_APP_ID }}
           AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
@@ -38,26 +52,36 @@ jobs:
           TOKEN=$(REPO=.github CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
                   bash scripts/gh-app-token.sh)
           echo "APP_TOKEN=$TOKEN" >>"$GITHUB_ENV"
+          # 第二枚（ADR-0055）：REPO=arbiter 单仓作用域（租约宿主仓，installation
+          # #154584760）——adjudicate.sh 优先取 env 令牌、免二次铸币
+          ATOKEN=$(REPO=arbiter CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
+                  bash scripts/gh-app-token.sh)
+          echo "ARBITER_TOKEN=$ATOKEN" >>"$GITHUB_ENV"
       # 事件路由与守卫：transitions.yaml 是唯一转移定义；guard 受限求值
       # （变量白名单注入、无内建）；非授权=静默丢弃（回退标签、不评论、审计进
       # run 日志——AC-11）。注释/标签正文绝不进入任何求值（命令白名单精确匹配）。
+      # W1-C3：/claim（T3）/release 前置转介 arbiter（ADR-0055；参数以 arbiter 仓
+      # cli.py 为准）；delivery-id=comment node_id（稳定幂等键，重投→arbiter noop）。
       - name: route（INV-02/09）
         id: route
         env:
           APP_TOKEN: ${{ env.APP_TOKEN }}
+          ARBITER_TOKEN: ${{ env.ARBITER_TOKEN }}
           GOV_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
           LABEL_NAME: ${{ github.event.label.name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_ASSOC: ${{ github.event.comment.author_association }}
+          COMMENT_NODE_ID: ${{ github.event.comment.node_id }}
           ACTOR: ${{ github.actor }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           python3 - <<'PYEOF'
-          import json, os, re, urllib.parse, urllib.request, urllib.error, yaml
+          import json, os, re, subprocess, urllib.parse, urllib.request, urllib.error, yaml
 
           E = os.environ
           ORG, REPO = "Cloudbird-Software", E["REPO"]
@@ -88,7 +112,7 @@ jobs:
           elif E["EVENT_NAME"] == "issue_comment" and E["ACTION"] == "created":
               head = (E.get("COMMENT_BODY") or "").strip().split()
               token = head[0] if head else ""
-              if token in ("/start", "/claim", "/retry"):
+              if token in ("/start", "/claim", "/retry", "/release"):
                   ev = f"comment:{token}"
               else:
                   raise SystemExit(0)  # 普通评论：无审计面（噪音）
@@ -117,12 +141,39 @@ jobs:
               audit(f"verdict=abort 多状态标签并存: {states}"); raise SystemExit(1)
 
           # ---- 转移表匹配（幂等：from_state 不符=no-op）----
+          # /release 不在表内（transitions.yaml 未列该事件）——纯租约面命令：
+          # 直达 arbiter 裁决，不产生任何标签转移（ADR-0055 决策 6）
           table = yaml.safe_load(open("governance/transitions.yaml", encoding="utf-8"))
           cands = [t for t in table["transitions"] if t["event"] == ev]
           t = next((x for x in cands if x["from_state"] == current), None)
-          if t is None:
+          if t is None and ev != "comment:/release":
               audit(f"event={ev} from={current} verdict=noop（无匹配转移——跳态/重复/未列组合）")
               raise SystemExit(0)
+
+          # ---- arbiter 前置裁决（ADR-0055：/claim /release 转介；退出码三态）----
+          # cwd 必须是 arbiter checkout 根（python -m arbiter.cli 的包根在那里）
+          ARBITER_DIR = os.path.join(os.getcwd(), "arbiter")
+          def adjudicate(command):
+              argv = ["bash", os.path.join(ARBITER_DIR, "scripts", "adjudicate.sh"), command,
+                      "--card", f"{REPO}#{ISSUE}", "--sender", actor,
+                      "--sender-role", role,
+                      "--delivery-id", E.get("COMMENT_NODE_ID") or f"run-{E.get('RUN_ID', 'unknown')}",
+                      "--event", "created", "--current-state", current, "--backend", "github"]
+              return subprocess.call(argv, cwd=ARBITER_DIR)
+
+          if ev == "comment:/release":
+              rc = adjudicate("/release")
+              if rc == 0:
+                  audit(f"event={ev} from={current} sender_role={role} arbiter=allow "
+                        f"verdict=ALLOWED release（租约已释放——无标签转移定义，纯租约面）")
+                  raise SystemExit(0)
+              if rc == 1:
+                  audit(f"event={ev} sender_role={role} verdict=DENIED-by-arbiter "
+                        f"（非 holder/无租约/过期——无租约变更、无标签变更）")
+                  raise SystemExit(0)
+              audit(f"event={ev} arbiter=infra rc={rc} verdict=ABORT "
+                f"（fail-closed——仲裁器失明不放行；delivery 幂等可安全重投）")
+              raise SystemExit(1)
 
           # ---- guard 受限求值 ----
           env_vars = {"sender_role": role, "author_association": assoc, "label_set": labels}
@@ -143,9 +194,23 @@ jobs:
               if ev.startswith("label:"):
                   api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/"
                       + urllib.parse.quote(ev[len("label:"):], safe=""), "DELETE")
-              audit(f"event={ev} transition={t['id']} sender_role={role} assoc={assoc} "
+                  audit(f"event={ev} transition={t['id']} sender_role={role} assoc={assoc} "
                     f"verdict=DENIED-silent-drop（标签已回退，无评论，无阶段启动）")
               raise SystemExit(0)
+
+          # ---- /claim 前置裁决（guard 先行——为注定拒绝的请求不建租约；ADR-0055）----
+          if ev == "comment:/claim":
+              rc = adjudicate("/claim")
+              if rc == 1:
+                  audit(f"event={ev} transition={t['id']} sender_role={role} assoc={assoc} "
+                    f"verdict=DENIED-by-arbiter（无标签变更、无 assignee——对齐 silent-drop）")
+                  raise SystemExit(0)
+              if rc != 0:
+                  audit(f"event={ev} transition={t['id']} arbiter=infra rc={rc} verdict=ABORT "
+                    f"（fail-closed——不许绕过仲裁；delivery 幂等可安全重投）")
+                  raise SystemExit(1)
+              audit(f"event={ev} transition={t['id']} sender_role={role} arbiter=allow "
+                f"（租约已建——T3 落地；TTL 到期由下一 /claim 原子接管，ADR-0054）")
 
           # ---- 执行转移（状态标签写=App 身份，INV-02）----
           out = open(E["GITHUB_OUTPUT"], "a", encoding="utf-8")

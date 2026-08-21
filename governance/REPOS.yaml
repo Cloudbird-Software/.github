@@ -24,6 +24,7 @@ repos:
     status: active
     role: 治理总仓——GOVERNANCE/rulesets/expected-state/policies/agent 标准 schema/初始化与漂移脚本
     key_paths: [governance/, standards/agent/, scripts/]
+    entry_protocol: true   # AGENTS.md 携带统一入口协议块（宪法 §11；drift §17 对账，ADR-0055）
 
   - name: CI-Workflows
     layer: L0
@@ -55,8 +56,9 @@ repos:
     layer: L2
     visibility: public
     status: active
-    role: 项目模板仓——新仓由此派生，自动继承 gate/护栏/AGENTS.md 骨架
+    role: 项目模板仓——新仓由此派生，自动继承 gate/护栏/AGENTS.md 骨架；统一入口协议块下发真源（ADR-0055）
     key_paths: [AGENTS.md, .github/workflows/ci.yml, docs/ARCHITECTURE.md]
+    entry_protocol: true   # 协议块真源自身（drift §17 以其 main 的块为 canon 比对，ADR-0055）
 
   - name: agent-tools
     layer: L2
