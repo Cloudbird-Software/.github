@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sli-report.sh —— 自动合并 SLI 采集 + 每周抽样审计（P3-4 / .github #98，ADR-0049）
+# sli-report.sh —— 自动合并 SLI 采集 + 每周抽样审计（P3-4 / .github #98，ADR-0059）
 #
 # 指标（窗口默认 7 天，SLI_WINDOW 天）：
 #   auto_merge_rate   = agent 身份合并的 PR / 全部合并 PR（agent=cloudbrid-agent[bot]/app/…）
@@ -195,7 +195,7 @@ if [[ -n "$SAMPLES" ]]; then
 $SAMPLES
 
 审计 checklist（每样本）：改动是否与宣称相符 / 门禁判定是否正确 / 有无事后发现问题。
-发现回流：归因后回写 SLI 指标，必要时开门禁补强 issue。（#98，ADR-0049）" || infra "审计 issue 创建失败"
+发现回流：归因后回写 SLI 指标，必要时开门禁补强 issue。（#98，ADR-0059）" || infra "审计 issue 创建失败"
 else
   echo "::notice::窗口内无 agent 合并 PR——抽样审计本期跳过"
 fi
