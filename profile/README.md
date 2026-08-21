@@ -21,3 +21,7 @@
 | [agent-registry](https://github.com/Cloudbird-Software/agent-registry) | L1 | agent/skill/tool/team 声明 + 模型注册表 + ADR（私有） |
 | [template-service](https://github.com/Cloudbird-Software/template-service) | L2 | 新项目模板 |
 | [AI_Web_School](https://github.com/Cloudbird-Software/AI_Web_School) | L2 | 产品仓库 |
+
+## 自治流水线（W0）
+
+组织已具备意图→规格的无人值守链路：用意图表单提交 IR，owner 打 `state:ir-signed` 后，conductor（状态机）自动调用 spec-author 起草条款级规格并开出 spec PR，全程计量落盘。规格与波次计划见 [`specs/IR-0001/`](../specs/IR-0001/)。
