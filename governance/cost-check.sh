@@ -182,10 +182,14 @@ PYEOF
 }
 
 set_breaker() {  # PATCH 已有 / POST 新建（404 时）
+  # 端点勘误（2026-08-21 deadman 演习实测）：创建 org 变量必须 POST 到集合端点
+  # /orgs/{org}/actions/variables（不带变量名——带名 POST 是 404）；value 是字符串
+  # 类型（-F 布尔会 422 "not of type string"）。此前两处错叠加致变量从未创建成功
+  # （首次真实触发前从未执行过该路径——W1-C5 演习抓出）。
   if ! mutate "$GH" api -X PATCH "orgs/$ORG/actions/variables/$CB_VARIABLE" \
-       -f name="$CB_VARIABLE" -F value=true >/dev/null 2>&1; then
-    mutate "$GH" api -X POST "orgs/$ORG/actions/variables/$CB_VARIABLE" \
-      -f name="$CB_VARIABLE" -F value=true -f visibility=all >/dev/null 2>&1 \
+       -f name="$CB_VARIABLE" -f value=true >/dev/null 2>&1; then
+    mutate "$GH" api -X POST "orgs/$ORG/actions/variables" \
+      -f name="$CB_VARIABLE" -f value=true -f visibility=all >/dev/null 2>&1 \
       || infra "org 变量 $CB_VARIABLE 置位失败"
   fi
 }
@@ -207,7 +211,7 @@ if [[ "$STOP_MIN" == "True" || "$STOP_TOK" == "True" ]]; then
 
 处置（仅 $CB_RESET_BY，人工）：
 1. 排查用量根因（失控循环查 auto-fix-limit 的 issue 历史）；
-2. 复位：\`gh api -X PATCH orgs/$ORG/actions/variables/$CB_VARIABLE -f name=$CB_VARIABLE -F value=false\`（或 DELETE 该变量）；
+2. 复位：\`gh api -X PATCH orgs/$ORG/actions/variables/$CB_VARIABLE -f name=$CB_VARIABLE -f value=false\`（或 DELETE 该变量）；
 3. 在本 issue 留复位评论（留痕）；cost-check 确认变量复位且用量 <${AM_STOP}% 后自动关闭本 issue。"
   if [[ -n "$P0_EXISTING" ]]; then
     if ! issue_silent_today "$P0_EXISTING"; then

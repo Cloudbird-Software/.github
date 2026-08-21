@@ -81,7 +81,7 @@ AC-3 的 fail-closed 实证路径 = 手动 dispatch（无需真停心跳）：
 3. **复位**（仅 owner，留痕）：
    ```bash
    gh api -X PATCH orgs/Cloudbird-Software/actions/variables/AUTO_MERGE_DISABLED \
-     -f name=AUTO_MERGE_DISABLED -F value=false
+     -f name=AUTO_MERGE_DISABLED -f value=false
    ```
    然后在 P0 issue 评论"演习复位（who/when）"并关闭。
 4. **月度正控**（宪法 §7 审计节奏建议）：每月手动执行一次上述演习，确认 trip 管道

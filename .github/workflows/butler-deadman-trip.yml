@@ -67,8 +67,11 @@ jobs:
           [[ "$SIM" == "true" ]] && SRC="演习（workflow_dispatch simulate=true）"
 
           # 1) 置共用熔断变量（PATCH 已有 / 404 时 POST 新建——同 cost-check.sh set_breaker）
-          if ! gh api -X PATCH "orgs/$ORG/actions/variables/$CB" -f name="$CB" -F value=true >/dev/null 2>&1; then
-            if ! gh api -X POST "orgs/$ORG/actions/variables/$CB" -f name="$CB" -F value=true -f visibility=all >/dev/null 2>&1; then
+          #    端点勘误（2026-08-21 首次演习实测）：POST 须打集合端点 /actions/variables
+          #    （不带变量名，带名=404）；value 为字符串类型（-F 布尔=422）。
+          #    首演 run 32481546304 因旧写法 INFRA（变量未置位），本修复后重演闭环。
+          if ! gh api -X PATCH "orgs/$ORG/actions/variables/$CB" -f name="$CB" -f value=true >/dev/null 2>&1; then
+            if ! gh api -X POST "orgs/$ORG/actions/variables" -f name="$CB" -f value=true -f visibility=all >/dev/null 2>&1; then
               infra "org 变量 $CB 置位失败（PATCH/POST 均败）"
             fi
           fi
@@ -107,7 +110,7 @@ jobs:
 
           处置（仅 owner 人工，完整 runbook 见 docs/deadman-setup.md）：
           1. 排查管家 cron 静默根因（Actions 故障 / workflow 被删改 / token 失效 / 外部服务误报）；
-          2. 复位：\`gh api -X PATCH orgs/$ORG/actions/variables/$CB -f name=$CB -F value=false\`（或 DELETE 该变量）；
+          2. 复位：\`gh api -X PATCH orgs/$ORG/actions/variables/$CB -f name=$CB -f value=false\`（或 DELETE 该变量）；
           3. 在本 issue 留复位评论后关闭（留痕）。"
           if [[ -n "$EXISTING" ]]; then
             LAST=$(gh issue view "$EXISTING" --repo "$GOV_REPO" --json createdAt,comments \
