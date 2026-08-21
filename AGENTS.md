@@ -26,10 +26,9 @@ AI agent 进入本仓的工作契约（索引型，CG-1；治理仓豁免 ≤40 
 ## 常用命令（本仓驻留）
 
 - 校验本仓声明：`.github/workflows/gate.yml`（本地等价：`make gates-pr`——bash -n + yaml 全量解析）
-- 漂移检测：`GH_TOKEN=<org admin> bash governance/drift-check.sh`（每日 CI 自动跑；§17=入口协议块对账）
-- 修复循环上限执法：`GH_TOKEN=<org admin> bash governance/auto-fix-limit.sh`（小时级；`AUTOFIX_DRY_RUN=1` 只报告）
-- 成本熔断检查：`GH_TOKEN=<org admin> bash governance/cost-check.sh`（6h；`COST_USAGE_MINUTES_OVERRIDE=<n>` 注入测试）
-- 漂移修复：`GH_TOKEN=<org admin> bash governance/apply.sh`（幂等；失败 loud 退出）· 新仓初始化：`bash scripts/new-repo-init.sh <name>`
+- 漂移检测/漂移修复/新仓初始化（**owner 或 CI 专属**——需 org admin PAT，agent 不得持此令牌，AG-1；agent 需要时提卡转交 owner 或走 workflow_dispatch）：`GH_TOKEN=<org admin> bash governance/drift-check.sh`（每日 CI 自动跑；§17=入口协议块对账）· `GH_TOKEN=<org admin> bash governance/apply.sh`（幂等；失败 loud 退出）· `bash scripts/new-repo-init.sh <name>`（owner）
+- 修复循环上限执法：`GH_TOKEN=<org admin> bash governance/auto-fix-limit.sh`（小时级；`AUTOFIX_DRY_RUN=1` 只报告；同上 owner/CI 专属）
+- 成本熔断检查：`GH_TOKEN=<org admin> bash governance/cost-check.sh`（6h；`COST_USAGE_MINUTES_OVERRIDE=<n>` 注入测试；同上 owner/CI 专属）
 - 取 App 令牌：`GH_TOKEN=$(scripts/ghcb <repo>)`（缓存命中零网络；`--refresh` 强刷，ADR-0044）
 - factory-floor 板/账本手动刷新：Actions → board-sync（dispatch-only；日常 cron 归 butler-ledger，ADR-0055）
 

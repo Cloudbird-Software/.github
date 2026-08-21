@@ -414,7 +414,8 @@ def main():
         for key, entry in board.items():
             if key in card_keys or entry.get("issue_state") != "CLOSED":
                 continue
-            final = next((n[len("state:"):] for n in entry["labels"]
+            # 与 scan_cards 同判据：排序取首（closed 多标签时两投影确定性一致）
+            final = next((n[len("state:"):] for n in sorted(entry["labels"])
                           if n.startswith("state:")), None)
             if final and entry["fields"].get("State") != final and final in opt_ids:
                 if DRY_RUN:

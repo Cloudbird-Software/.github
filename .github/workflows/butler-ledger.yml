@@ -34,7 +34,11 @@ jobs:
           BUTLER_TRIGGER: ${{ github.event_name }}
         run: |
           set -uo pipefail
-          source governance/butler-audit.sh
+          # 审计发射器加载失败=检测器失明——fail-closed（与 board-sync.yml 同款守卫）
+          if ! source governance/butler-audit.sh || ! command -v audit_emit >/dev/null; then
+            echo "::error::governance/butler-audit.sh 加载失败或未定义 audit_emit（审计失明——fail-closed）" >&2
+            exit 2
+          fi
           TRIGGER="${BUTLER_TRIGGER:-manual}"
           # --- W1-C3 投影脚本一：board-sync.py（守卫：未落地=skipped 保持绿） ---
           if [[ -f governance/board-sync.py ]]; then

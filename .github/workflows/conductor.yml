@@ -98,7 +98,10 @@ jobs:
                            "User-Agent": "conductor"})
               try:
                   with urllib.request.urlopen(req) as r:
-                      return r.status, json.load(r)
+                      raw = r.read()
+                      # 204（DELETE label 等）响应体为空——json.load 空体必抛
+                      # JSONDecodeError，状态码拿不到就 fail-closed 不成立
+                      return r.status, (json.loads(raw) if raw.strip() else {})
               except urllib.error.HTTPError as e:
                   return e.code, {}
 
@@ -158,11 +161,14 @@ jobs:
           # ---- arbiter 前置裁决（ADR-0055：/claim /release 转介；退出码三态）----
           # cwd 必须是 arbiter checkout 根（python -m arbiter.cli 的包根在那里）
           ARBITER_DIR = os.path.join(os.getcwd(), "arbiter")
-          def adjudicate(command):
+          def adjudicate(command, delivery_id=None):
+              # delivery_id 缺省=评论 node_id（重投幂等键）；补偿调用必须传独立 id——
+              # arbiter seen_ref 只按 sha1(delivery_id) 判重放（kernel §2，与命令无关），
+              # 复用原 id 的补偿 /release 会被判 replay no-op，租约释放不掉
               argv = ["bash", os.path.join(ARBITER_DIR, "scripts", "adjudicate.sh"), command,
                       "--card", f"{REPO}#{ISSUE}", "--sender", actor,
                       "--sender-role", role,
-                      "--delivery-id", E.get("COMMENT_NODE_ID") or f"run-{E.get('RUN_ID', 'unknown')}",
+                      "--delivery-id", delivery_id or (E.get("COMMENT_NODE_ID") or f"run-{E.get('RUN_ID', 'unknown')}"),
                       "--event", "created", "--current-state", current, "--backend", "github"]
               return subprocess.call(argv, cwd=ARBITER_DIR)
 
@@ -190,9 +196,10 @@ jobs:
 
           def swap_state(frm, to):
               # 写结果逐项检查（ADR-0055）：标签写失败=状态面失真——不许“路由记 allow
-              # 但卡未变更”静默成功，抛 WriteFail 交上层 fail-closed/租约补偿
+              # 但卡未变更”静默成功，抛 WriteFail 交上层 fail-closed/租约补偿。
+              # DELETE 容 404：标签已不在=目标态已达成（幂等删/补偿恢复场景）
               st_del, _ = api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3A{frm}", "DELETE")
-              if st_del not in (200, 204):
+              if st_del not in (200, 204, 404):
                   raise WriteFail(f"删标签 state:{frm} HTTP {st_del}")
               st_add, _ = api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels",
                               "POST", {"labels": [f"state:{to}"]})
@@ -247,11 +254,19 @@ jobs:
                           raise WriteFail(f"置 assignee HTTP {st_as}")
                   except WriteFail as e:
                       if lease_created:
-                          # 补偿：同 sender 裁决 /release（holder 本人可成）→ 租约回滚，
-                          # 卡回到可重试态；随后 fail-closed 退出，delivery 幂等可安全重投
-                          audit(f"event={ev} transition={t['id']} write-fail {e}"
-                                f"——补偿回滚刚建的租约（adjudicate /release）")
-                          adjudicate("/release")
+                          # 补偿双面：状态标签（宪法 §12 真相源——先恢复，卡回到
+                          # 可重试态）+ 租约（独立 delivery id：复用原 id 会被
+                          # arbiter seen_ref 判 replay no-op）。每步结果都入审计，
+                          # 任一失败仍 fail-closed 退出（delivery 幂等可安全重投）。
+                          audit(f"event={ev} transition={t['id']} write-fail {e}——开始补偿回滚")
+                          try:
+                              swap_state(t["to_state"], t["from_state"])
+                          except WriteFail as e2:
+                              audit(f"compensate 状态恢复失败 {e2}——人工置回 state:{t['from_state']}")
+                          comp_id = f"{E.get('COMMENT_NODE_ID') or E.get('RUN_ID', 'run')}-compensate-release"
+                          rc = adjudicate("/release", comp_id)
+                          audit(f"compensate /release rc={rc}"
+                                f"（0=租约已释放；非 0=TTL 到期自然回收或人工 /release）")
                       raise
                   out.write("invoke=none\n")
                   audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "

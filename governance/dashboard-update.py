@@ -127,7 +127,7 @@ def scan_cards(repos):
                     print(f"WARN multi-state {repo}#{it['number']}: {sl}"
                           f"——多 state 标签并存，本轮取 {sl[0]}，请修标签")
                 cards.append({"repo": repo, "number": it["number"], "title": _safe_text(it["title"]),
-                              "state": sl[0][len("state:"):],
+                              "state": _safe_text(sl[0][len("state:"):]),
                               "assignee": (it.get("assignees") or [{}])[0].get("login", ""),
                               "url": it["html_url"], "updated_at": it.get("updated_at") or "",
                               "days_idle": max(0, (NOW - _iso(it.get("updated_at"))).days)})
@@ -256,14 +256,16 @@ def ensure_issue(body):
 
     查找范围 state=all（含已关闭：账本被人工关闭后复用之，不得重复创建——
     否则账本分裂、编辑历史散落）；/issues 端点混入 PR，须按 "pull_request"
-    键排除后再匹配标题。
+    键排除；标题不唯一——复用已存在账本还须带 `dashboard` label（本脚本创建
+    即打标；同名无标 issue 不接管，防 body 覆盖写进无关 issue）。
     """
     found = None
     page = 1
     while True:
         batch = get(f"/repos/{ORG}/{HOME_REPO}/issues?state=all&per_page=100&page={page}")
         found = next((i for i in batch
-                      if "pull_request" not in i and i["title"] == ISSUE_TITLE), None)
+                      if "pull_request" not in i and i["title"] == ISSUE_TITLE
+                      and LABEL["name"] in [l.get("name") for l in i.get("labels", [])]), None)
         if found or len(batch) < 100:
             break
         page += 1

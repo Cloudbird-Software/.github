@@ -734,16 +734,22 @@ fi
 # entry_protocol: true 即纳入本节管辖。
 PROTO_OK=0
 PROTO_REPOS=""
-# REPOS.yaml 是 YAML——jq 直读必失败且被吞掉=假绿（§7 同教训）。复用 §7 已生成的
-# REPO_MAP（python3+pyyaml→JSON）；解析不可用或 entry_protocol 清单为空均 fail-closed。
-if [[ -n "${REPO_MAP:-}" ]]; then
-  PROTO_REPOS=$(jq -r '[.repos[] | select((.entry_protocol // false) == true) | .name] | join(" ")' <<<"$REPO_MAP")
+# REPOS.yaml 是 YAML——jq 直读必失败且被吞掉=假绿（§7 同教训）。§17 自解析
+# （§7 同款 python3+pyyaml→JSON，不信任继承的 REPO_MAP——调用方 env 注入可
+# 重定向对账对象）；解析不可用或 entry_protocol 清单为空均 fail-closed。
+PROTO_MAP=""
+if python3 -c 'import yaml' 2>/dev/null; then
+  PROTO_MAP=$(python3 -c 'import yaml,json,sys;print(json.dumps(yaml.safe_load(open(sys.argv[1]))))' \
+    "$DIR/REPOS.yaml" 2>/dev/null || true)
+fi
+if [[ -n "$PROTO_MAP" ]]; then
+  PROTO_REPOS=$(jq -r '[.repos[] | select((.entry_protocol // false) == true) | .name] | join(" ")' <<<"$PROTO_MAP")
   if [[ -z "$PROTO_REPOS" ]]; then
     drift "REPOS.yaml 无 entry_protocol 仓——协议块对账失去对象（申报丢失=漂移，fail-closed，ADR-0055 §17）"
     PROTO_OK=1
   fi
 else
-  drift "REPOS.yaml 未解析（缺 python3+pyyaml，REPO_MAP 缺席）——协议块对账不可执行（fail-closed，ADR-0055 §17）"
+  drift "REPOS.yaml 未解析（缺 python3+pyyaml）——协议块对账不可执行（fail-closed，ADR-0055 §17）"
   PROTO_OK=1
 fi
 proto_block() {  # 提取协议块（标记间内容，含首尾标记行）——起止标记任一缺失输出空
