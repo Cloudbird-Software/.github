@@ -27,7 +27,9 @@
     "squash_only": true,
     "delete_branch_on_merge": true,
     "allow_auto_merge": true,
-    "exclude_repos": []
+    "exclude_repos": [
+      "holdout"
+    ]
   },
   "pr_liveness_hours": 4,
   "labels": {
@@ -123,8 +125,8 @@
     ],
     "Shorts_Director": [
       "f63baf264291670aa33f4a599779dd5c84678433",
-      "d81fea9db47e065fd2bd0e254449862fc4a3c91b6",
-      "014f38986ee5335fe0d7e3ea260a9a4f2899fa1"
+      "d81fea9db47e065fd2bd5211dd1a8e3c26589f41",
+      "014f38986ee5338fe0d7e3ea260c9a4f289af401"
     ],
     "agent-tools": [
       "1050459443ce0373cffff7788c668d6f5dec0048"
@@ -145,6 +147,9 @@
     "agent-registry": [
       "60bd1557481fa89d0358302e150a8f7d9381309c",
       "e9424d220ded331c221b37135faa9d6e9cd1ecac"
+    ],
+    "holdout": [
+      "63360c581524510ef37150dd7540cb333d283014"
     ],
     "arbiter": [
       "7b1a65234b1697bde11cea2ebdacd8ee0efc44c4"
