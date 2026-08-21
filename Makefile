@@ -4,7 +4,9 @@
 # gates-pr 真实执行 gate.yml 的本地可等价部分（bash -n / yaml 解析），CI 关卡语义
 # 仍以 .github/workflows/gate.yml 为准，不伪装已运行 CI。
 CARD ?=
-REPO ?= Cloudbird-Software/.github   # 卡所在仓（W1 波次卡都在治理仓；产品仓自有卡时 REPO=... 覆盖）
+# 卡所在仓（W1 波次卡都在治理仓；产品仓自有卡时 REPO=... 覆盖）。
+# 注释须独立成行：行尾注释会把 # 前的尾随空格并入 REPO 值，gh -R 解析失败且被吞。
+REPO ?= Cloudbird-Software/.github
 
 .PHONY: card-test gates-pr
 card-test: ## 读卡 AC 列表并提示测试先行：make card-test CARD=<issue#>

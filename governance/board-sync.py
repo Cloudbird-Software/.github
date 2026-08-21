@@ -170,9 +170,13 @@ def scan_cards(repos):
             for it in batch:
                 if "pull_request" in it:  # issues 端点混入 PR——不是卡
                     continue
-                sl = [l["name"] for l in it.get("labels", []) if str(l.get("name", "")).startswith("state:")]
+                sl = sorted(l["name"] for l in it.get("labels", [])
+                            if str(l.get("name", "")).startswith("state:"))
                 if not sl:
                     continue
+                if len(sl) > 1:  # 真相源唯一性被破坏（宪法 §12）——排序取首保证两投影一致
+                    print(f"WARN multi-state {repo}#{it['number']}: {sl}"
+                          f"——多 state 标签并存，本轮取 {sl[0]}，请修标签")
                 body = it.get("body") or ""
                 boxes = re.findall(r"^\s*[-*]\s+\[( |x|X)\]", body, re.M)
                 cards.append({
@@ -192,8 +196,9 @@ def scan_cards(repos):
 
 # ---------- Project(v2) 幂等准备 ----------
 
-Q_ORG = """query($org:String!){ organization(login:$org){
-  id projectsV2(first:100){ nodes{ id title url } } } }"""
+Q_ORG = """query($org:String!,$cur:String){ organization(login:$org){
+  id projectsV2(first:100, after:$cur){ nodes{ id title url }
+  pageInfo{ hasNextPage endCursor } } } }"""
 Q_FIELDS = """query($pid:ID!){ node(id:$pid){ ... on ProjectV2 {
   fields(first:50){ nodes{ __typename
     ... on ProjectV2Field{ id name dataType }
@@ -228,12 +233,19 @@ FIELD_SPEC = [  # (字段名, 类型)——State 单选（选项=state 全集）
 
 
 def ensure_project():
-    org = gql(Q_ORG, {"org": ORG})["organization"]
+    org = gql(Q_ORG, {"org": ORG, "cur": None})["organization"]
     if org is None:
         raise Infra(f"organization {ORG} 不可见（GOVERNANCE_TOKEN 权限？）")
-    for p in (org.get("projectsV2") or {}).get("nodes") or []:
-        if p.get("title") == PROJECT_TITLE:
-            return p["id"], p.get("url") or ""
+    # 游标翻页遍历全量后再判“不存在”（org 项目 >100 时不翻页会重复建同名板）
+    while True:
+        conn = (org.get("projectsV2") or {})
+        for p in conn.get("nodes") or []:
+            if p.get("title") == PROJECT_TITLE:
+                return p["id"], p.get("url") or ""
+        if not conn.get("pageInfo", {}).get("hasNextPage"):
+            break
+        cur = conn["pageInfo"]["endCursor"]
+        org = gql(Q_ORG, {"org": ORG, "cur": cur})["organization"]
     if DRY_RUN:
         print(f"[dry-run] 将创建 org Project(v2)「{PROJECT_TITLE}」")
         return None, ""
@@ -351,7 +363,7 @@ def main():
             key = (c["repo"], c["number"])
             if c["state"] not in state_names:
                 print(f"WARN unknown-state {c['repo']}#{c['number']}: label 态 {c['state']} "
-                      f"不在 expected-state 全集——字段照设为文本态名，请修标签")
+                      f"不在 expected-state 全集——State 无对应单选选项，将跳过 State 写入（报警留观），请修标签")
             entry = board.get(key)
             preexisting = entry is not None  # 报警面只认"板上有旧值"的漂移（新增不算）
             if entry is None:
@@ -402,7 +414,8 @@ def main():
         for key, entry in board.items():
             if key in card_keys or entry.get("issue_state") != "CLOSED":
                 continue
-            final = next((n[len("state:"):] for n in entry["labels"]
+            # 与 scan_cards 同判据：排序取首（closed 多标签时两投影确定性一致）
+            final = next((n[len("state:"):] for n in sorted(entry["labels"])
                           if n.startswith("state:")), None)
             if final and entry["fields"].get("State") != final and final in opt_ids:
                 if DRY_RUN:
