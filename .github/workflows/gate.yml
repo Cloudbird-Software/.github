@@ -170,7 +170,7 @@ jobs:
             # entry → "NNNN archive_path" 行（pyyaml 已随本 job 前置步骤安装）；
             # archive_path 为空的 entry 不入 map（#96 扩展点：后续 substantive 字段
             # 不影响本映射——number/archive_path 是本关卡唯一消费的键）
-            python3 -c 'import yaml;d=yaml.safe_load(open("/tmp/adr_index.yaml",encoding="utf-8"));[print(f"{int(e[\"number\"]):04d} {e[\"archive_path\"]}") for e in (d.get("entries") or []) if e.get("archive_path")]' >/tmp/adr_map.txt
+            python3 -c 'import yaml;d=yaml.safe_load(open("/tmp/adr_index.yaml",encoding="utf-8"));[print("%04d %s" % (e["number"], e["archive_path"])) for e in (d.get("entries") or []) if e.get("archive_path")]' >/tmp/adr_map.txt
             if [[ ! -s /tmp/adr_map.txt ]]; then
               echo "::error::INDEX.yaml 存在但 entries 为空/解析失败——索引世界不可判定，fail-closed"
               exit 1
