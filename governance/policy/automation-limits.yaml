@@ -29,7 +29,11 @@ cost:
   # Actions 分钟月预算（声明值，非账单——全仓公开计费净额 $0，此处防的是失控烧穿速率；
   # 当月用量 = /orgs/{org}/settings/billing/usage 按 product=actions & unitType=Minutes 汇总）
   actions_minutes:
-    quota_per_month: 20000
+    # BUDGET-03（spec IR-0001 v3，PR#129，owner 已拍板）：Actions 分钟本期不设上限
+    # ——2026-08-21 曾按旧值 20000 在故障指标上误触 P0 硬停（#149 用量不可知+
+    # billing 端点 410），按 spec 明示的 C1 调整路径改为等效无上限大数。
+    # 恢复上限=回改本值（ADR-0040 复位流程不变）。
+    quota_per_month: 200000000
     warn_pct: 80        # ≥80% 开告警 issue（同日去重，不硬停）
     hardstop_pct: 100   # ≥100% 置熔断 + 撤全部 open PR auto-merge + P0 issue
   # LLM token 月预算（数据源 pending：llm-gateway usage 端点就绪后接入，ADR-0040 决策 6；
