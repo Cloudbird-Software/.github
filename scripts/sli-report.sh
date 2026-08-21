@@ -184,7 +184,7 @@ $REPORT
 BOD
 
 gh issue create --repo "$GOV_REPO" --title "SLI 周报 $WEEK（自动合并门禁自身指标）" \
-  --body-file "$TMP/body.md" --label sli-report || die "周报 issue 创建失败"
+  --body-file "$TMP/body.md" --label sli-report || die "周报 issue 创建失败" \n  || gh issue create --repo "$GOV_REPO" --title "SLI 周报 $WEEK（自动合并门禁自身指标）" --body-file "$TMP/body.md"
 
 # 抽样审计 issue
 SAMPLES=$(grep '^SAMPLE=' "$TMP/metrics.txt" || true)
