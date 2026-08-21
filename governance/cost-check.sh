@@ -301,3 +301,5 @@ fi
 
 [[ $TRIPPED -eq 1 ]] && exit 1
 exit 0
+
+# retrigger（gate.yml 索引分支已在 main 修复，重新评估）
