@@ -36,13 +36,20 @@ cost:
     quota_per_month: 200000000
     warn_pct: 80        # ≥80% 开告警 issue（同日去重，不硬停）
     hardstop_pct: 100   # ≥100% 置熔断 + 撤全部 open PR auto-merge + P0 issue
-  # LLM token 月预算（数据源 pending：llm-gateway usage 端点就绪后接入，ADR-0040 决策 6；
-  # pending 期间仅声明 + 注入通道（LLM_TOKENS_USED）可测，不触发真实告警）
+  # LLM token 月预算（W2-C3 .github#216，ADR-0062：数据源接入——CI-Workflows
+  # pipeline/metering 计量账本，按 invoke 聚合的 JSONL hash 链；cost-check 拉取
+  # metering-ledger 分支经 metering.py aggregate 按角色档归账。链断/归账失败=
+  # infra fail-closed（exit 2），不静默归零不盲熔断。pending 形态保留为回滚值
+  # （ADR-0040 决策 6）；注入通道 COST_LLM_TOKENS_USED 仍优先于真实数据源）
   llm_tokens:
     quota_per_month: 200000000
     warn_pct: 80
     hardstop_pct: 100
-    data_source: pending
+    data_source: ciw-metering
+    metering:            # data_source=ciw-metering 时消费（复用本段现有结构，不新建配置面）
+      repo: Cloudbird-Software/CI-Workflows
+      branch: metering-ledger
+      code_path: pipeline/metering   # 归账引擎 metering.py 所在（cost-check.yml sparse checkout）
 
 circuit_breaker:
   # 熔断标志：org Actions 变量（visibility=all，全仓 workflow/agent 可读）

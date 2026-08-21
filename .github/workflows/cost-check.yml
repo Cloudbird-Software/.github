@@ -21,7 +21,7 @@ on:
         required: false
         default: ""
       llm_tokens_used_override:
-        description: "LLM token 用量覆盖（pending 数据源的注入测试通道）"
+        description: "LLM token 用量覆盖（优先于计量账本的注入测试通道）"
         required: false
         default: ""
       llm_tokens_quota_override:
@@ -49,6 +49,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # 归账引擎 sparse checkout（W2-C3 .github#216，ADR-0062）：CI-Workflows 是公开仓且
+      # 自身有 CI+org-gate（C1），跟 main 消费；升级若破坏 aggregate 会让本检查显式
+      # INFRA 红（fail-closed 可见），不会被静默吞掉
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Cloudbird-Software/CI-Workflows
+          sparse-checkout: pipeline/metering
+          path: ciw-metering
+          persist-credentials: false
       - name: 用量检查与熔断（exit 1=触发告警/熔断 2=基础设施故障）
         env:
           GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
@@ -57,5 +66,6 @@ jobs:
           COST_QUOTA_MINUTES_OVERRIDE: ${{ inputs.quota_minutes_override }}
           COST_LLM_TOKENS_USED_OVERRIDE: ${{ inputs.llm_tokens_used_override }}
           COST_LLM_TOKENS_QUOTA_OVERRIDE: ${{ inputs.llm_tokens_quota_override }}
+          COST_LLM_METERING_PY: ciw-metering/pipeline/metering/metering.py # 归账引擎（ADR-0062 通道）
           COST_DRY_RUN: ${{ inputs.dry_run }}
         run: bash governance/cost-check.sh
