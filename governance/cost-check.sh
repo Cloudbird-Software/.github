@@ -29,6 +29,23 @@ ok()    { echo "OK    $1"; }
 act()   { echo "ACT   $1"; }
 infra() { echo "INFRA $1" >&2; INFRA=$((INFRA+1)); }
 
+# ---------- AUDIT（ADR-0057，INV-12：宪法 §11 行 3 预算检查的审计条目） ----------
+# 本脚本纳入管家唤醒矩阵（cron 6h→1h）。trigger 由 workflow 注入 COST_TRIGGER
+# （${{ github.event_name }}：schedule/workflow_dispatch——"谁唤醒"）；头行=running，
+# 尾行由 EXIT 陷阱按实际退出码落（0=ok 1=tripped 2=infra-fail）——多出口脚本无需
+# 逐出口插行，判定逻辑零改动。duration 由 butler-audit.sh 的审计起点口径计算
+# （source 时刻起算，等效脚本内 SECONDS）。
+source "$DIR/butler-audit.sh" || { echo "FATAL: butler-audit.sh 加载失败" >&2; exit 2; }
+audit_emit cost-check "${COST_TRIGGER:-local}" running '{"phase":"start"}' \
+  || infra "AUDIT 头行输出失败（INV-12 完整性受损）"
+cost_audit_final() {
+  local rc=$1 oc=ok
+  [[ "$rc" == "1" ]] && oc=tripped
+  [[ "$rc" == "2" ]] && oc=infra-fail
+  audit_emit cost-check "${COST_TRIGGER:-local}" "$oc" '{"phase":"done"}' || true
+}
+trap 'cost_audit_final "$?"' EXIT
+
 [[ -n "${GH_TOKEN:-}" ]] || { echo "FATAL: GH_TOKEN 未设置（需 org admin token）" >&2; exit 2; }
 
 # 数值校验（fail-closed，须在父 shell 调用——子 shell 里 infra 计数会丢失）：

@@ -1,0 +1,58 @@
+name: butler-heartbeat
+# 外部 dead-man 心跳 ping 侧（宪法 §6；ADR-0057，W1-C5 .github#168）
+# 每 30min ping 外部 dead-man 服务（healthchecks.io 或任意同类；owner runbook：
+# docs/deadman-setup.md）。服务侧 grace = butler.yaml thresholds.deadman_grace_minutes
+# （60min=容忍一次 ping 丢失）；超时未收到 ping → 服务回调 butler-deadman-trip
+# （缺席即停）。"心跳是唤醒的唤醒，也必须外部"（宪法 §11 末行）——GitHub 侧只做
+# 被动 ping 客户端与 trip 接收方：GitHub cron 全挂时 GitHub 自己无法自我报警，
+# 缺席判定必须在外部服务。
+# DEADMAN_PING_URL（org secret，owner 手工步骤）未配置 → WARN 审计行不红——骨架期
+# 不因缺外部配置阻塞；配置后 curl 失败重试 1 次仍败 → 变红（心跳管道故障可见：
+# 持续失败意味着外部服务将判定管家缺席并触发 trip）。
+on:
+  schedule:
+    - cron: "*/30 * * * *" # 每 30min（:00/:30 与其他治理 cron 重叠可接受——单次 curl <1s）
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: butler-heartbeat
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # 仅为读取 governance/butler-audit.sh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: dead-man ping
+        env:
+          DEADMAN_PING_URL: ${{ secrets.DEADMAN_PING_URL }}
+          BUTLER_TRIGGER: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+          source governance/butler-audit.sh
+          TRIGGER="${BUTLER_TRIGGER:-manual}"
+          # 未配置（org secret 缺失时 env 为空串）→ WARN 不红：外部服务注册是 owner
+          # 手工步骤（docs/deadman-setup.md），骨架期代码侧已完备即可
+          if [[ -z "${DEADMAN_PING_URL:-}" ]]; then
+            echo "WARN  DEADMAN_PING_URL 未配置——外部 dead-man 服务 owner 侧待配置（runbook: docs/deadman-setup.md）；骨架期不红"
+            audit_emit deadman-ping "$TRIGGER" warn '{"deadman":"unconfigured","runbook":"docs/deadman-setup.md"}'
+            exit 0
+          fi
+          for attempt in 1 2; do
+            if curl -fsS --max-time 20 "$DEADMAN_PING_URL" >/dev/null; then
+              echo "OK    dead-man ping 成功（attempt $attempt/2）"
+              audit_emit deadman-ping "$TRIGGER" ok '{"deadman":"ping-ok","attempt":'$attempt'}'
+              exit 0
+            fi
+            echo "WARN  dead-man ping 失败（attempt $attempt/2，max-time 20s）"
+          done
+          audit_emit deadman-ping "$TRIGGER" fail '{"deadman":"ping-failed-twice"}' || true
+          echo "::error::dead-man ping 两次失败——心跳管道故障（外部服务不可达/URL 失效），变红可见；若持续失败，外部服务将按 grace 判定管家缺席并触发 trip（butler-deadman-trip）" >&2
+          exit 1

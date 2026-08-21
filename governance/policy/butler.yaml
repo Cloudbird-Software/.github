@@ -1,0 +1,60 @@
+version: 1
+# ============================================================================
+# butler.yaml —— 管家唤醒矩阵声明（ADR-0057，W1-C5 .github#168；宪法 §11）
+# 真源: 本文件（trigger/cadence/职责/阈值声明）；执行: .github/workflows/butler-*.yml
+#       与 governance/butler-*.sh（脚本读本文件取阈值，不读注释）。
+# 铁律（宪法 §11）: 管家永远不"自己醒来"——每次运行必须有明确触发器，且每次
+#   运行产出审计条目（INV-12，经 governance/butler-audit.sh 输出 AUDIT 行）。
+# 范围: 仅唤醒矩阵**前三行**（reconcile 6h / 账本刷新 15min / 预算检查 1h）。
+#   第四行起（每日 digest/flaky sweep、每周审计包/种子缺陷演习等）属后续波次，
+#   勿在此声明——未落地的职责不预先声明，防"声明了但没有触发器"的宪法违规。
+# ============================================================================
+
+wake_matrix:
+  # 行 1：主收敛循环——僵尸卡/孤儿标签/隔离超时（事件丢失的最终兜底）
+  - duty: reconcile
+    trigger: cron
+    cadence: every_6h            # 机器可读语义值；实际 cron 表达式在 workflow 里（含错峰分钟）
+    workflow: .github/workflows/butler-reconcile.yml
+    checks:
+      - stale_in_progress         # state:in-progress 卡超时未更新 → needs-human
+      - orphan_state_labels       # closed issue 仍挂 state:* 标签 → 记入报告
+      - stale_quarantine          # state:quarantine 停留超时 → 升 needs-human
+  # 行 2：账本/dashboard 刷新 + Project 板同步（宪法 §12 投影；投影脚本由 W1-C3 提供）
+  - duty: ledger-refresh
+    trigger: cron
+    cadence: every_15min
+    workflow: .github/workflows/butler-ledger.yml
+    checks:
+      - board_sync                # 调 W1-C3 governance/board-sync.py（[ -f ] 守卫，未落地保持绿）
+      - dashboard_update          # 调 W1-C3 governance/dashboard-update.py（同上）
+      - run_bookkeeping           # 本卡自带轻量记账：运行追加 dashboard 备注行（仅审计日志）
+  # 行 3：预算/配额检查（ADR-0040 cost-check，cron 由 6h 收紧至 1h）
+  - duty: budget-check
+    trigger: cron
+    cadence: every_1h
+    workflow: .github/workflows/cost-check.yml
+    checks:
+      - actions_minutes           # billing API 用量 vs automation-limits.yaml#cost
+      - llm_tokens                # 数据源 pending（ADR-0040 决策 6），声明不告警
+
+# 服务行（不属唤醒矩阵编号行，但与矩阵同一铁律：有触发器、有审计条目）
+services:
+  - duty: deadman-ping
+    trigger: cron
+    cadence: every_30min
+    workflow: .github/workflows/butler-heartbeat.yml
+    notes: 外部 dead-man 服务的 ping 侧；DEADMAN_PING_URL 未配置时 WARN 不红（owner runbook 见 docs/deadman-setup.md）
+  - duty: deadman-trip
+    trigger: repository_dispatch # type=deadman-tripped（外部服务超时回调）+ workflow_dispatch（演习）
+    workflow: .github/workflows/butler-deadman-trip.yml
+    notes: 缺席即停（宪法 §6）——置共用熔断变量 AUTO_MERGE_DISABLED + 撤全部 auto-merge + P0 issue
+
+# 阈值（改动走 C1：本文件在 governance/ 路径，PR 须引用 ADR）
+thresholds:
+  # state:in-progress 卡 issue updated 距今超过 N 天 → needs-human（保守值：活跃卡误报代价 > 检出延迟）
+  stale_in_progress_days: 3
+  # state:quarantine 停留超过 N 天 → 升 needs-human（隔离应有处置 SLA，不应无限期滞留）
+  stale_quarantine_days: 2
+  # 外部 dead-man 服务的 grace 时长（分钟）——心跳每 30min 一次，grace=60 容忍一次丢失
+  deadman_grace_minutes: 60

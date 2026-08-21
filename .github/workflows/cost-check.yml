@@ -1,12 +1,14 @@
 name: cost-check
-# 额度/成本熔断（ADR-0040，P2-8 .github#93）：
-# 6h 周期拉取 /orgs/{org}/settings/billing/usage 当月 Actions 分钟 vs
+# 额度/成本熔断（ADR-0040，P2-8 .github#93；cron 收紧至 1h：ADR-0057，W1-C5 .github#168）：
+# 每小时拉取 /orgs/{org}/settings/billing/usage 当月 Actions 分钟 vs
 # policy/automation-limits.yaml 声明预算——≥80% 告警 issue；≥100% 置 org 变量
 # AUTO_MERGE_DISABLED + 撤全部 open PR auto-merge + P0 issue。复位仅人工（变量 PATCH/DELETE
 # + P0 留评论），脚本观察到复位后自动关 P0。脚本细节/注入通道见 governance/cost-check.sh 头注。
+# 本流程是管家唤醒矩阵第 3 行（宪法 §11 预算/配额检查 1h）的落地；每次运行产出
+# AUDIT 审计行（INV-12，头行+EXIT 陷阱尾行，trigger 由 COST_TRIGGER 注入）。
 on:
   schedule:
-    - cron: "42 */6 * * *" # 每 6h :42（避开整点 governance-drift 与 :18 auto-fix-limit）
+    - cron: "23 * * * *" # 每小时 :23（宪法 §11 行 3 的 1h 预算检查——ADR-0057 由 6h 收紧；避开整点 governance-drift 与 :18 auto-fix-limit）
   workflow_dispatch:
     # 注入入口（T2 注入式测试：79%/85%/100% 全场景不依赖真实超支）：空=真实 API/真源
     inputs:
@@ -50,6 +52,7 @@ jobs:
       - name: 用量检查与熔断（exit 1=触发告警/熔断 2=基础设施故障）
         env:
           GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          COST_TRIGGER: ${{ github.event_name }} # AUDIT 行 trigger 字段（schedule/workflow_dispatch——INV-12 谁唤醒）
           COST_USAGE_MINUTES_OVERRIDE: ${{ inputs.usage_minutes_override }}
           COST_QUOTA_MINUTES_OVERRIDE: ${{ inputs.quota_minutes_override }}
           COST_LLM_TOKENS_USED_OVERRIDE: ${{ inputs.llm_tokens_used_override }}

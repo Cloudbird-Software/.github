@@ -65,6 +65,14 @@ repos:
       Python 仓（languages.yaml PY-* 规则，声明适配现实——openjiuwen SDK 为 Python）
     key_paths: [src/agentplatform/, tests/, docker/, Makefile]
 
+  - name: arbiter
+    layer: L2
+    visibility: public
+    status: active
+    role: 仲裁内核——确定性裁决/CAS 租约/防重放台账（宪法 §1）；无 LLM、默认拒绝、
+      自带测试与误放行台账（ADR-0054）
+    key_paths: [arbiter/, capabilities.yaml, tests/]
+
   - name: Shorts_Director
     layer: L2
     visibility: public

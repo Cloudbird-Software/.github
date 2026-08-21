@@ -1,0 +1,136 @@
+name: butler-deadman-trip
+# 缺席即停 trip 侧（宪法 §6 外部 dead-man 心跳；ADR-0057，W1-C5 .github#168）
+# 触发：外部 dead-man 服务超时回调 repository_dispatch(deadman-tripped)，或手动
+# workflow_dispatch（AC-3 演习路径）。动作（GOVERNANCE_TOKEN）：
+#   1) 置 org 变量 AUTO_MERGE_DISABLED=true —— 与 cost-check（ADR-0040）**共用熔断
+#      变量**：宪法 §6 的"缺席即停"与成本熔断同为"停自动合并"语义，拆两个变量=
+#      两套复位路径/两套旁路窗口，且消费点（agent 派发前置检查/auto-fix-limit 执法）
+#      只认这一个变量；
+#   2) 遍历 REPOS.yaml active 仓撤全部 open PR 的 auto-merge（模式同 cost-check.sh
+#      的 strip_all_automerge——硬停是全局语义，不分作者）；
+#   3) 开 P0 issue（label deadman-tripped，幂等去重）+ AUDIT 行。
+# 退出码：执法成功完毕 exit 1（=已熔断，变红=可见信号，同 cost-check tripped 语义）；
+# infra 故障（变量置位失败等）exit 2。复位仅人工：PATCH 变量 false + P0 留评论关闭
+# （docs/deadman-setup.md）。
+on:
+  repository_dispatch:
+    types: [deadman-tripped] # 外部 dead-man 服务的失败回调（runbook 见 docs/deadman-setup.md）
+  workflow_dispatch:
+    inputs:
+      simulate:
+        description: "true=演习（默认；动作与真实 trip 完全相同——熔断必须真置位才算演习，复位路径见 docs/deadman-setup.md）"
+        required: false
+        default: "true"
+
+permissions: {}
+
+concurrency:
+  group: butler-deadman-trip # trip 幂等：并发触发串行执行，后到者看到变量已置/P0 已开即去重
+  cancel-in-progress: false
+
+jobs:
+  trip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write # P0 issue 开在 .github 仓（gh org 变量/跨仓 auto-merge 撤销用 GOVERNANCE_TOKEN）
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 缺席即停——置熔断+撤 auto-merge+P0
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          BUTLER_TRIGGER: ${{ github.event_name }}
+          SIM: ${{ inputs.simulate }}
+        run: |
+          set -uo pipefail
+          source governance/butler-audit.sh
+          ORG=Cloudbird-Software
+          GOV_REPO="$ORG/.github"
+          CB=AUTO_MERGE_DISABLED
+          TRIGGER="${BUTLER_TRIGGER:-manual}"
+          SIM="${SIM:-true}"
+          INFRA=0
+          ok()  { echo "OK    $1"; }
+          act() { echo "ACT   $1"; }
+          infra() { echo "INFRA $1" >&2; INFRA=$((INFRA+1)); }
+
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            audit_emit deadman-trip "$TRIGGER" infra-fail '{"fatal":"GH_TOKEN missing (CI: org secret GOVERNANCE_TOKEN)"}' || true
+            echo "::error::缺 org secret GOVERNANCE_TOKEN——trip 无法执行缺席即停（fail-closed 变红）" >&2
+            exit 2
+          fi
+          audit_emit deadman-trip "$TRIGGER" running '{"phase":"start","simulate":"'"$SIM"'"}'
+          SRC="真实 trip（外部 dead-man 服务回调）"
+          [[ "$SIM" == "true" ]] && SRC="演习（workflow_dispatch simulate=true）"
+
+          # 1) 置共用熔断变量（PATCH 已有 / 404 时 POST 新建——同 cost-check.sh set_breaker）
+          if ! gh api -X PATCH "orgs/$ORG/actions/variables/$CB" -f name="$CB" -F value=true >/dev/null 2>&1; then
+            if ! gh api -X POST "orgs/$ORG/actions/variables/$CB" -f name="$CB" -F value=true -f visibility=all >/dev/null 2>&1; then
+              infra "org 变量 $CB 置位失败（PATCH/POST 均败）"
+            fi
+          fi
+          act "熔断变量 $CB=true 已置位（与 cost-check 共用——宪法 §6 缺席即停；$SRC）"
+
+          # 2) 撤全部 active 仓 open PR 的 auto-merge（模式同 cost-check.sh strip_all_automerge）
+          STRIPPED=0
+          REPOS=$(python3 -c 'import yaml; repos=yaml.safe_load(open("governance/REPOS.yaml", encoding="utf-8"))["repos"]; print(" ".join(r["name"] for r in repos if r.get("status") == "active"))' | tr -d '\r') || REPOS=""
+          if [[ -z "$REPOS" ]]; then
+            infra "REPOS.yaml 解析失败——auto-merge 撤销清单不可得"
+          fi
+          for r in $REPOS; do
+            while IFS=$'\t' read -r n am; do
+              [[ "${am:-}" == "1" ]] || continue
+              if gh api -X DELETE "repos/$ORG/$r/pulls/$n/auto-merge" >/dev/null 2>&1; then
+                act "撤 auto-merge: $r#$n"
+                STRIPPED=$((STRIPPED+1))
+              fi
+            done < <(gh pr list --repo "$ORG/$r" --state open --limit 200 \
+              --json number,autoMergeRequest \
+              --jq '.[] | [.number, (if .autoMergeRequest != null then "1" else "0" end)] | @tsv' 2>/dev/null)
+          done
+          ok "auto-merge 撤销完成：$STRIPPED 个 PR"
+
+          # 3) P0 issue（label deadman-tripped，幂等去重；同日已评论不重复——防回调重放灌水）
+          gh label create deadman-tripped --repo "$GOV_REPO" \
+            --description "dead-man trip 缺席即停标记（勿手工使用）" --color b60205 >/dev/null 2>&1 || true
+          EXISTING=$(gh issue list --repo "$GOV_REPO" --state open --label deadman-tripped \
+            --json number --jq '.[0].number' 2>/dev/null)
+          TODAY=$(date -u +%F)
+          BODY="P0：dead-man 心跳缺席即停已触发（宪法 §6；$SRC，运行 $(date -u +%FT%TZ)）。
+
+          - 已执行：org 变量 \`$CB\`=true（与 cost-check 共用熔断变量）；active 仓 open PR 的 auto-merge 已撤销（$STRIPPED 个）。
+          - 效果：agent 派发与 automerge 前置检查将拒绝启动（AGENTS.md）；auto-fix-limit 每轮机器执法撤销新 enable。
+          - 信号链：butler-heartbeat 每 30min ping 外部 dead-man 服务 → 服务 grace（butler.yaml deadman_grace_minutes=60min）内未收到 → 回调本 workflow。
+
+          处置（仅 owner 人工，完整 runbook 见 docs/deadman-setup.md）：
+          1. 排查管家 cron 静默根因（Actions 故障 / workflow 被删改 / token 失效 / 外部服务误报）；
+          2. 复位：\`gh api -X PATCH orgs/$ORG/actions/variables/$CB -f name=$CB -F value=false\`（或 DELETE 该变量）；
+          3. 在本 issue 留复位评论后关闭（留痕）。"
+          if [[ -n "$EXISTING" ]]; then
+            LAST=$(gh issue view "$EXISTING" --repo "$GOV_REPO" --json createdAt,comments \
+              --jq '[.comments[].createdAt, .createdAt] | max' 2>/dev/null) || LAST=""
+            if [[ "$LAST" == "$TODAY"* ]]; then
+              ok "P0 已开（#$EXISTING）且今日已评论，跳过重复评论（防灌水）"
+            else
+              gh issue comment "$EXISTING" --repo "$GOV_REPO" --body "$BODY" >/dev/null 2>&1 || true
+              act "P0 已开（#$EXISTING），已评论本次 trip"
+            fi
+          else
+            if ! gh issue create --repo "$GOV_REPO" \
+              --title "P0 dead-man trip：管家缺席，自动合并已停（$CB=true）" \
+              --body "$BODY" --label deadman-tripped >/dev/null 2>&1; then
+              infra "P0 issue 开立失败"
+            else
+              act "P0 issue 已开立（label deadman-tripped）"
+            fi
+          fi
+
+          if [[ $INFRA -gt 0 ]]; then
+            audit_emit deadman-trip "$TRIGGER" infra-fail "{\"breaker\":\"partial\",\"automerge_stripped\":$STRIPPED,\"simulate\":\"$SIM\",\"infra_failures\":$INFRA}" || true
+            exit 2
+          fi
+          audit_emit deadman-trip "$TRIGGER" tripped "{\"breaker\":\"set\",\"automerge_stripped\":$STRIPPED,\"simulate\":\"$SIM\"}"
+          exit 1 # 已熔断——变红=可见信号（同 cost-check tripped 语义）；复位仅人工
