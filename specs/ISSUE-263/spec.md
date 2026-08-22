@@ -1,6 +1,6 @@
 ---
 taskId: ISSUE-263
-specVersion: 4
+specVersion: 5
 title: 卡绑定测试与红队守门制度
 irRef: Cloudbird-Software/.github#263
 amendments:
@@ -10,11 +10,13 @@ amendments:
   reason: 红队审计 insufficient（#263 评论链红队报告 R2/R3，CNB 轮）——S5 错误路径守卫缺失（spec 路径缺 check 必须红、作废须转 insufficient、no-attempts 状态后果）、反摆拍断言逐 run 常驻化、REPOS.yaml 申报补登、ADR-0061 验证者 APP 通道修订
 - rev: 4
   reason: 红队审计 insufficient（#263 评论链红队报告 R4，CNB 轮）——正向上报回路缺失、T5/T6 未列入入册、意图道闸无命中被误挂失败语义、holdout/AG-1 时序判红、锁卡语义收窄至白卷、道闸跳过留痕
+- rev: 5
+  reason: 红队审计 insufficient（#263 评论链红队报告 R5，CNB 轮）——fail-closed 总原则、ADR-0072/0062/0068 承接引用、blastRadius 补 holdout 仓与 agent-registry 真源、白卷不挂失败分支、criteria 溯源、golden 盲化、T6 三元组、五轮后收敛
 acceptanceCriteria:
 - id: AC-1
   given: 组织默认 verifier 范式已写入 GOVERNANCE.yaml 与 testing.yaml（点名到文件）
   when: LLM 参与判定环节
-  then: 采用开源 LLM-as-a-Verifier 实践（绝对细粒度 reward、criteria 分解、K 次重复评估、阈值 gate），输出结构化连续分；PPT 锦标赛仅作 best-of-N 选择层，胜率不得作为 gate 输入（负向断言）；运行时证据：一次真实判定的 CI 日志含 llm-verifier 实际调用记录、逐 criterion 连续分 JSON 与 token 消耗，日志由独立于 verifier 的采集组件写入，不接受"声明已写入"
+  then: 采用开源 LLM-as-a-Verifier 实践（绝对细粒度 reward、criteria 分解、K 次重复评估、阈值 gate），输出结构化连续分——与 ADR-0072 引用同一外部范式（arXiv:2607.05391），本条为其向全判定环节的泛化承接；criteria 文件一卡一份且机器可追溯到对应卡的 AC 列表；阈值 gate、endpoint 探测、成本核对作用于同一次 verifier run 的同一判定链；PPT 锦标赛仅作 best-of-N 选择层，胜率不得作为 gate 输入（负向断言）；运行时证据：一次真实判定的 CI 日志含 llm-verifier 实际调用记录、逐 criterion 连续分 JSON 与 token 消耗，日志由独立于 verifier 的采集组件写入，不接受"声明已写入"
 - id: AC-2
   given: 红队 pipeline 判定环节
   when: 执行判定
@@ -22,7 +24,7 @@ acceptanceCriteria:
 - id: AC-3
   given: 实现 PR 绑定卡
   when: PR 提交
-  then: 自动走卡对应测试集与已注册 holdout 测试，且必须通过才能合并；测试集非空且含有效断言，且测试先于实现首次运行为红（fail-before，ADR-0061）；运行时证据：缺测试 PR、空测试集 PR、holdout hash 不匹配 PR 三类互异失败源的真实 CI 红记录
+  then: 自动走卡对应测试集与已注册 holdout 测试，且必须通过才能合并；测试集非空且含有效断言，且每次测试/实现变更对应测试须先于实现运行为红（fail-before 逐变更常驻，ADR-0061，非仅首次）；运行时证据：缺测试 PR、空测试集 PR、holdout hash 不匹配 PR 三类互异失败源的真实 CI 红记录
 - id: AC-4
   given: specs/** 路径的 PR
   when: 提交变更
@@ -30,11 +32,11 @@ acceptanceCriteria:
 - id: AC-5
   given: 红队执行意图层探索
   when: 每次 run
-  then: 产出探索留痕（读过的工件清单 + 显式"本轮是否发现 S6-S8"字段）；发现 S6-S8 问题时带证据报人裁决，不产生阻断性判定，证据须经 AC-9 机械核对；无命中须落盘留痕（正常结果，区别于未运行，不走失败分支）；无任何产出（白卷）才按 AC-15 失败分支处理
+  then: 产出探索留痕（读过的工件清单 + 显式"本轮是否发现 S6-S8"字段）；发现 S6-S8 问题时带证据报人裁决，不产生阻断性判定，证据须经 AC-9 机械核对；无命中须落盘留痕（正常结果，区别于未运行）；白卷（无任何产出）仅留痕+报人，不进入 AC-15 失败/锁卡分支——意图道闸的任何形态输出永不构成机器阻断；跳过与无命中为 schema 互异的两类工件
 - id: AC-6
   given: 红队 AI 运行
   when: 在沙箱中执行
-  then: 以 GitHub Actions job 形态存在，配置面恰为 1 个 org secret + 1 个 org variable（模型接入遵循 ADR-0048 直连 provider 现状，Gateway 迁移另起）；配置面膨胀（出现第 2 个 secret 或额外凭据）时 job 判红（负向断言）；运行时证据：Action run 日志含 LLM API 真实请求与代码库探索操作日志，空壳 job（echo survived）不满足
+  then: 以 GitHub Actions job 形态存在，配置面恰为 1 个 org secret + 1 个 org variable（模型接入遵循 ADR-0048 直连 provider 现状，Gateway 迁移另起）；job 可见的全部凭据来源（org+repo 层 secret、env 注入、硬编码默认值）唯一且来自指定 org secret，沙箱内对 env 全量做凭据形状扫描，出现第 2 个凭据即判红（负向断言）；运行时证据：Action run 日志含 LLM API 真实请求与代码库探索操作日志，空壳 job（echo survived）不满足
 - id: AC-7
   given: LLM-as-a-Verifier 范式实施
   when: 执行判定
@@ -42,23 +44,23 @@ acceptanceCriteria:
 - id: AC-8
   given: 阈值 gate 实施
   when: 使用含已知不合格样本的 golden set
-  then: 故意构造的低分样本触发 gate 失败；阈值随 criteria 文件版本化，标定记录留档（标定 SHA、golden 版本、定标时间机器可查）；golden set 每次 run 全量重放并含回归断言（不合格样本仍不合格）；用非 golden 的随机低分样本反特判；不合格样本构造方法独立于判定脚本代码；运行时证据：上述反向测试日志
+  then: 故意构造的低分样本触发 gate 失败；阈值随 criteria 文件版本化，标定记录留档（标定 SHA、golden 版本、定标时间机器可查）；golden set 每次 run 全量重放并含回归断言（不合格样本仍不合格）；用非 golden 的随机低分样本反特判；golden 样本盲化注入（剥离 id/来源元数据，与正常样本同批混排）；criteria 文件每次变更必须重新标定且标定记录与 criteria SHA 强一致；不合格样本构造方法独立于判定脚本代码；运行时证据：上述反向测试日志
 - id: AC-9
   given: 证据核对机制实施
   when: 红队/verifier 报告生成
-  then: 每条引用由代码对运行时刻真实工件做字符串级机械匹配，基准版本（SHA/抓取时间）在 run 开始时动态获取并写入报告，基准获取失败/为空时该条核对判不通过并阻断；核对不通过的命中作废并记录；核对所依据的工件快照随报告持久化归档（事后可重放，杜绝验过即焚）；golden 样本构造来源含 #263 erratum 事件（反面教材制度化重放）；运行时证据：含已知捏造引用样本的作废实测全部命中
+  then: 每条引用由代码对运行时刻真实工件做字符串级机械匹配，基准版本（SHA/抓取时间）在 run 开始时动态获取并写入报告，基准获取失败/为空时该条核对判不通过并阻断；核对不通过的命中作废并记录；核对所依据的工件快照随报告持久化归档（保留 TTL + 定期重放 job 对历史快照重跑核对，杜绝验过即焚/验过即丢）；golden 样本构造来源含 #263 erratum 事件（反面教材制度化重放）；运行时证据：含已知捏造引用样本的作废实测全部命中
 - id: AC-10
   given: endpoint 三探测校验制度化
   when: 每次 verifier run 前探测 endpoint（防探测后动态降级）
-  then: 检测 logprobs 有无、top_logprobs 上限、prefill/structured_outputs 支持，结果决定打分抽取路径与精度预期并写入报告；不满足最低要求的 endpoint 配置即失败；探测本身失败/超时不得误判为通过；top_logprobs 截断造成的精度折损必须在 run 报告中声明；运行时证据：一个被拒 endpoint 的失败记录
+  then: 检测 logprobs 有无、top_logprobs 上限、prefill/structured_outputs 支持，结果决定打分抽取路径与精度预期并写入报告；不满足最低要求的 endpoint 配置即失败；探测本身失败/超时不得误判为通过；探测结果与 LLM 响应 usage 中的 model/endpoint 指纹交叉一致，不一致即判红；top_logprobs 截断造成的精度折损必须在 run 报告中声明；运行时证据：一个被拒 endpoint 的失败记录
 - id: AC-11
   given: verifier token 成本管理
   when: 执行判定
-  then: token 成本随 run 持久化并与 LLM 响应 usage 字段交叉核对，偏差超阈值时该 run 判定作废并转人工（非仅告警）；纳入 automation-limits.yaml 预算口径；K 与 pivots 为暴露的成本旋钮，降档须留痕且不得改动判定语义与阈值；运行时证据：一次真实 run 的 token 账落盘文件
+  then: token 成本持久化挂接 ADR-0062 计量 wrapper 与 automation-limits.yaml 既有 llm_tokens 预算口径（不重述已有机制），新增约束：与 LLM 响应 usage 字段交叉核对，偏差超阈值时该 run 判定作废并转人工（非仅告警）；K 与 pivots 为暴露的成本旋钮，降档须留痕且不得改动判定语义与阈值；运行时证据：一次真实 run 的 token 账落盘文件
 - id: AC-12
   given: 状态机 T5/T6 实施
   when: spec PR 合并且 suite 就绪
-  then: conductor 按 T5/T6 转移状态，adversary 经 repository_dispatch 自动触发；"suite 就绪"为确定性谓词（suite/ 存在且含非空测试文件且可解析）；repository_dispatch 的 event_type 白名单精确匹配，T5/T6 全部前置条件由 conductor 侧重新断言（不信任 dispatch 载荷）；进入 wave-planned 必须存在对应的 survived 审计记录；前置不满足或 dispatch 未触发时转移拒绝并告警；运行时证据：状态变更记录 + needs-human 不可直跳 wave-planned 的自动化断言在 CI 强制运行
+  then: conductor 按 T5/T6 转移状态，adversary 经 repository_dispatch 自动触发；"suite 就绪"为确定性谓词（suite/ 存在且含非空测试文件且可解析）；repository_dispatch 的 event_type 白名单精确匹配，T5/T6 全部前置条件由 conductor 侧重新断言（不信任 dispatch 载荷）；进入 wave-planned 必须存在该卡本次生命周期内、卡 ID+specVersion+审计 run ID 三元组对应的 survived 审计记录（禁止跨卡/历史记录短路）；前置不满足或 dispatch 未触发时转移拒绝并告警；运行时证据：状态变更记录 + needs-human 不可直跳 wave-planned 的自动化断言作为 required check 在 CI 常驻强制运行
 - id: AC-13
   given: 红队沙箱运行
   when: 执行红队任务
@@ -70,27 +72,27 @@ acceptanceCriteria:
 - id: AC-15
   given: 红队 run 执行
   when: run 失败、无产出或 no-attempts 白卷
-  then: 有界重试≤2 次（重试计数以不可篡改的 run ID 序列工件为准，不依赖可写状态）后自动开特定标签 issue、停止规划 agent 相关产出并提醒人类；产物报告须通过结构化 JSON schema 校验，空报告/不合 schema 按失败同等处理；no-attempts/空报告 run 之后该卡锁定 needs-human、不得进入 wave-planned 并 dead-man 提醒（白卷不得视为红队已通过；普通 run 失败只重试+开 issue，不锁卡）；运行时证据：failure 与空报告两种形态的自动开 issue 实测记录 + 白卷后状态锁定记录
+  then: 有界重试≤2 次（重试计数以不可篡改的 run ID 序列工件为准，不依赖可写状态）后自动开特定标签 issue、停止规划 agent 相关产出并提醒人类；产物报告须通过结构化 JSON schema 校验（缺逐 criterion 连续分或证据核对记录即判白卷，最小化填坑报告不豁免），空报告/不合 schema 按失败同等处理；红队是否跑过只认指定 Action 历史 run ID（防冒充）；本条的失败/锁卡分支仅适用红队 run，不适用意图道闸（AC-5）；no-attempts/空报告 run 之后该卡锁定 needs-human、不得进入 wave-planned 并 dead-man 提醒（白卷不得视为红队已通过；普通 run 失败只重试+开 issue，不锁卡）；运行时证据：failure 与空报告两种形态的自动开 issue 实测记录 + 白卷后状态锁定记录
 - id: AC-16
   given: 意图兜底道闸 S6-S8 实施
   when: 每张卡
-  then: 道闸每卡实跑并留痕（无命中也产出"无命中"落盘记录，区别于未运行）；S6-S8 入 attack-strategies.yaml（标 requires_explore），只报人不阻断；S8（blastRadius 集合比对）为确定性脚本——可脱离 LLM 独立运行且结果可复现（独立性自成一条，不与机械核对耦合），脚本崩溃或两次运行结果不一致时该次 S8 判定作废（blocking）；命中带 file:line 且经 AC-9 机械核对；#263 dogfood 三条有效命中（专用 APP vs AG-1、每 PR 审计 vs ADR-0067 频率、holdout 强制 vs DECISION-02 隔离）作为首批实跑记录存档；LLM 不可用导致道闸跳过时须显式留痕（跳过原因，与未运行可区分）；运行时证据：对一张已知含 S6 重复问题的卡产出含 file:line 的评论 + 一次真实 S8 集合比对命中的落盘记录 + 一张无问题卡的"无命中"落盘记录
+  then: 道闸每卡实跑并留痕（无命中也产出"无命中"落盘记录，区别于未运行）；S6-S8 入 attack-strategies.yaml（标 requires_explore），只报人不阻断；S8（blastRadius 集合比对）为确定性脚本——可脱离 LLM 独立运行且结果可复现（独立性自成一条，不与机械核对耦合），脚本崩溃或两次运行结果不一致时该次 S8 判定作废（blocking）；命中带 file:line 且经 AC-9 机械核对；#263 dogfood 三条有效命中（专用 APP vs AG-1、每 PR 审计 vs ADR-0067 频率、holdout 强制 vs DECISION-02 隔离）作为首批实跑记录存档；LLM 不可用导致道闸跳过时须显式留痕（跳过原因，与无命中、未运行为三类 schema 互异工件）；运行时证据：对一张已知含 S6 重复问题的卡产出含 file:line 的评论 + 一次真实 S8 集合比对命中的落盘记录 + 一张无问题卡的"无命中"落盘记录
 - id: AC-17
   given: T-14 条款实施
   when: spec PR 或实现 PR 提交
-  then: spec PR 必须含 suite/（至少一个非空测试文件且含有效断言），缺失即合并阻断（显式负向断言）；实现 PR 带卡必须跑卡对应测试 + 已注册 holdout 测试且通过；开卡时规划 agent 必须设计并登记 holdout 测试（缺失即阻断）；holdout 注册主体为验证者 APP（可挂载 holdout 仓；ADR-0056 DECISION-02 修订合并前本条不得实施），机器校验 PR 引用的 holdout hash 与已注册记录一致；非验证者 APP 写入 holdout 内容被拒（覆盖跨仓场景）；运行时证据：缺 suite/ 的 spec PR 被阻断的红记录 + 跨仓写入被拒的 403 记录
+  then: spec PR 必须含 suite/（至少一个非空测试文件且含有效断言），缺失即合并阻断（显式负向断言）；实现 PR 带卡必须跑卡对应测试 + 已注册 holdout 测试且通过；开卡时规划 agent 必须设计并登记 holdout 测试（缺失即阻断）；holdout 注册主体为验证者 APP（可挂载 holdout 仓；ADR-0056 DECISION-02 修订合并前本条不得实施），机器校验 PR 引用的 holdout hash 与已注册记录一致（复用 ADR-0068 揭封 hash 校验机制，仅新增验证者 APP 身份面）；非验证者 APP 写入 holdout 内容被拒（覆盖跨仓场景）；运行时证据：缺 suite/ 的 spec PR 被阻断的红记录 + 跨仓写入被拒的 403 记录
 - id: AC-18
   given: 验证者 APP 设立
   when: 测试相关内容修改
-  then: CODEOWNER = 验证者 APP + 人类，开发 agent 修改测试被拒；g060 等价关卡落地治理仓（specs/*/suite/** 按 IR 分片锁定），非验证者 APP/owner 改测试 exit 2 且自动开 issue 路由 owner 裁决（裁决闭环：TTL 内处置 + dead-man 提醒）；ADR-0061 同步修订以为验证者 APP 定义合法写豁免通道；AG-1 修订 ADR 合并前出现验证者 APP 实施证据即判红（时序断言）；实现 agent 发现验收测试/AC 语义有误时经结构化上报 issue（引用 test/AC 编号）路由 owner，TTL 内裁决（dead-man 提醒），裁决前暂停该卡相关合并——这是"发现错误"的合法上报通道，与防篡改阻断互补；运行时证据：验证者 APP 安装与权限范围查询记录；开发 APP 有效授权令牌改测试被拒的 403 日志（覆盖治理仓与 holdout 仓两场景）；真实 exit 2 阻断日志 + 阻断后自动开 issue 的记录
+  then: CODEOWNER = 验证者 APP + 人类，开发 agent 修改测试被拒；g060 关卡落地治理仓（引用 ADR-0061 g060 语义扩展至 specs/*/suite/** 按 IR 分片锁定，非新设实现），非验证者 APP/owner 改测试 exit 2 且自动开 issue 路由 owner 裁决（裁决闭环：终态机器可核——采纳/驳回+证据引用，TTL 内处置 + dead-man 提醒）；ADR-0061 同步修订以为验证者 APP 定义合法写豁免通道（该修订合并前验证者 APP 无写豁免）；AG-1 修订 ADR 合并前出现验证者 APP 实施证据即判红（时序断言）；实现 agent 发现验收测试/AC 语义有误时经结构化上报 issue（引用 test/AC 编号）路由 owner，TTL 内裁决（dead-man 提醒），裁决前暂停该卡相关合并——这是"发现错误"的合法上报通道，与防篡改阻断互补；运行时证据：验证者 APP 安装与权限范围查询记录；开发 APP 有效授权令牌改测试被拒的 403 日志（覆盖治理仓与 holdout 仓两场景）；真实 exit 2 阻断日志 + 阻断后自动开 issue 的记录
 - id: AC-19
   given: 条款入册
   when: 本 spec 实施
-  then: testing.yaml 新增 T-14（card_bound_test_required）与 T-15（intent_backstop），GOVERNANCE.yaml agent_runtime 新增 AR-10（red_team_veto），REPOS.yaml key_paths 补登 .github 的 specs/ 与 CI-Workflows 的 pipeline/（GM-4 申报）；transitions.yaml 登记 T5/T6 转移（T6 guard 含 survived 审计记录要求）；drift-check §18 断言随 ADR-0056 修订同步更新；llm-verifier 依赖钉点（pip+lock）与 org-required-workflows 钉点改 commit SHA；出现第三个 App 身份（验证者 APP 之外）时执行逻辑判红（负向断言）；新条款必须被至少一处执行逻辑引用（死条款判失败）；运行时证据：条款 diff + 机器检查读取新条款的实测（执行层恒绿不算）
+  then: testing.yaml 新增 T-14（card_bound_test_required）与 T-15（intent_backstop），GOVERNANCE.yaml agent_runtime 新增 AR-10（red_team_veto），REPOS.yaml key_paths 补登 .github 的 specs/ 与 CI-Workflows 的 pipeline/（GM-4 申报）；transitions.yaml 登记 T5/T6 转移（T6 guard 含 survived 审计记录要求）；drift-check §18 断言随 ADR-0056 修订同步更新；llm-verifier 依赖钉点（pip+lock）与 org-required-workflows 钉点改 commit SHA；出现第三个 App 身份（验证者 APP 之外）时执行逻辑判红（负向断言）；新条款必须被至少一处执行逻辑引用（死条款判失败）；运行时证据：条款 diff + 机器检查读取新条款的实测（执行层恒绿不算）+ llm-verifier lock 文件 diff 与 org-required-workflows 的 commit SHA 变更记录
 - id: AC-20
   given: 一张真实卡
   when: 走完完整流程
-  then: 从 ir-signed→spec→redteam→（Veto 一次→修复→survived）→wave-planned→认领→PR 绑定卡测试→合并全程；Veto 理由与修复 diff 经机械核对证明修复确实回应了该理由；"Veto 过一次"不构成可复用资历，每卡红队守门相互独立；运行时证据：全程 issue 时间线 + 各 check run 链接链 + 人类对端到端证据链的签收抽检记录（DECISION-05 第三层）
+  then: 从 ir-signed→spec→redteam→（Veto 一次→修复→survived）→wave-planned→认领→PR 绑定卡测试→合并全程；Veto 理由与修复 diff 经机械核对证明修复确实回应了该理由；"Veto 过一次"不构成可复用资历，每卡红队守门相互独立；运行时证据：全程 issue 时间线 + 各 check run 链接链 + 一条真实 verdict=insufficient 阻断记录（负向事件硬谓词，无 Veto 发生的全程不算）+ 人类对端到端证据链的签收抽检记录（DECISION-05 第三层）
 blastRadius:
 - repo: .github
   path: governance/transitions.yaml
@@ -146,7 +148,7 @@ nonGoals:
 - **证据核对铁律**：核对由代码执行、基准为运行时刻真实工件、基准版本写入报告；裁判（人或 LLM）凭记忆/转述比对一律无效。
 
 ### INV-04
-- **反摆拍常驻**：关键反摆拍断言（golden 回归、无绕过转移断言、机械核对、配置面校验）逐 run 常驻 CI，非一次性验收动作；一次性演示不构成合规证据。
+- **反摆拍常驻 + fail-closed**：关键反摆拍断言（golden 回归、无绕过转移断言、机械核对、配置面校验）逐 run 常驻 CI，非一次性验收动作；一次性演示不构成合规证据。判定工具链任何环节异常（LLM 不可用、核对脚本崩溃、golden 加载失败、配置面枚举失败、无 verdict、探测失败）一律判红或转 needs-human——不存在"未定义默认绿"分支（fail-closed 总原则）。
 
 ## BEH 行为
 
