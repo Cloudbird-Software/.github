@@ -160,11 +160,16 @@ llm_channel_account() {
       fi
       return 0
     fi
+    # 记录位于 metering-ledger 分支根（ledger-sync.sh 经 contents API 写回，路径=文件名）；
+    # 旧路径 pipeline/metering/ 下不会有 records——原 glob 必失败 INFRA（#258 根因）。
+    # strip-components=1 剥除 tarball 顶层 <repo>-<sha>/ 后落到提取根 = 记录文件。
     if ! tar -xzf "$led.tar.gz" -C "$led" --strip-components=1 --wildcards \
-         "*/$LT_M_CODE/records-*.jsonl" 2>/dev/null; then
-      printf 'INFRA\tmetering 账本 tar 解包失败（strip-components=1 + %s/records-*.jsonl）\n' "$LT_M_CODE"
+         "*-records-*.jsonl" "records-*.jsonl" 2>/dev/null; then
+      printf 'INFRA\tmetering 账本 tar 解包失败（strip-components=1 + records-*.jsonl）\n'
       return 0
     fi
+    # 落盘后如有子目录（旧形态兼容），统一挪到提取根供 aggregate --dir 扫描。
+    find "$led" -mindepth 2 -name "records-*.jsonl" -exec mv -t "$led" {} + 2>/dev/null || true
   fi
   if [[ -z "$mpy" || ! -f "$mpy" ]]; then
     printf 'INFRA\t归账引擎不可用（COST_LLM_METERING_PY=%s——cost-check.yml 须 sparse checkout %s 的 %s）\n' "$mpy" "$LT_M_REPO" "$LT_M_CODE"
