@@ -1,6 +1,6 @@
 # 验证者 APP（verifier-app）创建与安装 Runbook
 
-> 关联：ISSUE-263 W2-C1（.github#273）、ADR-0080、ADR-0056 DECISION-02、ADR-0061、AG-1 修订。  
+> 关联：ISSUE-263 W2-C1（.github#273）、ADR-0076、ADR-0080、ADR-0081、ADR-0056 DECISION-02、ADR-0061、AG-1 修订。  
 > **时序闸**：AG-1/ADR-0056/ADR-0061 修订 ADR 全部合并前，不得实施安装（W2-C1 AC-2）。
 
 ## 1. 为什么必须 owner 手动创建
