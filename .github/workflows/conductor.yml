@@ -20,6 +20,7 @@ on:
   workflow_run:
     workflows: [adversary]
     types: [completed]
+    branches: [main]
 
 # INV-09：每 issue 一个 concurrency group、cancel-in-progress=false——重复投递
 # 排队串行而非并发竞态；幂等由 from_state 匹配承担（重复事件=当前态已变=no-op）。
