@@ -26,7 +26,7 @@ domains:
       - id: BP-2
         intent: "合并前置：双轨 required check = gate（本地聚合）+ org-gate（中心仓钉点审判，PR 改不到审判源——P3-1/ADR-0046；观察期双轨，一致率 100% 后退役本地轨须新 ADR）"
         strength: enforced
-        platform: {github: {mechanism: ruleset-required-status, context: "gate+org-gate", central_pin: "org-required-workflows ruleset → CI-Workflows@refs/tags/v1.4.0:.github/workflows/org-gate.yml"}}
+        platform: {github: {mechanism: ruleset-required-status, context: "gate+org-gate", central_pin: "org-required-workflows ruleset → CI-Workflows@2d368c29f170eab43b83f6b866f76fad3774fba9:.github/workflows/org-gate.yml"}}
         verify: {method: "drift-check §1（ruleset 文本对账）+ §15（钉点 commit 绑定）", frequency: hourly}
       - id: BP-3
         intent: "发布标签 v* 不可删除/覆盖"
@@ -187,6 +187,11 @@ domains:
         intent: "可信交付=失败可见：agent 内 guardrails → test-author 出题（owner 已批验收示例→冻结测试树）→ verifier 机制判卷（required check）→ persistent 团队外部审计（escape review/控制测试）→ 平台防线兜底；builder 永不自我信任；意图保真靠 owner 批验收示例（intent ratification）"
         strength: enforced
         validate: agent-registry/scripts/validate.py
+      - id: AR-10
+        intent: "红队守门 Veto 强制力：红队审计 verdict=insufficient 时状态变为 needs-human 且无法进入 wave-planned；specs/** 路径 PR 必须包含 adversary check；开发实现路径 PR 按 EXPECTED_SKIP 模式条件化豁免"
+        strength: enforced
+        platform: {github: {mechanism: ruleset-required-status, context: "adversary", workflow: "CI-Workflows/.github/workflows/adversary*.yml"}}
+        verify: {method: adversary-run, on: PR}
 
 flows:
   governance_change:

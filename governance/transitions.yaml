@@ -50,6 +50,18 @@ transitions:
     to_state: ready
     action: noop
     guard: "sender_role in ['owner', 'agent']"
+  - id: T5  # spec PR 合并 + suite 就绪后进入红队阶段（ISSUE-263 AC-12 / ADR-0049）
+    from_state: spec
+    event: label:state:redteam
+    to_state: redteam
+    action: noop
+    guard: "sender_role in ['owner', 'agent'] and 'type:intent' in label_set"
+  - id: T6  # redteam 产出 survived 审计记录后进入波次规划（ISSUE-263 AC-12 / ADR-0079）
+    from_state: redteam
+    event: label:state:wave-planned
+    to_state: wave-planned
+    action: noop
+    guard: "sender_role == 'agent' and 'adversary:survived' in label_set"
   # ---------- Bug 流（W3-C1 .github#218 / ADR-0064，宪法 §3）----------
   # 执行者：CI-Workflows pipeline/bugflow（bug-reproduce.yml 以 App 身份写标签）。
   # conductor 对 label:bug/label:reproduced 等非 state 标签事件静默 no-op——
