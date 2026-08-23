@@ -8,3 +8,6 @@
 /profile/**            @randypanding
 /CODEOWNERS            @randypanding
 /.github/**            @randypanding
+# ADR-0061 g060 扩展（ISSUE-263 W2-C2）：specs/*/suite/** 按 IR 分片锁定
+# 写身份仅限 verifier-app[bot] + owner；非法修改由 scripts/g060-lock.sh exit 2 阻断
+/specs/*/suite/**      @verifier-app[bot] @randypanding
