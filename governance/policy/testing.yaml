@@ -27,9 +27,9 @@ active_now:
      policy: "本文件 diff_coverage 段（ADR-0037）", risk: fake_tests}
   - {id: T-13, name: test_integrity, tool: "CI-Workflows test-integrity.yml（钉 hash）",
      placement: gate, rule: "测试篡改四形态直接红（ADR-0035）", note: "P2-1 第一必需门"}
-  - {id: T-14, name: card_bound_test_required, tool: "conductor/verdict 卡绑定测试 + g060-lock.sh",
-     placement: gate, rule: "实现 PR 绑定卡后自动走卡对应测试集与已注册 holdout 测试；spec PR 须含 suite/（至少一个非空测试文件且含有效断言）；specs/*/suite/** 的 CODEOWNER = verifier-app[bot] + owner，非授权身份修改由 g060-lock.sh exit 2 阻断并开 issue 路由 owner 裁决",
-     note: "ISSUE-263 AC-17 / AC-18 / ADR-0061 / ADR-0068 / ADR-0080"}
+  - {id: T-14, name: card_bound_test_required, tool: "conductor/verdict 卡绑定测试",
+     placement: gate, rule: "实现 PR 绑定卡后自动走卡对应测试集与已注册 holdout 测试；spec PR 须含 suite/（至少一个非空测试文件且含有效断言）",
+     note: "ISSUE-263 AC-17 / ADR-0061 / ADR-0068"}
   - {id: T-15, name: intent_backstop, tool: "CI-Workflows pipeline/adversary/intent-backstop.sh",
      placement: gate, rule: "红队顺带做意图层探索 S6-S8，命中带证据报人裁决；无命中产出落盘记录；白卷不进入失败/锁卡分支",
      note: "ISSUE-263 AC-16 / ADR-0067 / ADR-0079"}
@@ -121,31 +121,6 @@ test_integrity:
     non_source: '^(\.github/|docs/|governance/)|(^|/)([^/]*\.md)$|(^|/)(LICENSE|CODEOWNERS|NOTICE|\.gitignore|\.gitattributes)$'
   fail_closed: true
 
-# ---- g060 guard（ADR-0061 扩展 / ISSUE-263 W2-C2）------------------------
-# 机器可执行真源：.github scripts/g060-lock.sh 与 scripts/g060-escalation.py。
-# 锁定 specs/*/suite/**（按 IR 分片的测试/验收路径），写身份仅限 verifier-app[bot]
-# 与 owner 人类账号；非法修改触发 exit 2 并自动开 issue 路由 owner 裁决，裁决终态
-# 须机器可核（adopted/rejected + 证据引用），超 TTL 触发 dead-man 提醒。
-g060_guard:
-  policy_id: [T-14, T-15]
-  lock_path_pattern: "specs/*/suite/**"
-  codeowners: ["@verifier-app[bot]", "@randypanding"]
-  authorized_writers:
-    - verifier-app[bot]
-    - randypanding
-  block_exit_code: 2
-  enforcement_tools:
-    lock: "scripts/g060-lock.sh"
-    escalation: "scripts/g060-escalation.py"
-    cross_repo_bridge: "CI-Workflows/scripts/g060-bridge.sh"
-  escalation:
-    ttl_hours: 72
-    deadman_interval_hours: 24
-    required_final_states: [adopted, rejected]
-    evidence_required: true
-    issue_assignee: randypanding
-  ir_card: "Cloudbird-Software/.github#274"
-
 # ---- flaky_governance 参数（ADR-0043 / .github #94，P2-9）----------------
 # 机器可执行真源：CI-Workflows scripts/flaky-retry.sh 拉取本节（fail-closed）。
 # 语义约束：重试必须入账（无声重试=作弊）；仅"失败→重试通过"转移记 flaky 事件
@@ -157,3 +132,28 @@ flaky_governance:
   flaky_window_days: 30        # flaky 事件统计窗口
   flaky_threshold: 3           # 窗口内事件 ≥ 此值 → 隔离候选（自动开 issue 人确认）
   quarantine_max_days: 30      # 隔离条目最长有效期（到期回炉）
+
+# ---- g060 治理仓锁定（ADR-0061 / ADR-0081 / ISSUE-263 W2-C2, AC-18）----------------
+# specs/*/suite/** 按 IR 分片锁定；CODEOWNER = 验证者 APP + 人类 owner（CODEOWNERS）。
+# 执行：.github/scripts/g060-lock.sh（PR gate 调起，exit 2 阻断 + 自动开裁决 issue）+
+#       .github/scripts/g060-escalation.py（裁决闭环：终态机器可核 + TTL + dead-man）。
+# 跨仓桥接：CI-Workflows scripts/g060-bridge.sh（被治理仓/CI-Workflows 互调）。
+# 本节声明锁定路径模式与授权身份集；执行逻辑以 scripts/ 为准。
+# 本节属 C1 路径——锁定路径模式/授权身份集变更必须走 ADR。
+g060:
+  policy_id: g060-governance-lock
+  placement: gate
+  lock_path_pattern: "specs/*/suite/**"
+  authorized_actors:
+    - owner: randypanding          # 人类 owner
+    - app: verifier-app            # 验证者 APP（ADR-0076/ADR-0080，仅测试/验证路径写权）
+  fail_action: exit2_and_escalate   # 非授权改测试 → exit 2 + 开裁决 issue
+  ttl_hours: 72                    # 裁决 TTL；过期 dead-man 提醒
+  escalation:
+    adopt_cmd: "/g060-adopt"
+    reject_cmd: "/g060-reject"
+    final_state_dir: ".artg060"
+  ir_card: "Cloudbird-Software/.github#274"
+  adr_ref: "ADR-0061 / ADR-0081"
+  ac_ref: "ISSUE-263 AC-18"
+  note: "验证者 APP 在 ADR-0081 合并前无写豁免；合并前仅 owner 可解锁"

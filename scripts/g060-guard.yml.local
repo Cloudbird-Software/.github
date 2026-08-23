@@ -1,0 +1,31 @@
+# g060-guard.yml —— g060 治理仓锁定 workflow（ISSUE-263 W2-C2 / ADR-0061）
+#
+# ⚠️ 阻塞：当前 cloudbrid-agent App 无 workflows 权限（ADR-0045），向上游
+# .github/workflows/ 推会失败。本文件本地保留，待权限到位后移至
+# .github/workflows/g060-guard.yml 并提交。
+#
+# 语义：PR 涉及 specs/*/suite/** 时触发 g060-lock.sh；非授权身份 exit 2 阻断 +
+# 自动开裁决 issue。与 CI-Workflows scripts/g060-bridge.sh 互补（跨仓场景）。
+name: g060-guard
+on:
+  pull_request:
+    paths:
+      - "specs/*/suite/**"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  g060:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: g060 lock check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          G060_PR: ${{ github.event.pull_request.number }}
+          G060_ACTOR: ${{ github.actor }}
+        run: bash scripts/g060-lock.sh --pr "$G060_PR" --repo "$GITHUB_REPOSITORY" --actor "$G060_ACTOR"

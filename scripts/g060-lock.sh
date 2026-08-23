@@ -1,168 +1,147 @@
 #!/usr/bin/env bash
-# g060-lock.sh —— ADR-0061 g060 语义扩展至治理仓（ISSUE-263 W2-C2）
+# g060-lock.sh —— g060 落地治理仓（ISSUE-263 W2-C2 / ADR-0061 / ADR-0081）
 #
-# 锁定范围：specs/*/suite/**（按 IR 分片的测试/验收路径）。
-# 合法写身份：owner 人类账号 + verifier-app[bot]；其余身份修改 → exit 2，
-# 并自动开 issue 路由 owner 裁决（裁决闭环由 scripts/g060-escalation.py 承接）。
+# 对 specs/*/suite/** 按 IR 分片锁定；非验证者 APP/owner 改测试 exit 2，
+# 并自动开 issue 路由 owner 裁决（终态机器可核 + TTL + dead-man）。
 #
 # 用法：
-#   bash scripts/g060-lock.sh [--actor <actor>] [--pr <number>] [--base <ref>]
-#                             [--owner <owner>] [--verifier <app-slug>]
-#                             [--paths <csv>]
-#   环境变量（CI 自动注入优先）：
-#     GH_REPO / GITHUB_REPOSITORY, GITHUB_ACTOR, GITHUB_EVENT_PATH,
-#     GITHUB_BASE_REF, GH_TOKEN / GITHUB_TOKEN, G060_PATHS
+#   bash scripts/g060-lock.sh [--pr <number>] [--repo <owner/repo>] \
+#                             [--actor <actor>] [--owner <owner>] \
+#                             [--verifier <app-slug>] [--base <sha>] [--head <sha>]
+# 环境变量：GH_TOKEN / GITHUB_TOKEN（须对目标仓 issues:write + pull_requests:read）
 #
-# 退出码：0=放行 / 2=阻断（g060 非法修改）/ 1=脚本自身异常
-
+# 退出码：0=无锁定路径变更 或 授权身份 | 1=参数错误 | 2=非授权改测试（阻断 + 开 issue）
 set -euo pipefail
 
-REPO="${GH_REPO:-${GITHUB_REPOSITORY:-}}"
+REPO="${G060_REPO:-${GITHUB_REPOSITORY:-Cloudbird-Software/.github}}"
+PR_NUMBER="${G060_PR:-}"
 ACTOR="${G060_ACTOR:-${GITHUB_ACTOR:-}}"
 OWNER="${G060_OWNER:-randypanding}"
 VERIFIER_SLUG="${G060_VERIFIER:-verifier-app}"
-VERIFIER_ACTOR="${VERIFIER_SLUG}[bot]"
-LOCK_PATTERN='specs/*/suite/*'
-IR_CARD="Cloudbird-Software/.github#274"
+BASE_SHA="${G060_BASE:-}"
+HEAD_SHA="${G060_HEAD:-}"
+DRY_RUN=0
 
-PR_NUMBER=""
-BASE_REF="${GITHUB_BASE_REF:-main}"
-HEAD_REF="${GITHUB_HEAD_REF:-HEAD}"
-G060_PATHS="${G060_PATHS:-}"
-SHOW_HELP=0
+VERIFIER_ACTOR="${VERIFIER_SLUG}[bot]"
+IR_CARD="Cloudbird-Software/.github#274"
+TTL_HOURS=72
 
 usage() {
   cat <<EOF
 用法: $(basename "$0") [选项]
-  --actor <actor>      触发者 GitHub login（默认：\$GITHUB_ACTOR）
-  --pr <number>        PR 编号；未提供时尝试从 \$GITHUB_EVENT_PATH 解析
-  --base <ref>         diff base ref（默认：\$GITHUB_BASE_REF / main）
-  --head <ref>         diff head ref（默认：\$GITHUB_HEAD_REF / HEAD）
-  --paths <csv>        直接传入变更路径（逗号分隔），用于测试/桥接
-  --owner <owner>      人类 owner（默认：randypanding）
-  --verifier <slug>    验证者 App slug（默认：verifier-app）
-  -h, --help           显示本帮助
+  --pr <number>               PR 编号（与 --base/--head 二选一）
+  --repo <owner/repo>         目标仓（默认：$GITHUB_REPOSITORY）
+  --actor <actor>             触发者 GitHub login（默认：\$GITHUB_ACTOR）
+  --owner <owner>             人类 owner（默认：randypanding）
+  --verifier <slug>           验证者 App slug（默认：verifier-app）
+  --base <sha>                对比基准 SHA（无 --pr 时使用）
+  --head <sha>                对比目标 SHA（无 --pr 时使用）
+  --dry-run                   仅报告，不开 issue / 不 exit 2
+  -h, --help                  显示本帮助
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --actor) ACTOR="$2"; shift 2 ;;
     --pr) PR_NUMBER="$2"; shift 2 ;;
-    --base) BASE_REF="$2"; shift 2 ;;
-    --head) HEAD_REF="$2"; shift 2 ;;
-    --paths) G060_PATHS="$2"; shift 2 ;;
+    --repo) REPO="$2"; shift 2 ;;
+    --actor) ACTOR="$2"; shift 2 ;;
     --owner) OWNER="$2"; shift 2 ;;
     --verifier) VERIFIER_SLUG="$2"; VERIFIER_ACTOR="${VERIFIER_SLUG}[bot]"; shift 2 ;;
-    -h|--help) SHOW_HELP=1; shift ;;
+    --base) BASE_SHA="$2"; shift 2 ;;
+    --head) HEAD_SHA="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "错误：未知参数 $1" >&2; usage >&2; exit 1 ;;
   esac
 done
 
-[[ $SHOW_HELP -eq 1 ]] && { usage; exit 0; }
-
 if [[ -z "$ACTOR" ]]; then
-  echo "错误：无法确定触发者身份（--actor 或 \$GITHUB_ACTOR）" >&2
-  exit 1
+  echo "错误：--actor 或 \$GITHUB_ACTOR 未设置" >&2; exit 1
 fi
 
 is_authorized() {
-  local actor="$1"
-  [[ "$actor" == "$OWNER" || "$actor" == "$VERIFIER_ACTOR" ]]
+  [[ "$1" == "$OWNER" || "$1" == "$VERIFIER_ACTOR" ]]
 }
 
-# ---------- 变更文件探测 ----------
-# 优先级：--paths/G060_PATHS > --pr > GITHUB_EVENT_PATH > git diff base..head
-find_changed_files() {
-  if [[ -n "$G060_PATHS" ]]; then
-    printf '%s\n' "$G060_PATHS" | tr ',' '\n'
-    return
-  fi
-  local files=""
-  if [[ -n "$PR_NUMBER" ]]; then
-    files=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json files --jq '.files[].path' 2>/dev/null || true)
-  elif [[ -n "${GITHUB_EVENT_PATH:-}" && -f "$GITHUB_EVENT_PATH" ]]; then
-    PR_NUMBER=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || true)
-    if [[ -n "$PR_NUMBER" ]]; then
-      files=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json files --jq '.files[].path' 2>/dev/null || true)
-    fi
-  fi
-  if [[ -z "$files" ]]; then
-    # 本地/非 PR 场景：用 git diff；尽力拉取 base
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      git fetch origin "$BASE_REF" >/dev/null 2>&1 || true
-      files=$(git diff --name-only "origin/${BASE_REF}...${HEAD_REF}" 2>/dev/null || true)
-    fi
-  fi
-  printf '%s\n' "$files"
-}
-
-matches_lock_pattern() {
-  local path="$1"
-  # 只匹配 specs/<ir>/suite/ 下任意文件（单层 IR 分片）
-  case "$path" in
-    specs/*/suite/*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+# ---------- 收集变更文件 ----------
+FILES=()
+if [[ -n "$PR_NUMBER" ]]; then
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && FILES+=("$f")
+  done < <(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only 2>/dev/null || true)
+elif [[ -n "$BASE_SHA" && -n "$HEAD_SHA" ]]; then
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && FILES+=("$f")
+  done < <(gh api "repos/$REPO/compare/$BASE_SHA...$HEAD_SHA" --jq '.files[].filename' 2>/dev/null || true)
+else
+  # 回退：工作树 diff HEAD
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && FILES+=("$f")
+  done < <(git diff --name-only HEAD 2>/dev/null || true)
+fi
 
 LOCKED_FILES=()
-while IFS= read -r f; do
-  [[ -z "$f" ]] && continue
-  if matches_lock_pattern "$f"; then
-    LOCKED_FILES+=("$f")
-  fi
-done < <(find_changed_files)
+for f in "${FILES[@]}"; do
+  case "$f" in
+    specs/*/suite/*) LOCKED_FILES+=("$f") ;;
+  esac
+done
 
 if [[ ${#LOCKED_FILES[@]} -eq 0 ]]; then
-  echo "g060-lock: 未涉及 specs/*/suite/**，无需锁定检查"
+  echo "g060: 未涉及 specs/*/suite/** 变更，放行。"
   exit 0
 fi
 
-if is_authorized "$ACTOR"; then
-  echo "g060-lock: 触发者 $ACTOR 为授权身份（owner/verifier-app），放行以下锁定路径："
-  printf '  - %s\n' "${LOCKED_FILES[@]}"
-  exit 0
-fi
-
-# ---------- 非法修改：开 issue 路由 owner 裁决 ----------
-echo "::error::g060-lock: 触发者 $ACTOR 非授权身份，修改了锁定路径："
+echo "g060: 检测到 specs/*/suite/** 变更 ${#LOCKED_FILES[@]} 个文件："
 printf '  - %s\n' "${LOCKED_FILES[@]}" >&2
 
-PR_URL=""
-if [[ -n "$PR_NUMBER" ]]; then
-  PR_URL="https://github.com/${REPO}/pull/${PR_NUMBER}"
+if is_authorized "$ACTOR"; then
+  echo "g060: 触发者 $ACTOR 为授权身份（owner=$OWNER 或 verifier=$VERIFIER_ACTOR），放行。"
+  exit 0
 fi
 
-ISSUE_BODY=$(cat <<EOF
-> 由 g060-lock.sh 自动生成 | ADR-0061 g060 扩展 | 卡：${IR_CARD}
+echo "::error::g060: 触发者 $ACTOR 非授权身份，修改了 specs/*/suite/** （ADR-0061 g060 扩展）："
+printf '  - %s\n' "${LOCKED_FILES[@]}" >&2
 
-触发者 \`$ACTOR\` 尝试修改以下按 IR 分片的锁定测试路径，但非 owner / verifier-app 授权身份：
+# ---------- 开裁决 issue ----------
+PR_URL="${PR_NUMBER:+"https://github.com/${REPO}/pull/${PR_NUMBER}"}"
+PR_REF="${PR_URL:-"base=${BASE_SHA} head=${HEAD_SHA}"}"
+
+ISSUE_BODY=$(cat <<EOF
+> 由 .github/scripts/g060-lock.sh 自动生成 | ADR-0061 g060 扩展 | 卡：${IR_CARD}
+
+触发者 \`$ACTOR\` 在 ${REPO} 修改了以下按 IR 分片的锁定测试路径：
 $(printf '%s\n' "${LOCKED_FILES[@]}" | sed 's/^/- `/; s/$/`/')
 
-${PR_URL:+关联 PR：$PR_URL}
+关联：${PR_REF}
 
-## 请 owner 裁决
-- \`/g060-adopt <证据引用>\`：采纳变更（终态机器可核）。
-- \`/g060-reject <证据引用>\`：驳回变更（终态机器可核）。
-- 无裁决且超过 TTL（72h）将触发 dead-man 提醒。
-
-裁决须附带证据引用（file:line 或 PR 行级链接），由 scripts/g060-escalation.py 做机器可核的终态校验。
+## 请 owner 裁决（终态机器可核）
+- \`/g060-adopt <证据引用>\`：采纳变更（owner 评论即写入终态）。
+- \`/g060-reject <证据引用>\`：驳回变更（owner 评论即写入终态）。
+- TTL ${TTL_HOURS}h 内无裁决将触发 dead-man 提醒（butler-deadman-trip）。
+- 裁决前该卡相关合并暂停（conductor 侧经 state:needs-human 锁卡）。
 EOF
 )
 
-ISSUE_TITLE="g060 blocked: unauthorized change to specs/*/suite/** by ${ACTOR}"
+ISSUE_TITLE="g060 blocked: unauthorized change to specs/*/suite/** by ${ACTOR} on ${REPO}"
 
-# 标签仅使用治理标签集中已存在的 state:needs-human；避免依赖可能不存在的 g060 专用标签
-if gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$ISSUE_BODY" --assignee "$OWNER" --label state:needs-human >/dev/null 2>&1; then
-  echo "::error::已创建裁决 issue 并 assign 给 $OWNER"
-else
-  # 标签不存在时降级为无标签创建
-  if gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$ISSUE_BODY" --assignee "$OWNER" >/dev/null 2>&1; then
-    echo "::warning::已创建裁决 issue（无 state:needs-human 标签），assign 给 $OWNER" >&2
-  else
-    echo "::error::g060-lock: 创建裁决 issue 失败" >&2
-  fi
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "::warning::[dry-run] 将开裁决 issue：$ISSUE_TITLE"
+  echo "$ISSUE_BODY"
+  exit 2
 fi
 
+ISSUE_URL=""
+if gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$ISSUE_BODY" \
+   --assignee "$OWNER" --label state:needs-human >/dev/null 2>&1; then
+  ISSUE_URL="（state:needs-human 标签已加）"
+elif gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$ISSUE_BODY" \
+   --assignee "$OWNER" >/dev/null 2>&1; then
+  ISSUE_URL="（无 state:needs-human 标签）"
+else
+  echo "::error::g060: 在 ${REPO} 创建裁决 issue 失败（仍 exit 2 阻断）" >&2
+fi
+
+echo "::error::g060: 已阻断并开裁决 issue ${ISSUE_URL}，assign 给 $OWNER，TTL ${TTL_HOURS}h" >&2
 exit 2
