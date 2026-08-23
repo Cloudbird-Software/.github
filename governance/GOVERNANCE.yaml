@@ -91,7 +91,7 @@ domains:
   agent_identity:
     measures:
       - id: AG-1
-        intent: "agent 写仓库唯一身份 = App(cloudbrid-agent)；权限 contents/issues/PRs:write，无 workflows/administration"
+        intent: "开发身份唯一（cloudbrid-agent）+ 验证者身份独立（新设验证者 APP，仅测试/验证路径写权）"
         strength: enforced
         platform: {github: {mechanism: github-app, id: 4632704, state: expected-state.json#github_app}}
         verify: {method: drift-check, frequency: daily}
