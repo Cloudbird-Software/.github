@@ -61,6 +61,13 @@ cost:
       role: verifier     # metering 记录 role 字段过滤值
       fail_closed_action: void_and_escalate
       void_reason: "token 账与 metering 偏差超阈值（相对>5% 或绝对>50 tokens）——作废转人工"
+    # 成本旋钮（BUDGET-01 / AC-11）：K 与 pivots 为暴露的成本旋钮，降档须留痕且
+    # 不得改动判定语义与阈值。默认取保守高值（ASSUMPTION-03）。
+    cost_knobs:
+      k_default: 3          # 每 criterion 重复评估次数
+      pivots_default: 1     # 成本旋钮 pivots（记录用）
+      downgrade_requires_log: true
+      downgrade_preserves_semantic: true
 
 circuit_breaker:
   # 熔断标志：org Actions 变量（visibility=all，全仓 workflow/agent 可读）

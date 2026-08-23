@@ -16,10 +16,7 @@ on:
   # W4-C1：跨仓触发面——adversary 完成 survived 后经 repository_dispatch 通知 conductor
   repository_dispatch:
     types: [conductor]
-  # W4-C1：adversary workflow_run 完成后触发 T6 评估
-  workflow_run:
-    workflows: [adversary]
-    types: [completed]
+  # W4-C1：adversary 完成后经 repository_dispatch 触发 T6 评估（zizmor: workflow_run 不安全）
 
 # INV-09：每 issue 一个 concurrency group、cancel-in-progress=false——重复投递
 # 排队串行而非并发竞态；幂等由 from_state 匹配承担（重复事件=当前态已变=no-op）。
