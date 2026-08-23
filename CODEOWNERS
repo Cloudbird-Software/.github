@@ -8,3 +8,7 @@
 /profile/**            @randypanding
 /CODEOWNERS            @randypanding
 /.github/**            @randypanding
+# g060 测试锁定（ADR-0061 / ISSUE-263 AC-18）：specs/*/suite/** 按 IR 分片锁定，
+# CODEOWNER = 验证者 APP + owner 人类账号。开发 agent 经既有 APP 改测试被拒，
+# 仅 verifier-app 与 owner 拥有测试路径写权。
+/specs/*/suite/**      @randypanding verifier-app[bot]

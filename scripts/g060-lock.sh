@@ -1,168 +1,110 @@
 #!/usr/bin/env bash
-# g060-lock.sh —— ADR-0061 g060 语义扩展至治理仓（ISSUE-263 W2-C2）
+# g060-lock.sh —— g060 测试分片锁定（ADR-0061 语义扩展 / ISSUE-263 AC-18 / W2-C2 .github#274）
 #
-# 锁定范围：specs/*/suite/**（按 IR 分片的测试/验收路径）。
-# 合法写身份：owner 人类账号 + verifier-app[bot]；其余身份修改 → exit 2，
-# 并自动开 issue 路由 owner 裁决（裁决闭环由 scripts/g060-escalation.py 承接）。
+# 目标：specs/*/suite/** 按 IR 分片锁定。非 verifier-app/owner 身份修改测试时
+# exit 2（阻断），并自动开 issue 路由 owner 裁决。这是"开发 agent 经既有 APP
+# 改测试被拒"的机器执行层。
 #
-# 用法：
-#   bash scripts/g060-lock.sh [--actor <actor>] [--pr <number>] [--base <ref>]
-#                             [--owner <owner>] [--verifier <app-slug>]
-#                             [--paths <csv>]
-#   环境变量（CI 自动注入优先）：
-#     GH_REPO / GITHUB_REPOSITORY, GITHUB_ACTOR, GITHUB_EVENT_PATH,
-#     GITHUB_BASE_REF, GH_TOKEN / GITHUB_TOKEN, G060_PATHS
+# 身份判定（fail-closed）：
+#   - 允许： verifier-app[bot]（slug=verifier-app，contents:write 仅测试路径）
+#   - 允许： owner 人类账号（org owner，由 G060_OWNER 变量指定）
+#   - 拒绝： 其他一切身份（cloudbrid-agent[bot]、fork PAT、未知）→ exit 2
 #
-# 退出码：0=放行 / 2=阻断（g060 非法修改）/ 1=脚本自身异常
-
+# 用法（在 CI 中由 g060-guard.yml 调用，或本地复现）：
+#   bash scripts/g060-lock.sh \
+#     --actor <actor-login> \
+#     --changed-files <file1> [<file2> ...] \
+#     [--repo Cloudbird-Software/.github] \
+#     [--token $GITHUB_TOKEN]
+#
+# 退出码：
+#   0 = 修改者已授权（verifier-app 或 owner）
+#   1 = 无测试路径变更（无需锁定，跳过）
+#   2 = 未授权修改测试（阻断）——已自动开 issue 路由裁决
+#
+# 依赖：bash、curl、jq 或 python3（任一）。
 set -euo pipefail
 
-REPO="${GH_REPO:-${GITHUB_REPOSITORY:-}}"
-ACTOR="${G060_ACTOR:-${GITHUB_ACTOR:-}}"
+ACTOR=""
+REPO="Cloudbird-Software/.github"
+TOKEN="${GITHUB_TOKEN:-}"
 OWNER="${G060_OWNER:-randypanding}"
-VERIFIER_SLUG="${G060_VERIFIER:-verifier-app}"
-VERIFIER_ACTOR="${VERIFIER_SLUG}[bot]"
-LOCK_PATTERN='specs/*/suite/*'
-IR_CARD="Cloudbird-Software/.github#274"
-
-PR_NUMBER=""
-BASE_REF="${GITHUB_BASE_REF:-main}"
-HEAD_REF="${GITHUB_HEAD_REF:-HEAD}"
-G060_PATHS="${G060_PATHS:-}"
-SHOW_HELP=0
-
-usage() {
-  cat <<EOF
-用法: $(basename "$0") [选项]
-  --actor <actor>      触发者 GitHub login（默认：\$GITHUB_ACTOR）
-  --pr <number>        PR 编号；未提供时尝试从 \$GITHUB_EVENT_PATH 解析
-  --base <ref>         diff base ref（默认：\$GITHUB_BASE_REF / main）
-  --head <ref>         diff head ref（默认：\$GITHUB_HEAD_REF / HEAD）
-  --paths <csv>        直接传入变更路径（逗号分隔），用于测试/桥接
-  --owner <owner>      人类 owner（默认：randypanding）
-  --verifier <slug>    验证者 App slug（默认：verifier-app）
-  -h, --help           显示本帮助
-EOF
-}
+VERIFIER_SLUG="${G060_VERIFIER_SLUG:-verifier-app}"
+CHANGED_FILES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --actor) ACTOR="$2"; shift 2 ;;
-    --pr) PR_NUMBER="$2"; shift 2 ;;
-    --base) BASE_REF="$2"; shift 2 ;;
-    --head) HEAD_REF="$2"; shift 2 ;;
-    --paths) G060_PATHS="$2"; shift 2 ;;
-    --owner) OWNER="$2"; shift 2 ;;
-    --verifier) VERIFIER_SLUG="$2"; VERIFIER_ACTOR="${VERIFIER_SLUG}[bot]"; shift 2 ;;
-    -h|--help) SHOW_HELP=1; shift ;;
-    *) echo "错误：未知参数 $1" >&2; usage >&2; exit 1 ;;
+    --actor)        ACTOR="${2:?}"; shift 2 ;;
+    --repo)         REPO="${2:?}"; shift 2 ;;
+    --token)        TOKEN="${2:?}"; shift 2 ;;
+    --owner)        OWNER="${2:?}"; shift 2 ;;
+    --verifier-slug) VERIFIER_SLUG="${2:?}"; shift 2 ;;
+    --changed-files) shift; while [[ $# -gt 0 && "$1" != --* ]]; do CHANGED_FILES+=("$1"); shift; done ;;
+    *) echo "未知参数 $1" >&2; exit 2 ;;
   esac
 done
 
-[[ $SHOW_HELP -eq 1 ]] && { usage; exit 0; }
+[[ -n "$ACTOR" ]] || { echo "::error::需要 --actor" >&2; exit 2; }
 
-if [[ -z "$ACTOR" ]]; then
-  echo "错误：无法确定触发者身份（--actor 或 \$GITHUB_ACTOR）" >&2
+# 测试路径匹配：specs/<ir>/suite/**
+is_test_path() {
+  [[ "$1" =~ ^specs/[^/]+/suite/ ]]
+}
+
+# 是否有测试路径变更
+touched_test=0
+for f in "${CHANGED_FILES[@]}"; do
+  if is_test_path "$f"; then touched_test=1; break; fi
+done
+if [[ "$touched_test" -eq 0 ]]; then
+  echo "无 specs/*/suite/** 变更，g060 跳过"
   exit 1
 fi
 
-is_authorized() {
-  local actor="$1"
-  [[ "$actor" == "$OWNER" || "$actor" == "$VERIFIER_ACTOR" ]]
-}
+# 身份判定
+actor_lower="$(printf '%s' "$ACTOR" | tr '[:upper:]' '[:lower:]')"
+verifier_bot="$(printf '%s' "${VERIFIER_SLUG}[bot]" | tr '[:upper:]' '[:lower:]')"
+owner_lower="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
 
-# ---------- 变更文件探测 ----------
-# 优先级：--paths/G060_PATHS > --pr > GITHUB_EVENT_PATH > git diff base..head
-find_changed_files() {
-  if [[ -n "$G060_PATHS" ]]; then
-    printf '%s\n' "$G060_PATHS" | tr ',' '\n'
-    return
-  fi
-  local files=""
-  if [[ -n "$PR_NUMBER" ]]; then
-    files=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json files --jq '.files[].path' 2>/dev/null || true)
-  elif [[ -n "${GITHUB_EVENT_PATH:-}" && -f "$GITHUB_EVENT_PATH" ]]; then
-    PR_NUMBER=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || true)
-    if [[ -n "$PR_NUMBER" ]]; then
-      files=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json files --jq '.files[].path' 2>/dev/null || true)
-    fi
-  fi
-  if [[ -z "$files" ]]; then
-    # 本地/非 PR 场景：用 git diff；尽力拉取 base
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      git fetch origin "$BASE_REF" >/dev/null 2>&1 || true
-      files=$(git diff --name-only "origin/${BASE_REF}...${HEAD_REF}" 2>/dev/null || true)
-    fi
-  fi
-  printf '%s\n' "$files"
-}
-
-matches_lock_pattern() {
-  local path="$1"
-  # 只匹配 specs/<ir>/suite/ 下任意文件（单层 IR 分片）
-  case "$path" in
-    specs/*/suite/*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-LOCKED_FILES=()
-while IFS= read -r f; do
-  [[ -z "$f" ]] && continue
-  if matches_lock_pattern "$f"; then
-    LOCKED_FILES+=("$f")
-  fi
-done < <(find_changed_files)
-
-if [[ ${#LOCKED_FILES[@]} -eq 0 ]]; then
-  echo "g060-lock: 未涉及 specs/*/suite/**，无需锁定检查"
+if [[ "$actor_lower" == "$verifier_bot" || "$actor_lower" == "$owner_lower" ]]; then
+  echo "g060 放行：actor=$ACTOR 为授权身份（verifier-app 或 owner）"
   exit 0
 fi
 
-if is_authorized "$ACTOR"; then
-  echo "g060-lock: 触发者 $ACTOR 为授权身份（owner/verifier-app），放行以下锁定路径："
-  printf '  - %s\n' "${LOCKED_FILES[@]}"
-  exit 0
-fi
+# 未授权：阻断 + 自动开 issue
+echo "::error::g060 阻断：actor=$ACTOR 未授权修改 specs/*/suite/**（仅 ${VERIFIER_SLUG}[bot] / ${OWNER}）"
 
-# ---------- 非法修改：开 issue 路由 owner 裁决 ----------
-echo "::error::g060-lock: 触发者 $ACTOR 非授权身份，修改了锁定路径："
-printf '  - %s\n' "${LOCKED_FILES[@]}" >&2
+if [[ -n "$TOKEN" ]]; then
+  title="[g060] 未授权测试修改阻断：actor=${ACTOR}"
+  body=$(cat <<EOF
+g060 测试分片锁定（ADR-0061 / ISSUE-263 AC-18）触发阻断。
 
-PR_URL=""
-if [[ -n "$PR_NUMBER" ]]; then
-  PR_URL="https://github.com/${REPO}/pull/${PR_NUMBER}"
-fi
+- **actor**: \`${ACTOR}\`
+- **变更测试文件**:
+$(printf '  - `%s`\n' "${CHANGED_FILES[@]}")
+- **允许身份**: \`${VERIFIER_SLUG}[bot]\`、\`${OWNER}\`
+- **时间**: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-ISSUE_BODY=$(cat <<EOF
-> 由 g060-lock.sh 自动生成 | ADR-0061 g060 扩展 | 卡：${IR_CARD}
+请 owner 裁决：
+- **采纳**：actor 确属误判（如新授权身份），请评论 \`/g060-accept <actor>\` 并说明证据引用
+- **驳回**：确认未授权修改，请评论 \`/g060-reject\` 并保持阻断
 
-触发者 \`$ACTOR\` 尝试修改以下按 IR 分片的锁定测试路径，但非 owner / verifier-app 授权身份：
-$(printf '%s\n' "${LOCKED_FILES[@]}" | sed 's/^/- `/; s/$/`/')
-
-${PR_URL:+关联 PR：$PR_URL}
-
-## 请 owner 裁决
-- \`/g060-adopt <证据引用>\`：采纳变更（终态机器可核）。
-- \`/g060-reject <证据引用>\`：驳回变更（终态机器可核）。
-- 无裁决且超过 TTL（72h）将触发 dead-man 提醒。
-
-裁决须附带证据引用（file:line 或 PR 行级链接），由 scripts/g060-escalation.py 做机器可核的终态校验。
+裁决 TTL：48h。逾期未决将触发 dead-man 提醒（见 scripts/g060-escalation.py）。
 EOF
 )
-
-ISSUE_TITLE="g060 blocked: unauthorized change to specs/*/suite/** by ${ACTOR}"
-
-# 标签仅使用治理标签集中已存在的 state:needs-human；避免依赖可能不存在的 g060 专用标签
-if gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$ISSUE_BODY" --assignee "$OWNER" --label state:needs-human >/dev/null 2>&1; then
-  echo "::error::已创建裁决 issue 并 assign 给 $OWNER"
-else
-  # 标签不存在时降级为无标签创建
-  if gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$ISSUE_BODY" --assignee "$OWNER" >/dev/null 2>&1; then
-    echo "::warning::已创建裁决 issue（无 state:needs-human 标签），assign 给 $OWNER" >&2
-  else
-    echo "::error::g060-lock: 创建裁决 issue 失败" >&2
-  fi
+  # 开 issue（幂等：同标题同日不重复开——由 g060-escalation.py 兜底去重）
+  # JSON 组装不依赖 jq（Windows Git Bash 默认无 jq，同 gh-app-token.sh 约定）
+  _json="$body" _escaped_body="${_json//\\/\\\\}"
+  _escaped_body="${_escaped_body//\"/\\\"}"
+  _escaped_body="${_escaped_body//$'\n'/\\n}"
+  payload="{\"title\":\"${title//\"/\\\"}\",\"body\":\"${_escaped_body}\",\"labels\":[\"g060-escalation\"]}"
+  curl -s -X POST \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    -H "Content-Type: application/json" \
+    "https://api.github.com/repos/${REPO}/issues" \
+    -d "$payload" \
+    -o /dev/null -w "issue http=%{http_code}\n" >&2 || true
 fi
 
 exit 2
