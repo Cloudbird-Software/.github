@@ -74,7 +74,7 @@ bash scripts/register-verifier-app.sh
 
 - PR 标题示例：`governance(ISSUE-263): W2-C1 回填 verifier-app 安装信息 (#273)`
 - Body 引用：`Closes Cloudbird-Software/.github#273`
-- 必须引用 ADR-0080 / ADR-0056 / ADR-0061
+- **必须引用 ADR-NNNN**（如 ADR-0080 / ADR-0081 / ADR-0076 / ADR-0056 / ADR-0061），否则 `gate` / `org-gate` 的 `adr-required` 会判红。
 - owner-only review，过 gate 后合并
 
 ## 6. 验证清单（AC 证据）
