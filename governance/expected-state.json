@@ -117,6 +117,42 @@
       "administration"
     ]
   },
+  "verifier_app": {
+    "comment": "ISSUE-263 / ADR-0080：验证者 APP，仅测试/验证路径写权；holdout 挂载唯一合法身份（drift-check §18）；与 cloudbrid-agent 身份分离（AG-1，ADR-0076）",
+    "name": "verifier-app",
+    "slug": "verifier-app",
+    "id": 4691958,
+    "client_id": "Iv23li3n9m7ux9lp9Mdp",
+    "installation_id": 155939178,
+    "permissions": {
+      "contents": "write",
+      "issues": "write",
+      "pull_requests": "write",
+      "metadata": "read"
+    },
+    "must_not_have": [
+      "workflows",
+      "administration"
+    ],
+    "single_repo_scope": true,
+    "token_ttl_minutes": 60,
+    "repositories": [
+      ".github",
+      "CI-Workflows",
+      "agent-registry",
+      "archive",
+      "template-service",
+      "agent-tools",
+      "agent-platform",
+      "arbiter",
+      "Shorts_Director",
+      "Script_Writer",
+      "Use-up-Plan",
+      "AI_Web_School",
+      "mutual",
+      "holdout"
+    ]
+  },
   "direct_push_exemptions": {
     "comment": "§8 直推检测豁免——两类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃；arbiter 建仓 bootstrap 同理（W1-C2 .github#165/ADR-0054）。archive（W1-C1 .github#164/ADR-0053）：bootstrap README commit 同属 (b) 类——注意 ADR-0046 后 org-required-workflows ruleset 无 bypass，空仓首推被 required workflow 拦截，豁免操作=对 org ruleset 的 archive 仓库做秒级临时 exclude 后经 contents API 建 commit 并即刻还原（全程约 5 秒，已留痕于 #164）；ruleset 最终态与落盘定义一致（drift-check §1 不受影响）。",
     ".github": [
@@ -175,12 +211,12 @@
     }
   },
   "org_required_workflows": {
-    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本（path/ref/repository_id 任何改动即漂移）；§15 校验 tag 钉点的 commit 绑定（tag 指针被移而 ruleset 文本不变的情形）。 v1.4.1：org-adr-required 修 bash -e 下 false 灭脚本缺陷（CI-Workflows PR#27）。 v1.4.2：merge_group 下 org-adr-required 设计性 skip 配 EXPECTED_SKIP（#135，CI-Workflows PR#28）——修复 merge queue 全量弹回。",
+    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本（path/ref/repository_id 任何改动即漂移）；§15 校验钉点 commit 绑定（由 tag 改为直接钉 commit SHA，ISSUE-263 W1-C5）。钉点值：CI-Workflows v1.4.2（2d368c2）——v1.4.2 修复 merge_group 下 org-adr-required 设计性 skip 配 EXPECTED_SKIP（#135，CI-Workflows PR#28）。",
     "ruleset": "org-required-workflows",
     "repository": "CI-Workflows",
     "repository_id": 1337911551,
     "path": ".github/workflows/org-gate.yml",
-    "ref": "refs/tags/v1.4.2",
+    "ref": "2d368c29f170eab43b83f6b866f76fad3774fba9",
     "ref_commit": "2d368c29f170eab43b83f6b866f76fad3774fba9"
   }
 }

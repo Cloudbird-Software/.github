@@ -50,6 +50,42 @@ transitions:
     to_state: ready
     action: noop
     guard: "sender_role in ['owner', 'agent']"
+  # T5/T6 suite 就绪谓词（ISSUE-263 AC-12 / W4-C1 .github#282）：
+  # suite 就绪 = 确定性谓词，conductor 在转移前重新断言（不信任 dispatch 载荷）：
+  #   1. suite/ 目录存在；
+  #   2. suite/ 含至少一个非空测试文件（字节数 >0 且含有效断言语法）；
+  #   3. 测试文件可解析（python -m py_compile / node --check / 等语言原生语法校验通过）。
+  # 任一不满足 → 转移拒绝并告警（fail-closed：不放行不确定的红队/波次规划）。
+  # 该谓词由 conductor 在运行时对目标 spec 仓做确定性检查，非仅标签面断言。
+  - id: T5  # spec PR 合并 + suite 就绪后进入红队阶段（ISSUE-263 AC-12 / ADR-0049 / W4-C1）
+    from_state: spec
+    event: label:state:redteam
+    to_state: redteam
+    action: noop
+    guard: "sender_role in ['owner', 'agent'] and 'type:intent' in label_set"
+    suite_ready_required: true  # conductor 在转移前执行 suite 就绪谓词（存在+非空+可解析）
+  # T6 三元组校验（ISSUE-263 AC-12 / W4-C1 .github#282）：
+  # 进入 wave-planned 必须存在该卡本次生命周期内、卡 ID + specVersion + 审计 run ID
+  # 三元组对应的 survived 审计记录。禁止跨卡/历史记录短路：
+  #   - 卡 ID 必须与当前 issue 匹配；
+  #   - specVersion 必须与当前 spec PR 合并后的 spec 版本一致；
+  #   - 审计 run ID 必须来自本次生命周期（非历史 run）。
+  # 三元组任一缺失或不匹配 → 转移拒绝并告警。
+  - id: T6  # redteam 产出 survived 审计记录后进入波次规划（ISSUE-263 AC-12 / ADR-0079 / W4-C1）
+    from_state: redteam
+    event: label:state:wave-planned
+    to_state: wave-planned
+    action: noop
+    guard: "sender_role == 'agent' and 'adversary:survived' in label_set"
+    triple_check:  # conductor 在转移前校验三元组 survived 记录
+      card_id: issue   # 卡 ID 键 = 当前 issue number
+      spec_version: spec  # specVersion 键 = spec 文件版本（SHA 或 semver）
+      audit_run_id: adversary-run  # 审计 run ID 键 = adversary 报告 run_id
+      source_label: "adversary:survived"  # 触发本转移的 survived 标签
+  # needs-human 不可直跳 wave-planned（ISSUE-263 AC-12 / AC-14 / W4-C1）：
+  # needs-human → wave-planned 转移不在本表列 = 禁止（conductor no-op）。
+  # 该断言作为 required check 在 CI 常驻强制运行（conductor-negtest 模式），
+  # 确保没有任何路径可从 needs-human 直跳 wave-planned。
   # ---------- Bug 流（W3-C1 .github#218 / ADR-0064，宪法 §3）----------
   # 执行者：CI-Workflows pipeline/bugflow（bug-reproduce.yml 以 App 身份写标签）。
   # conductor 对 label:bug/label:reproduced 等非 state 标签事件静默 no-op——

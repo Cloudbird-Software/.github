@@ -1,0 +1,12 @@
+{
+  "name": "verifier-app",
+  "description": "ISSUE-263 / ADR-0080 验证者 APP：仅测试/验证路径写权，holdout 挂载，1h 短期令牌",
+  "url": "https://github.com/Cloudbird-Software",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "pull_requests": "write",
+    "metadata": "read"
+  }
+}

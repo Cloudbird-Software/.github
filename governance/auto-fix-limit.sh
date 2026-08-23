@@ -90,16 +90,21 @@ gov_issue_find() {  # <label> <title-fragment> → issue number（无则空）
 }
 
 # ---------- 熔断状态（只读；置位在 cost-check.sh，复位仅人工——ADR-0040 决策 4） ----------
+# 取值语义（三态 + 容错）：
+#   "true"      → 熔断置位（撤销全部 auto-merge，硬停执法）
+#   "false"     → 未置位（dead-man 演习复位后的合法值，等价于变量不存在）
+#   404         → 未置位（变量从未创建）
+#   其他        → INFRA exit 2（fail-closed：不假置位，避免把流水线停摆）
 BREAKER_SET=0
 VERR=$("$GH" api "orgs/$ORG/actions/variables/$CB_VARIABLE" --jq .value 2>&1) || true
 if [[ "$VERR" == *"true"* && "$VERR" != *"Not Found"* ]]; then
   BREAKER_SET=1
   ok "熔断标志 $CB_VARIABLE=true（本轮附带撤销全部 auto-merge）"
-elif grep -q "Not Found" <<<"$VERR"; then
+elif grep -q "Not Found" <<<"$VERR" || [[ "$VERR" == "false" ]]; then
   ok "熔断标志 $CB_VARIABLE 未置位"
 else
   # 读失败 ≠ 未置位：fail-closed 出口 2（不假置位——假熔断要求人工复位，会把流水线停摆）
-  infra "org 变量 $CB_VARIABLE 读取失败（非 404）：$(head -c 200 <<<"$VERR")"
+  infra "org 变量 $CB_VARIABLE 读取失败（非 404/false）：$(head -c 200 <<<"$VERR")"
 fi
 
 # ---------- 逐仓扫描 ----------

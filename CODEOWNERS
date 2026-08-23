@@ -8,3 +8,6 @@
 /profile/**            @randypanding
 /CODEOWNERS            @randypanding
 /.github/**            @randypanding
+# g060 落地治理仓（ISSUE-263 W2-C2 / ADR-0061 / ADR-0081）：specs/*/suite/** 按 IR 分片锁定
+# CODEOWNER = 验证者 APP + 人类 owner；开发 agent 修改被拒（g060-lock.sh exit 2 + 开裁决 issue）
+/specs/*/suite/**     @randypanding @verifier-app

@@ -1,2 +1,6 @@
 # 治理仓所有权：全部路径归 owner（GM-2/C1 分级的评审归属）
 * @randypanding
+
+# ADR-0061 g060 扩展（ISSUE-263 / W2-C2）：specs/*/suite/** 按 IR 分片锁定，
+# CODEOWNER = 验证者 APP + owner 人类账号；非授权身份修改由 g060-lock.sh exit 2 阻断。
+specs/*/suite/** @verifier-app[bot] @randypanding

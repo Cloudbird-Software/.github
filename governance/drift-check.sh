@@ -703,14 +703,20 @@ if [[ -n "$ORW_CFG" ]]; then
     if [[ -n "$BAD" ]]; then
       drift "org-required-workflows 钉点漂移:$BAD（期望 path=$WANT_PATH ref=$WANT_REF repo_id=$WANT_REPO_ID）——审判源被改指（ADR-0046 §15）"
     fi
-    # tag 解引用 → commit 绑定（tag 移动而 ruleset 文本不变的情形）
-    SHORTREF="${WANT_REF#refs/tags/}"
-    TAGROW=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/ref/tags/$SHORTREF")
-    TAGCOMMIT=$(jq -r '.object.sha // empty' <<<"$TAGROW")
+    # commit 绑定校验（tag 或直接 SHA；ISSUE-263 W1-C5 改为直接钉 commit SHA）
+    if [[ "$WANT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+      # 直接钉 commit SHA：校验该对象在目标仓可达
+      COMMIT_OBJ=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/commits/$WANT_REF")
+      TAGCOMMIT=$(jq -r '.sha // empty' <<<"$COMMIT_OBJ")
+    else
+      SHORTREF="${WANT_REF#refs/tags/}"
+      TAGROW=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/ref/tags/$SHORTREF")
+      TAGCOMMIT=$(jq -r '.object.sha // empty' <<<"$TAGROW")
+    fi
     if [[ -z "$TAGCOMMIT" ]]; then
-      drift "org-required-workflows 钉点 tag $WANT_REF 解引用失败（fail-closed，ADR-0046 §15）"
+      drift "org-required-workflows 钉点 $WANT_REF 解引用/校验失败（fail-closed，ADR-0046 §15）"
     elif [[ "$TAGCOMMIT" != "$WANT_COMMIT" ]]; then
-      drift "org-required-workflows 钉点 tag $WANT_REF 已移动：${TAGCOMMIT:0:8} ≠ 声明 ${WANT_COMMIT:0:8}——审判内容被换（ADR-0046 §15；还原或走发布流程+expected-state 更新）"
+      drift "org-required-workflows 钉点 $WANT_REF 已移动：${TAGCOMMIT:0:8} ≠ 声明 ${WANT_COMMIT:0:8}——审判内容被换（ADR-0046 §15；还原或更新 expected-state）"
     elif [[ -n "$BAD" ]]; then
       :   # 钉点漂移已上报，不再输出 OK 行（避免同段 OK/DRIFT 并存的误导）
     else
@@ -832,50 +838,65 @@ for r in $PROTO_REPOS; do
 done
 [[ $PROTO_OK -eq 0 ]] && ok "统一入口协议块一致（真源 template-service × $PROTO_N 个 entry_protocol 仓，逐字节比对）"
 
-# ---------- 18. holdout 隔离断言（DECISION-02：App 安装差异隔离，W1-C4/ADR-0056）----------
-# 试卷层 holdout 的读隔离不靠保密（公开仓，ADR-0056/DECISION-02），靠两条：
-# cloudbrid-agent App 不安装到该仓（agent 的组织级凭据通道物理不可达）+ 泄漏诱饵
-# 周检（.github 仓 holdout-canary-sweep，宪法 §6/§11）。本节断言第一条：
-# App installation 的仓清单不得包含 holdout——在清单 = P0（隔离失效，agent 可持
-# 组织凭据读考卷）。正向对照防检测器失明假绿（§4 同思想）：installation 清单必须
-# 非空且包含 .github——连 .github 都不在清单 = 端点读法错/权限变了 → 按漂移报错，
+# ---------- 18. holdout 隔离断言（DECISION-02：App 安装差异隔离，W1-C4/ADR-0056，ADR-0080 修订）----------
+# 试卷层 holdout 的读隔离不靠保密（公开仓，ADR-0056/DECISION-02），靠三条：
+#   - cloudbrid-agent App 不安装到该仓（agent 的组织级凭据通道物理不可达）；
+#   - 验证者 APP 可安装，但仅作为测试/验证路径写入主体（ADR-0080）；
+#   - 泄漏诱饵周检（.github 仓 holdout-canary-sweep，宪法 §6/§11）。
+# 本节断言 App 挂载差异：
+#   - cloudbrid-agent installation 的仓清单含 holdout = P0 漂移；
+#   - 验证者 APP installation 的仓清单含 holdout = OK（合法）；
+#   - 验证者 APP 尚未安装 → INFO/SKIP（实施阶段再断言）。
+# 正向对照防检测器失明假绿（§4 同思想）：cloudbrid-agent 的 installation 清单必须
+# 非空且含 .github——连 .github 都不在清单 = 端点读法错/权限变了 → 按漂移报错，
 # 绝不把"看不见"当"没有"。API 任何失败 = fail-closed 报漂移。
 # §17 编号预留给并行卡 W1-C3（多代理并行修改本文件，编号互不占段）。
 # 端点注（2026-08-21 实测）：installation id 走 /orgs/<org>/installations（admin
 # 端点，new-repo-init.sh §3 同款）——/user/installations 要求 GitHub App 令牌，
 # 经典 PAT 一律 403；仓清单走 /user/installations/<id>/repositories（经典 PAT 可读）。
 HOLDOUT_REPO="holdout"
+
+# 拉取一次 org 安装列表，供 cloudbrid-agent 与验证者 APP 共用。
 HOLDOUT_INST=$(api "https://api.github.com/orgs/$ORG/installations?per_page=100")
 if ! jq -e 'type == "object" and (.installations | type == "array")' <<<"$HOLDOUT_INST" >/dev/null 2>&1; then
   drift "holdout 隔离断言失败：org installations 拉取失败（fail-closed——检测器失明不得伪装通过，ADR-0056 §18）: $(jq -r '.message // "非 JSON 响应"' <<<"$HOLDOUT_INST" 2>/dev/null || echo 传输失败)"
 else
-  # app 名取 expected-state 单一真源（与 §6 一致），不重复硬编码
+  # 辅助函数：拉取指定 installation 下的全部仓名；stdout 为排序去重后的仓名列表；
+  # 失败时返回非 0（stdout 为空，不应使用）。
+  holdout_install_repos() {
+    local iid="$1" tmp fail page n chunk
+    tmp=$(mktemp)
+    fail=0
+    page=1
+    while :; do
+      chunk=$(api "https://api.github.com/user/installations/$iid/repositories?per_page=100&page=$page")
+      if ! jq -e 'type == "object" and (.repositories | type == "array")' <<<"$chunk" >/dev/null 2>&1; then
+        fail=1; break
+      fi
+      n=$(jq '.repositories | length' <<<"$chunk")
+      [[ "$n" -eq 0 ]] && break
+      jq -r '.repositories[].name' <<<"$chunk" >>"$tmp"
+      [[ "$n" -lt 100 ]] && break
+      page=$((page+1))
+    done
+    if [[ $fail -ne 0 ]]; then
+      rm -f "$tmp"
+      return 1
+    fi
+    sort -u "$tmp"
+    rm -f "$tmp"
+  }
+
+  # cloudbrid-agent：老 DECISION-02 主体，必须不挂载 holdout。
   HOLDOUT_APP=$(jq -r .github_app.name "$EXPECTED")
   INST_ID=$(jq -r --arg s "$HOLDOUT_APP" '.installations[]? | select(.app_slug == $s) | .id' <<<"$HOLDOUT_INST" | head -1)
   if [[ -z "$INST_ID" || "$INST_ID" == "null" ]]; then
     drift "app '$HOLDOUT_APP' 的 installation 未找到——holdout 隔离断言无法执行（fail-closed，ADR-0056 §18）"
   else
-    # 全分页列出该 installation 下的仓（>100 仓单页漏检——§1/§4 同教训）
-    INST_TMP=$(mktemp)
-    INST_FAIL=0
-    INST_PAGE=1
-    while :; do
-      CHUNK=$(api "https://api.github.com/user/installations/$INST_ID/repositories?per_page=100&page=$INST_PAGE")
-      if ! jq -e 'type == "object" and (.repositories | type == "array")' <<<"$CHUNK" >/dev/null 2>&1; then
-        INST_FAIL=1; break
-      fi
-      INST_N=$(jq '.repositories | length' <<<"$CHUNK")
-      [[ "$INST_N" -eq 0 ]] && break
-      jq -r '.repositories[].name' <<<"$CHUNK" >>"$INST_TMP"
-      [[ "$INST_N" -lt 100 ]] && break
-      INST_PAGE=$((INST_PAGE+1))
-    done
-    if [[ $INST_FAIL -ne 0 ]]; then
+    INST_REPOS=$(holdout_install_repos "$INST_ID")
+    if [[ $? -ne 0 ]]; then
       drift "installation#$INST_ID 仓清单拉取失败，holdout 隔离断言无法执行（fail-closed，ADR-0056 §18）"
-      rm -f "$INST_TMP"
     else
-      INST_REPOS=$(sort -u "$INST_TMP")
-      rm -f "$INST_TMP"
       HOLDOUT_HIT=0
       grep -qx "$HOLDOUT_REPO" <<<"$INST_REPOS" && HOLDOUT_HIT=1
       # 正向对照（防失明）：清单非空且含 .github，否则断言结论不可信
@@ -887,10 +908,28 @@ else
         HOLDOUT_HIT=-1
       fi
       if [[ $HOLDOUT_HIT -eq 1 ]]; then
-        drift "holdout 出现在 app '$HOLDOUT_APP' installation#$INST_ID 仓清单——P0：App 挂上 holdout = 试卷层隔离失效（DECISION-02/ADR-0056 §18；立即在 App 设置页移除该仓访问并追查何时挂载）"
+        drift "holdout 出现在 app '$HOLDOUT_APP' installation#$INST_ID 仓清单——P0：cloudbrid-agent 挂上 holdout = 试卷层隔离失效（DECISION-02/ADR-0056 §18；立即在 App 设置页移除该仓访问并追查何时挂载）"
       elif [[ $HOLDOUT_HIT -eq 0 ]]; then
-        ok "holdout 隔离成立（installation#$INST_ID 共 $(grep -c . <<<"$INST_REPOS") 仓不含 holdout；正向对照 .github 在清单）"
+        ok "holdout 隔离成立（cloudbrid-agent installation#$INST_ID 共 $(grep -c . <<<"$INST_REPOS") 仓不含 holdout；正向对照 .github 在清单）"
       fi
+    fi
+  fi
+
+  # 验证者 APP（ADR-0080）：允许挂载 holdout，作为测试/验证路径写入主体。
+  VERIFIER_APP=$(jq -r '.verifier_app.name // empty' "$EXPECTED")
+  if [[ -n "$VERIFIER_APP" && "$VERIFIER_APP" != "null" ]]; then
+    VERIFIER_INST_ID=$(jq -r --arg s "$VERIFIER_APP" '.installations[]? | select(.app_slug == $s) | .id' <<<"$HOLDOUT_INST" | head -1)
+    if [[ -n "$VERIFIER_INST_ID" && "$VERIFIER_INST_ID" != "null" ]]; then
+      VERIFIER_REPOS=$(holdout_install_repos "$VERIFIER_INST_ID")
+      if [[ $? -ne 0 ]]; then
+        drift "验证者 APP '$VERIFIER_APP' installation#$VERIFIER_INST_ID 仓清单拉取失败，无法校验 holdout 挂载合法性（fail-closed，ADR-0080 §18）"
+      elif grep -qx "$HOLDOUT_REPO" <<<"$VERIFIER_REPOS"; then
+        ok "holdout 由验证者 APP '$VERIFIER_APP' 合法挂载（installation#$VERIFIER_INST_ID，ADR-0080）"
+      else
+        ok "验证者 APP '$VERIFIER_APP' 已安装但未挂载 holdout（ADR-0080 允许，非漂移）"
+      fi
+    else
+      echo "INFO  验证者 APP '$VERIFIER_APP' 尚未安装——holdout 挂载合法性断言跳过（实施阶段再校验，ADR-0080 §18）"
     fi
   fi
 fi

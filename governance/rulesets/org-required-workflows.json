@@ -25,7 +25,12 @@
         "workflows": [
           {
             "path": ".github/workflows/org-gate.yml",
-            "ref": "refs/tags/v1.4.2",
+            "ref": "2d368c29f170eab43b83f6b866f76fad3774fba9",
+            "repository_id": 1337911551
+          },
+          {
+            "path": ".github/workflows/adversary-gate.yml",
+            "ref": "2d368c29f170eab43b83f6b866f76fad3774fba9",
             "repository_id": 1337911551
           }
         ]
