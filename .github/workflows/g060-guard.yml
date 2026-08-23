@@ -66,9 +66,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          G060_ISSUE: ${{ inputs.issue }}
         run: |
-          if [[ -n "${{ inputs.issue }}" ]]; then
-            python3 scripts/g060-escalation.py --issue "${{ inputs.issue }}"
+          if [[ -n "$G060_ISSUE" ]]; then
+            python3 scripts/g060-escalation.py --issue "$G060_ISSUE"
           else
             python3 scripts/g060-escalation.py --all
           fi
