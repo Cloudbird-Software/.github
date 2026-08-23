@@ -703,14 +703,20 @@ if [[ -n "$ORW_CFG" ]]; then
     if [[ -n "$BAD" ]]; then
       drift "org-required-workflows 钉点漂移:$BAD（期望 path=$WANT_PATH ref=$WANT_REF repo_id=$WANT_REPO_ID）——审判源被改指（ADR-0046 §15）"
     fi
-    # tag 解引用 → commit 绑定（tag 移动而 ruleset 文本不变的情形）
-    SHORTREF="${WANT_REF#refs/tags/}"
-    TAGROW=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/ref/tags/$SHORTREF")
-    TAGCOMMIT=$(jq -r '.object.sha // empty' <<<"$TAGROW")
+    # commit 绑定校验（tag 或直接 SHA；ISSUE-263 W1-C5 改为直接钉 commit SHA）
+    if [[ "$WANT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+      # 直接钉 commit SHA：校验该对象在目标仓可达
+      COMMIT_OBJ=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/commits/$WANT_REF")
+      TAGCOMMIT=$(jq -r '.sha // empty' <<<"$COMMIT_OBJ")
+    else
+      SHORTREF="${WANT_REF#refs/tags/}"
+      TAGROW=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/ref/tags/$SHORTREF")
+      TAGCOMMIT=$(jq -r '.object.sha // empty' <<<"$TAGROW")
+    fi
     if [[ -z "$TAGCOMMIT" ]]; then
-      drift "org-required-workflows 钉点 tag $WANT_REF 解引用失败（fail-closed，ADR-0046 §15）"
+      drift "org-required-workflows 钉点 $WANT_REF 解引用/校验失败（fail-closed，ADR-0046 §15）"
     elif [[ "$TAGCOMMIT" != "$WANT_COMMIT" ]]; then
-      drift "org-required-workflows 钉点 tag $WANT_REF 已移动：${TAGCOMMIT:0:8} ≠ 声明 ${WANT_COMMIT:0:8}——审判内容被换（ADR-0046 §15；还原或走发布流程+expected-state 更新）"
+      drift "org-required-workflows 钉点 $WANT_REF 已移动：${TAGCOMMIT:0:8} ≠ 声明 ${WANT_COMMIT:0:8}——审判内容被换（ADR-0046 §15；还原或更新 expected-state）"
     elif [[ -n "$BAD" ]]; then
       :   # 钉点漂移已上报，不再输出 OK 行（避免同段 OK/DRIFT 并存的误导）
     else
