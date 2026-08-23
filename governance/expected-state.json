@@ -118,12 +118,12 @@
     ]
   },
   "verifier_app": {
-    "comment": "ISSUE-263 / ADR-0080：验证者 APP，仅测试/验证路径写权；holdout 挂载需经 drift-check §18 允许；id/client_id/installation_id 在 owner 手动创建并安装后由 scripts/register-verifier-app.sh 回填",
+    "comment": "ISSUE-263 / ADR-0080：验证者 APP，仅测试/验证路径写权；holdout 挂载唯一合法身份（drift-check §18）；与 cloudbrid-agent 身份分离（AG-1，ADR-0076）",
     "name": "verifier-app",
     "slug": "verifier-app",
-    "id": null,
-    "client_id": null,
-    "installation_id": null,
+    "id": 4691958,
+    "client_id": "Iv23li3n9m7ux9lp9Mdp",
+    "installation_id": 155939178,
     "permissions": {
       "contents": "write",
       "issues": "write",
@@ -136,7 +136,22 @@
     ],
     "single_repo_scope": true,
     "token_ttl_minutes": 60,
-    "repositories": []
+    "repositories": [
+      ".github",
+      "CI-Workflows",
+      "agent-registry",
+      "archive",
+      "template-service",
+      "agent-tools",
+      "agent-platform",
+      "arbiter",
+      "Shorts_Director",
+      "Script_Writer",
+      "Use-up-Plan",
+      "AI_Web_School",
+      "mutual",
+      "holdout"
+    ]
   },
   "direct_push_exemptions": {
     "comment": "§8 直推检测豁免——两类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃；arbiter 建仓 bootstrap 同理（W1-C2 .github#165/ADR-0054）。archive（W1-C1 .github#164/ADR-0053）：bootstrap README commit 同属 (b) 类——注意 ADR-0046 后 org-required-workflows ruleset 无 bypass，空仓首推被 required workflow 拦截，豁免操作=对 org ruleset 的 archive 仓库做秒级临时 exclude 后经 contents API 建 commit 并即刻还原（全程约 5 秒，已留痕于 #164）；ruleset 最终态与落盘定义一致（drift-check §1 不受影响）。",
