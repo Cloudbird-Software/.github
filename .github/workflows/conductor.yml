@@ -55,18 +55,21 @@ jobs:
           path: arbiter
           persist-credentials: false
       - name: 铸 App 令牌（AG-2：本仓 + arbiter 各一枚单仓作用域）
+        id: tokens
         env:
           CB_APP_ID: ${{ secrets.CB_APP_ID }}
           AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
         run: |
+          set -euo pipefail
           TOKEN=$(REPO=.github CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
                   bash scripts/gh-app-token.sh)
-          echo "APP_TOKEN=$TOKEN" >>"$GITHUB_ENV"
+          # 用 step output 传递（避免 GITHUB_ENV 的 zizmor github-env 告警）
+          echo "app_token=$TOKEN" >>"$GITHUB_OUTPUT"
           # 第二枚（ADR-0055）：REPO=arbiter 单仓作用域（租约宿主仓，installation
           # #154584760）——adjudicate.sh 优先取 env 令牌、免二次铸币
           ATOKEN=$(REPO=arbiter CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
                   bash scripts/gh-app-token.sh)
-          echo "ARBITER_TOKEN=$ATOKEN" >>"$GITHUB_ENV"
+          echo "arbiter_token=$ATOKEN" >>"$GITHUB_OUTPUT"
       # 事件路由与守卫：transitions.yaml 是唯一转移定义；guard 受限求值
       # （变量白名单注入、无内建）；非授权=静默丢弃（回退标签、不评论、审计进
       # run 日志——AC-11）。注释/标签正文绝不进入任何求值（命令白名单精确匹配）。
@@ -75,8 +78,8 @@ jobs:
       - name: route（INV-02/09/AC-12）
         id: route
         env:
-          APP_TOKEN: ${{ env.APP_TOKEN }}
-          ARBITER_TOKEN: ${{ env.ARBITER_TOKEN }}
+          APP_TOKEN: ${{ steps.tokens.outputs.app_token }}
+          ARBITER_TOKEN: ${{ steps.tokens.outputs.arbiter_token }}
           GOV_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
