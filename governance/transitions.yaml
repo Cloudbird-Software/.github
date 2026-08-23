@@ -51,12 +51,19 @@ transitions:
     action: noop
     guard: "sender_role in ['owner', 'agent']"
   - id: T5  # spec PR 合并 + suite 就绪后进入红队阶段（ISSUE-263 AC-12 / ADR-0049）
+    # suite 就绪谓词（conductor 侧重新断言，不信任 dispatch 载荷）：
+    #   suite/ 存在 + 含非空测试文件（test_*.py）+ ast.parse 可解析。
+    # 不满足=转移拒绝并告警（AC-12 / AC-17 的 T-14 卡绑定测试回路）。
     from_state: spec
     event: label:state:redteam
     to_state: redteam
     action: noop
     guard: "sender_role in ['owner', 'agent'] and 'type:intent' in label_set"
   - id: T6  # redteam 产出 survived 审计记录后进入波次规划（ISSUE-263 AC-12 / ADR-0079）
+    # 三元组校验（conductor 侧重新断言）：进入 wave-planned 必须存在该卡本次
+    # 生命周期内、卡 ID + specVersion + 审计 run ID 三元组对应的 survived 审计
+    # 记录（禁止跨卡/历史记录短路）。adversary verdict 必须 = survived。
+    # 不满足=转移拒绝并告警（AC-12）。
     from_state: redteam
     event: label:state:wave-planned
     to_state: wave-planned
