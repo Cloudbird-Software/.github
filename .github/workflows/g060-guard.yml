@@ -1,0 +1,74 @@
+name: g060 guard
+
+# ADR-0061 g060 语义扩展至治理仓（ISSUE-263 W2-C2）：
+#   - PR 变更 specs/*/suite/** 时校验写者身份；
+#   - 定时扫描未裁决的 g060 阻断 issue，超 TTL 触发 dead-man 提醒。
+#
+# 注意：当前 App 无 workflows 权限，本文件已完整实现但暂无法推送至上游，
+#       阻塞记录在 ISSUE-263 W2-C2 交付说明中。
+on:
+  pull_request:
+    paths:
+      - 'specs/*/suite/**'
+  schedule:
+    # 每 6 小时巡检一次（与 butler 系列对齐）
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: '指定裁决 issue 编号（未指定则处理全部 open g060 issue）'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  g060-lock:
+    # 仅在 PR 事件且命中 paths 时触发
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read        # checkout
+      issues: write         # 非法修改时创建裁决 issue
+      pull-requests: read   # 读取 PR 文件清单
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0      # 需要完整历史做 base..head diff 兜底
+
+      - name: g060 lock check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: bash scripts/g060-lock.sh
+
+  g060-escalation:
+    # 定时/手动触发：处理未裁决 issue
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: g060 escalation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ -n "${{ inputs.issue }}" ]]; then
+            python3 scripts/g060-escalation.py --issue "${{ inputs.issue }}"
+          else
+            python3 scripts/g060-escalation.py --all
+          fi
