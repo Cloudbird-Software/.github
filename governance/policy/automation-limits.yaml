@@ -51,6 +51,19 @@ cost:
       branch: metering-ledger
       code_path: pipeline/metering   # 归账引擎 metering.py 所在（cost-check.yml sparse checkout）
 
+verifier:
+  # verifier token 预算口径（W3-C3 .github#279，ADR-0072）：与 ADR-0062 metering
+  # wrapper 既有 llm_tokens 预算口径衔接，不重述已有机制。新增约束：
+  #   - 与 LLM 响应 usage 字段交叉核对，偏差超阈值时该 run 判定作废并转人工（非仅告警）
+  #   - K 与 pivots 为暴露的成本旋钮，降档须留痕且不得改动判定语义与阈值
+  role: judge-deep                 # 复用 models.yaml 角色档（与 adversary 同族，AR-8）
+  repeat_k_default: 3
+  token_deviation_pct: 10
+  cross_check: metering-ledger     # 与 CI-Workflows metering 账本交叉核对
+  criteria_dir: pipeline/adversary/criteria
+  pip_pinned:                      # 依赖钉点（与 .github/requirements-llm-verifier.txt 一致）
+    pyyaml: "6.0.3"
+
 circuit_breaker:
   # 熔断标志：org Actions 变量（visibility=all，全仓 workflow/agent 可读）
   variable: AUTO_MERGE_DISABLED
