@@ -50,22 +50,17 @@ cost:
       repo: Cloudbird-Software/CI-Workflows
       branch: metering-ledger
       code_path: pipeline/metering   # 归账引擎 metering.py 所在（cost-check.yml sparse checkout）
-    # verifier 专属口径（ISSUE-263 W3-C3 .github#279，AC-11）：与 LLM 响应 usage 字段
-    # 交叉核对，偏差超阈值该 run 作废转人工（非仅告警）。K 与 pivots 为暴露的成本旋钮，
-    # 降档须留痕且不得改动判定语义与阈值（BUDGET-01）。执行：pipeline/adversary/llm_verifier.py。
-    verifier:
-      cross_check:
-        deviation_pct: 5      # 相对偏差阈值（%），超阈值即作废
-        deviation_abs: 50     # 绝对偏差阈值（tokens），超阈值即作废
-        void_on_mismatch: true  # 偏差超阈值 -> verdict=void 转人工（fail-closed）
-      cost_knobs:
-        k_default: 3          # 每 criterion 重复评估次数（保守高值，ASSUMPTION-03）
-        pivots_default: 1     # 成本旋钮 pivots（记录用）
-        downgrade_requires_log: true  # 降档 K/pivots 须留痕
-        downgrade_preserves_semantic: true  # 降档不得改动判定语义与阈值
-      token_account:
-        persist_per_run: true   # token 账逐 run 落盘（AC-11 运行时证据）
-        report_field: "token_account"  # llm-verifier-report 中账字段名
+    # verifier 档口径（AC-11）：W3-C3 llm-verifier 接入后，verifier run 的 token 账
+    # 落盘并与 LLM 响应 usage 字段交叉核对。偏差超出任一阈值 → 该 run 判定作废转人工
+    # （非仅告警）。K 与 pivots 为暴露成本旋钮，降档须留痕且不得改动判定语义与阈值。
+    # 计量数据源复用上方 ciw-metering（records-*.jsonl role=verifier 切片），本段仅
+    # 声明 verifier 档独立阈值与 fail-closed 行为，不新建计量通道。
+    verifier:            # data_source=ciw-metering role=verifier 时的 fail-closed 阈值
+      deviation_pct: 5   # 相对偏差阈值（%），超出即作废
+      deviation_abs: 50  # 绝对偏差阈值（tokens），超出即作废
+      role: verifier     # metering 记录 role 字段过滤值
+      fail_closed_action: void_and_escalate
+      void_reason: "token 账与 metering 偏差超阈值（相对>5% 或绝对>50 tokens）——作废转人工"
 
 circuit_breaker:
   # 熔断标志：org Actions 变量（visibility=all，全仓 workflow/agent 可读）
