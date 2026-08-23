@@ -467,7 +467,7 @@ jobs:
       ciw_ref: '4676c98047f816f7c888591eb882bf941e5c9fe0'   # 与上方 uses 钉点同值（ADR-0043 钉源）
     # 显式传递（zizmor secrets-inherit：调用方 secrets 必须显式点名）
     secrets:
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY1 }}
       CB_APP_ID: ${{ secrets.CB_APP_ID }}
       AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
 
