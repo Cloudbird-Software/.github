@@ -2,6 +2,8 @@ name: conductor
 # 状态机路由器（IR-0001 W0-C3 / ADR-0049）。W0 事件面=本仓（issues.labeled +
 # issue_comment）；跨仓扩展随产品仓接入。全部状态标签写操作以 cloudbrid-agent
 # App 令牌执行（INV-02：GITHUB_TOKEN 身份不持有状态写权）。
+# W4-C1（ADR-0079 / ISSUE-263 AC-12）：T5/T6 路由增强——suite 就绪谓词 +
+# 三元组 survived 记录校验 + needs-human 不可直跳 wave-planned 断言。
 # W1-C3（ADR-0055 决策 6）：写入类 front-desk 命令（/claim /release）前置转介
 # arbiter 裁决（宪法 §11 唤醒矩阵事件行"仲裁请求处理（/claim 等，转 arbiter）"）；
 # 仲裁是叠加授权层，transitions.yaml 转移表语义不变。三态：0=allow 继续原动作、
@@ -11,6 +13,13 @@ on:
     types: [labeled]
   issue_comment:
     types: [created]
+  # W4-C1：跨仓触发面——adversary 完成 survived 后经 repository_dispatch 通知 conductor
+  repository_dispatch:
+    types: [conductor]
+  # W4-C1：adversary workflow_run 完成后触发 T6 评估
+  workflow_run:
+    workflows: [adversary]
+    types: [completed]
 
 # INV-09：每 issue 一个 concurrency group、cancel-in-progress=false——重复投递
 # 排队串行而非并发竞态；幂等由 from_state 匹配承担（重复事件=当前态已变=no-op）。
@@ -28,11 +37,12 @@ jobs:
   route:
     if: github.repository == 'Cloudbird-Software/.github'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       invoke: ${{ steps.route.outputs.invoke }}
       issue: ${{ steps.route.outputs.issue }}
       ir_ref: ${{ steps.route.outputs.ir_ref }}
+      verdict: ${{ steps.route.outputs.verdict }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,7 +72,7 @@ jobs:
       # run 日志——AC-11）。注释/标签正文绝不进入任何求值（命令白名单精确匹配）。
       # W1-C3：/claim（T3）/release 前置转介 arbiter（ADR-0055；参数以 arbiter 仓
       # cli.py 为准）；delivery-id=comment node_id（稳定幂等键，重投→arbiter noop）。
-      - name: route（INV-02/09）
+      - name: route（INV-02/09/AC-12）
         id: route
         env:
           APP_TOKEN: ${{ env.APP_TOKEN }}
@@ -79,6 +89,8 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
+          # W4-C1：repository_dispatch / workflow_run 载荷
+          EVENT_PAYLOAD: ${{ toJson(github.event) }}
         run: |
           python3 - <<'PYEOF'
           import json, os, re, subprocess, urllib.parse, urllib.request, urllib.error, yaml
@@ -111,6 +123,7 @@ jobs:
 
           # ---- 事件规范化（白名单精确匹配，正文不进任何求值）----
           ev = None
+          dispatch_payload = None
           if E["EVENT_NAME"] == "issues" and E["ACTION"] == "labeled":
               ln = E.get("LABEL_NAME") or ""
               if ln.startswith("state:"):
@@ -124,6 +137,40 @@ jobs:
                   ev = f"comment:{token}"
               else:
                   raise SystemExit(0)  # 普通评论：无审计面（噪音）
+          elif E["EVENT_NAME"] == "repository_dispatch" and E["ACTION"] == "conductor":
+              # W4-C1：跨仓 conductor 事件——载荷含 event_type 白名单精确匹配
+              raw_payload = E.get("EVENT_PAYLOAD") or "{}"
+              try:
+                  dispatch_payload = json.loads(raw_payload)
+              except Exception:
+                  audit("event=repository_dispatch verdict=noop payload=unparseable"); raise SystemExit(0)
+              etype = (dispatch_payload.get("event_type") or "").strip()
+              # 白名单精确匹配：只接受 adversary-survived / adversary-insufficient 等
+              if etype == "adversary-survived":
+                  ev = "dispatch:adversary-survived"
+              elif etype == "adversary-insufficient":
+                  ev = "dispatch:adversary-insufficient"
+              elif etype == "adversary-needs-human":
+                  ev = "dispatch:adversary-needs-human"
+              else:
+                  audit(f"event=repository_dispatch event_type={etype} verdict=noop（白名单外）")
+                  raise SystemExit(0)
+          elif E["EVENT_NAME"] == "workflow_run":
+              # W4-C1：workflow_run 完成事件——仅处理 adversary workflow 的 T6 路由
+              raw_payload = E.get("EVENT_PAYLOAD") or "{}"
+              try:
+                  wr_payload = json.loads(raw_payload)
+              except Exception:
+                  audit("event=workflow_run verdict=noop payload=unparseable"); raise SystemExit(0)
+              wf_name = (wr_payload.get("workflow_run") or {}).get("name", "")
+              conclusion = (wr_payload.get("workflow_run") or {}).get("conclusion", "")
+              if "adversary" not in wf_name.lower():
+                  audit(f"event=workflow_run workflow={wf_name} verdict=noop（非 adversary）")
+                  raise SystemExit(0)
+              # workflow_run 触发 T6 评估（redteam→wave-planned）
+              ev = "workflow_run:adversary-completed"
+              dispatch_payload = {"workflow_run": wr_payload.get("workflow_run", {}),
+                                  "conclusion": conclusion}
           if ev is None:
               audit("event=unrecognized verdict=noop"); raise SystemExit(0)
 
@@ -163,6 +210,14 @@ jobs:
           current = states[0] if states else "ir-draft"
           if len(states) > 1:
               audit(f"verdict=abort 多状态标签并存: {states}"); raise SystemExit(1)
+
+          # ---- W4-C1：needs-human 不可直跳 wave-planned 断言（AC-12）----
+          # 任何试图从 needs-human 直接进入 wave-planned 的转移一律拒绝
+          if current == "needs-human" and ev in ("label:state:wave-planned", "workflow_run:adversary-completed"):
+              audit(f"verdict=DENIED-needs-human-bypass 当前态=needs-human 不可直跳 wave-planned（AC-12）")
+              # 回退标签
+              api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3Awave-planned", "DELETE")
+              raise SystemExit(0)
 
           # ---- 转移表匹配（幂等：from_state 不符=no-op）----
           # /release 不在表内（transitions.yaml 未列该事件）——纯租约面命令：
@@ -243,10 +298,105 @@ jobs:
                     f"（fail-closed——不许绕过仲裁；delivery 幂等可安全重投）")
                   raise SystemExit(1)
               audit(f"event={ev} transition={t['id']} sender_role={role}({role_src}) arbiter=allow "
-                f"（租约已建——T3 落地；TTL 到期由下一 /claim 原子接管，ADR-0054）")
+                    f"（租约已建——T3 落地；TTL 到期由下一 /claim 原子接管，ADR-0054）")
+
+          # ---- W4-C1：T5 suite 就绪谓词（AC-12）----
+          # suite 就绪 = 确定性谓词：suite/ 存在 + 含非空测试文件 + 可解析
+          # 不信任 dispatch 载荷——conductor 侧重新断言
+          def check_suite_ready(issue_number):
+              """检查卡对应的 suite/ 是否就绪（存在+非空+可解析）。返回 (ready, reason)。"""
+              # 从 issue body 中提取 spec 路径或 suite 路径
+              body = iss.get("body") or ""
+              # 默认 suite 路径：specs/<taskId>/suite/
+              m = re.search(r"(IR-\d+|ISSUE-\d+)", iss.get("title") or "")
+              task_id = m.group(1) if m else f"ISSUE-{issue_number}"
+              suite_rel = f"specs/{task_id}/suite"
+              # 检查 suite 目录是否存在且含非空测试文件
+              suite_abs = os.path.join(os.getcwd(), suite_rel)
+              if not os.path.isdir(suite_abs):
+                  return False, f"suite 目录不存在: {suite_rel}"
+              test_files = []
+              for root, _dirs, files in os.walk(suite_abs):
+                  for fn in files:
+                      if fn.startswith("test_") and fn.endswith(".py"):
+                          fpath = os.path.join(root, fn)
+                          # 非空检查
+                          if os.path.getsize(fpath) > 0:
+                              test_files.append(fpath)
+              if not test_files:
+                  return False, f"suite 目录无有效测试文件: {suite_rel}"
+              # 可解析检查：python ast.parse
+              import ast
+              for tf in test_files:
+                  try:
+                      with open(tf, encoding="utf-8") as f:
+                          ast.parse(f.read())
+                  except SyntaxError as e:
+                      return False, f"测试文件不可解析 {tf}: {e}"
+              return True, f"suite 就绪: {len(test_files)} 个有效测试文件"
+
+          if t["id"] == "T5":
+              ready, reason = check_suite_ready(ISSUE)
+              audit(f"T5 suite 就绪谓词: ready={ready} reason={reason}")
+              if not ready:
+                  audit(f"verdict=DENIED-suite-not-ready T5 拒绝——{reason}")
+                  # 回退标签
+                  api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3Aredteam", "DELETE")
+                  raise SystemExit(0)
+
+          # ---- W4-C1：T6 三元组 survived 记录校验（AC-12）----
+          # 进入 wave-planned 必须存在该卡本次生命周期内、卡 ID+specVersion+审计 run ID
+          # 三元组对应的 survived 审计记录（禁止跨卡/历史记录短路）
+          def check_triple_survived(issue_number, payload):
+              """校验三元组 survived 记录。返回 (ok, reason, triple)。"""
+              # 从 issue 提取卡 ID 与 specVersion
+              body = iss.get("body") or ""
+              m_card = re.search(r"Card:\s*(\S+)", body)
+              card_id = m_card.group(1) if m_card else f"{REPO}#{issue_number}"
+              m_spec = re.search(r"[Ss]pec[Vv]ersion:\s*(\d+)", body)
+              spec_version = m_spec.group(1) if m_spec else None
+              # 从 adversary 审计记录中提取 run ID
+              # 优先取 payload 中的 run_id，否则从 issue 注释中查找
+              run_id = None
+              verdict_from_dispatch = None
+              if payload:
+                  run_id = (payload.get("client_payload") or {}).get("run_id") or payload.get("run_id")
+                  verdict_from_dispatch = (payload.get("client_payload") or {}).get("verdict")
+              # 三元组完整性检查
+              if not spec_version:
+                  return False, "缺少 specVersion（issue body 未含 specVersion 字段）", None
+              if not run_id:
+                  return False, "缺少审计 run ID（adversary 记录未含 run_id）", None
+              triple = {"card_id": card_id, "specVersion": spec_version, "audit_run_id": run_id}
+              # 验证 survived 语义：verdict 必须是 survived
+              if verdict_from_dispatch and verdict_from_dispatch != "survived":
+                  return False, f"adversary verdict={verdict_from_dispatch}（非 survived）", triple
+              # 验证 run ID 未被跨卡复用（检查 issue 注释中是否有该 run ID 的 survived 记录）
+              st_com, comments = api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{issue_number}/comments")
+              if st_com == 200:
+                  survived_runs = set()
+                  for c in comments:
+                      cb = c.get("body", "")
+                      if "adversary:survived" in cb or "verdict=survived" in cb:
+                          # 提取 run id
+                          m_run = re.search(r"run[_-]?id[=:]\s*([A-Za-z0-9_\-]+)", cb, re.I)
+                          if m_run:
+                              survived_runs.add(m_run.group(1))
+                  if survived_runs and run_id not in survived_runs:
+                      return False, f"run ID {run_id} 不在本卡 survived 记录中（防跨卡短路）", triple
+              return True, f"三元组校验通过: {triple}", triple
+
+          if t["id"] == "T6":
+              ok_triple, triple_reason, triple = check_triple_survived(ISSUE, dispatch_payload)
+              audit(f"T6 三元组校验: ok={ok_triple} reason={triple_reason}")
+              if not ok_triple:
+                  audit(f"verdict=DENIED-triple-mismatch T6 拒绝——{triple_reason}")
+                  # 回退标签
+                  api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3Awave-planned", "DELETE")
+                  raise SystemExit(0)
 
           # ---- 执行转移（状态标签写=App 身份，INV-02；写失败=fail-closed，
-          # /claim 已建租约时先补偿回滚——杜绝“租约在、卡未变”的不一致面，ADR-0055）----
+          # /claim 已建租约时先补偿回滚——杜绝"租约在、卡未变"的不一致面，ADR-0055）----
           class WriteFail(Exception):
               pass
 
@@ -292,6 +442,8 @@ jobs:
                   out.write("invoke=none\n")
                   audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
                         f"{t['from_state']}->{t['to_state']} action=noop")
+              # W4-C1：输出 conductor 路由结果供下游消费
+              out.write(f"verdict=allowed\ntransition={t['id']}\n")
           except WriteFail as e:
               audit(f"event={ev} verdict=ABORT 状态写失败 {e}（fail-closed；delivery 幂等可安全重投）")
               raise SystemExit(1)
