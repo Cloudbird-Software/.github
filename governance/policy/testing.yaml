@@ -27,9 +27,9 @@ active_now:
      policy: "本文件 diff_coverage 段（ADR-0037）", risk: fake_tests}
   - {id: T-13, name: test_integrity, tool: "CI-Workflows test-integrity.yml（钉 hash）",
      placement: gate, rule: "测试篡改四形态直接红（ADR-0035）", note: "P2-1 第一必需门"}
-  - {id: T-14, name: card_bound_test_required, tool: "conductor/verdict 卡绑定测试 + g060-lock.sh",
-     placement: gate, rule: "实现 PR 绑定卡后自动走卡对应测试集与已注册 holdout 测试；spec PR 须含 suite/（至少一个非空测试文件且含有效断言）；specs/*/suite/** 的 CODEOWNER = verifier-app[bot] + owner，非授权身份修改由 g060-lock.sh exit 2 阻断并开 issue 路由 owner 裁决",
-     note: "ISSUE-263 AC-17 / AC-18 / ADR-0061 / ADR-0068 / ADR-0080"}
+  - {id: T-14, name: card_bound_test_required, tool: "conductor/verdict 卡绑定测试",
+     placement: gate, rule: "实现 PR 绑定卡后自动走卡对应测试集与已注册 holdout 测试；spec PR 须含 suite/（至少一个非空测试文件且含有效断言）",
+     note: "ISSUE-263 AC-17 / ADR-0061 / ADR-0068"}
   - {id: T-15, name: intent_backstop, tool: "CI-Workflows pipeline/adversary/intent-backstop.sh",
      placement: gate, rule: "红队顺带做意图层探索 S6-S8，命中带证据报人裁决；无命中产出落盘记录；白卷不进入失败/锁卡分支",
      note: "ISSUE-263 AC-16 / ADR-0067 / ADR-0079"}
