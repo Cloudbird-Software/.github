@@ -2,6 +2,7 @@
   "name": "main-protection",
   "target": "branch",
   "enforcement": "active",
+  "#": "W4-C3（.github#284，AC-14/AC-19）：required_status_checks 新增 adversary check——specs/** 路径 PR 必须含 adversary check（漏配/摘除/跳过即红，负向断言）；开发路径 PR 经 adversary-gate.yml 写回 EXPECTED_SKIP=success（由 pipeline/adversary/expected_skip.py 确定性派生，禁人工打标）。workflow 文件因 App 无 workflows 权限待补推，本 ruleset JSON 先推。",
   "conditions": {
     "ref_name": {
       "include": [
@@ -58,6 +59,9 @@
           },
           {
             "context": "org-gate"
+          },
+          {
+            "context": "adversary"
           }
         ]
       }
