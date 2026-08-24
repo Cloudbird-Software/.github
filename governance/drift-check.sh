@@ -324,8 +324,14 @@ adr_substantive() { # $1=四位编号 → stdout: missing|ok|shell|unreadable
     while IFS= read -r apath; do
       [[ -n "$apath" ]] || continue
       if [[ -n "${ADR_INDEX_MODE:-}" ]]; then
-        # 索引世界：archive raw 正本（公开仓，字节保真原件）；拉取失败留空→按不可判定处理
-        decoded=$(curl -sSf --max-time 20 "https://raw.githubusercontent.com/$ORG/archive/main/${apath}" 2>/dev/null || true)
+        # 索引世界：archive raw 正本（公开仓，字节保真原件）。raw 在 runner 上有
+        # 瞬时拒连抖动（2026-08-24 实测整批 unreadable）——重试 3 次后回退
+        # contents API（api.github.com 通道稳定），双通道皆失败才按不可判定处理。
+        decoded=$(curl -sSf --retry 3 --retry-delay 2 --max-time 20                     "https://raw.githubusercontent.com/$ORG/archive/main/${apath}" 2>/dev/null || true)
+        if [[ -z "$decoded" ]]; then
+          _c=$(api "https://api.github.com/repos/$ORG/archive/contents/${apath}" 2>/dev/null | jq -r '.content // empty' 2>/dev/null || true)
+          [[ -n "$_c" ]] && decoded=$(base64 -d <<<"$_c" 2>/dev/null || true)
+        fi
       else
         content=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/$apath" | jq -r '.content // empty')
         [[ -z "$content" ]] && continue
