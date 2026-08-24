@@ -62,3 +62,8 @@
    支持"无空闲自动补开"（swarm v2 先例模式）；窗口治理（回收/关闭策略）留待实践沉淀。
 5. **本地 jq 缺失**使 test-ir0002 在本机无法复跑（CI 有 jq 正常）——PM 工作区配置
    建议补 jq（已记入运行报告 [followup]）。
+6. **红队跨仓目标缺口（实弹发现）**：adversary 工作流实弹尝试 1 次（CI-Workflows run
+   32760946045，exit 2 infra）——其目标目录契约在 CI-Workflows 自身 checkout 上下文解析，
+   specs/IR-0005 在 .github 仓=跨仓目标当前不受支持。PR338 先例的红队实跑在 CNB 窗口
+   （zhuzhu-team/test）+人工机械核对，本 PR 按 owner bypass 授权合并；红队补审（CNB 窗口
+   judge-deep，PR338 同款）与 adversary 跨仓目标支持均登记 [followup]（运行报告）。
