@@ -163,8 +163,11 @@ llm_channel_account() {
     # 记录位于 metering-ledger 分支根（ledger-sync.sh 经 contents API 写回，路径=文件名）；
     # 旧路径 pipeline/metering/ 下不会有 records——原 glob 必失败 INFRA（#258 根因）。
     # strip-components=1 剥除 tarball 顶层 <repo>-<sha>/ 后落到提取根 = 记录文件。
+    # 通配符匹配 strip 前的成员全路径：分支根文件在 tarball 内形如
+    # <repo>-<sha>/records-*.jsonl——须带 */ 前缀（旧 pattern "*-records-*.jsonl"
+    # 对该形态恒不匹配 → 恒 INFRA，2026-08-24 独立验证定位）。
     if ! tar -xzf "$led.tar.gz" -C "$led" --strip-components=1 --wildcards \
-         "*-records-*.jsonl" "records-*.jsonl" 2>/dev/null; then
+         "*/records-*.jsonl" "records-*.jsonl" 2>/dev/null; then
       printf 'INFRA\tmetering 账本 tar 解包失败（strip-components=1 + records-*.jsonl）\n'
       return 0
     fi
