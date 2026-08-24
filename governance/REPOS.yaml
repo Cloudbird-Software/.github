@@ -124,6 +124,16 @@ repos:
       语言面收敛为 Go+BAML）
     key_paths: [src/mutual/, spec/, tests/golden/]
 
+  - name: QW_Arena1
+    layer: L2
+    visibility: public
+    status: active
+    role: 产品仓——千问 AI Arena「一键出海：商品素材全自动生成」参赛 Agent（跨境电商 listing
+      素材全自动生成，IR .github#345）；Python 语言（languages.yaml 对本仓整体豁免，ADR-0084：
+      外部契约优先/比赛沙箱部署/有限生命周期三条件，豁免仅语言规范面、治理基线不豁免）；建仓
+      bootstrap 直推豁免空仓变体（ADR-0084）；2026-08-31 赛后按 ADR-0084 退役条款处置
+    key_paths: [src/, tests/, quality/, docs/]
+
   - name: holdout
     layer: L1
     visibility: public
