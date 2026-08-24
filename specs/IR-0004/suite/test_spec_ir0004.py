@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 SPEC = Path(__file__).resolve().parents[1] / "spec.md"
-IR_ITEM_COUNT = 20  # IR #315 期望的可观察变化共 20 条，AC 一一映射
+IR_ITEM_COUNT = 21  # IR #315 期望变化 20 条；IR 条 11 拆为 AC-11/12、IR 条 20 补为 AC-21（R1-A H-1）
 
 
 def load_fm():
@@ -18,7 +18,10 @@ def load_fm():
     assert m, "frontmatter 定界符缺失或未闭合"
     fm = yaml.safe_load(m.group(1))
     assert fm["taskId"] == "IR-0004"
-    assert fm["specVersion"] == 1
+    assert isinstance(fm["specVersion"], int) and fm["specVersion"] >= 1
+    aml = fm.get("amendments") or []
+    if aml:
+        assert aml[-1]["rev"] == fm["specVersion"], "amendments 末条 rev 须等于 specVersion"
     assert fm["irRef"] == "Cloudbird-Software/.github#315"
     return fm, text
 
@@ -36,6 +39,8 @@ def test_acs_complete_and_unique():
         for seg in ("given", "when", "then"):
             assert str(a.get(seg, "")).strip(), f"{a['id']} 的 {seg} 段为空"
         assert "运行时证据" in a["then"], f"{a['id']} 缺运行时证据子句"
+        # 语义级断言（R1-C H-3）：证据须指向具体可机检工件，不许空泛措辞交差
+        assert any(w in a["then"] for w in ("run", "日志", "JSON", "JSONL", "记录", "diff", "issue")),             f"{a['id']} 运行时证据未指向具体工件类型"
 
 
 def test_blastradius_and_nongoals():
@@ -57,6 +62,15 @@ def test_clauses_unique_and_referenced():
     for m in re.finditer(r"BEH-\d+（(AC-[0-9/, ]+)）", body):
         for ref in re.findall(r"AC-\d+", m.group(1)):
             assert ref in text
+
+
+def test_negative_assertions_present():
+    """R1-C H-1/H-2/H-4：关键 fail-open 面必须有负向断言（异常/缺失即红）。"""
+    fm = load_fm()[0]
+    acs = {a["id"]: a["then"] for a in fm["acceptanceCriteria"]}
+    negative_words = ("红", "不通过", "作废", "失败", "拦截")
+    for ac_id in ("AC-1", "AC-3", "AC-5", "AC-14", "AC-18"):
+        assert any(w in acs[ac_id] for w in negative_words), f"{ac_id} 缺负向断言（fail-open 缝隙）"
 
 
 def test_no_exemption_of_governance():
