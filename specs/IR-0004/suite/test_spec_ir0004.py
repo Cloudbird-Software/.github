@@ -12,7 +12,7 @@ SPEC = Path(__file__).resolve().parents[1] / "spec.md"
 IR_ITEM_COUNT = 20  # IR #315 期望的可观察变化共 20 条，AC 一一映射
 
 
-def test_frontmatter_parses():
+def load_fm():
     text = SPEC.read_text(encoding="utf-8")
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     assert m, "frontmatter 定界符缺失或未闭合"
@@ -23,8 +23,12 @@ def test_frontmatter_parses():
     return fm, text
 
 
-def test_acs_complete_and_unique(fm):
-    acs = fm["acceptanceCriteria"]
+def test_frontmatter_parses():
+    load_fm()
+
+
+def test_acs_complete_and_unique():
+    acs = load_fm()[0]["acceptanceCriteria"]
     assert len(acs) == IR_ITEM_COUNT, f"AC 数 {len(acs)} != IR 期望变化数 {IR_ITEM_COUNT}"
     ids = [a["id"] for a in acs]
     assert ids == [f"AC-{i}" for i in range(1, IR_ITEM_COUNT + 1)], "AC 编号不连续"
@@ -34,7 +38,8 @@ def test_acs_complete_and_unique(fm):
         assert "运行时证据" in a["then"], f"{a['id']} 缺运行时证据子句"
 
 
-def test_blastradius_and_nongoals(fm):
+def test_blastradius_and_nongoals():
+    fm = load_fm()[0]
     assert fm["blastRadius"], "blastRadius 为空"
     for b in fm["blastRadius"]:
         assert set(b) >= {"repo", "path"}, f"blastRadius 条目缺字段: {b}"
