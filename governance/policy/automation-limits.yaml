@@ -75,3 +75,16 @@ circuit_breaker:
   # 人工复位：owner PATCH org 变量为 false（或 DELETE）+ 在 P0 issue 留复位评论（留痕）；
   # cost-check 确认"变量已复位且用量 <100%"后自动关闭 P0 issue
   reset_by: randypanding
+
+# ---- CNB 免费算力池参数（EX-1 / ADR-0085 / IR-0004 AC-15；配置面：加账号=改配置零代码）----
+cnb:
+  accounts:                       # 与 cnb-bridge/accounts.yaml 对账（漂移即红）
+    - alias: xuemei
+      secret: CNB_TOKEN_XUEMEI    # org secret，仅 cnb-dispatch/cnb-audit 可见
+    - alias: p11
+      secret: CNB_TOKEN_P11
+  tiers: {light: 1, std: 2, heavy: 4}   # 核数；8C 禁用；heavy 须 ADR
+  default_tier: light
+  max_concurrent_per_account: 8
+  quota_alert_pct: 20             # 余量低于此值自动开 cost 类 issue
+  ledger_reconcile_deviation_pct: 10    # 快照差分 vs build logs 实耗对账偏差告警线

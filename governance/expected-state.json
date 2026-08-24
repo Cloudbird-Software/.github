@@ -101,7 +101,9 @@
     "CB_APP_ID",
     "AGENT_APP_SECRET",
     "GOVERNANCE_TOKEN",
-    "LLM_API_KEY1"
+    "LLM_API_KEY1",
+    "CNB_TOKEN_XUEMEI",
+    "CNB_TOKEN_P11"
   ],
   "github_app": {
     "name": "cloudbrid-agent",
@@ -139,18 +141,16 @@
     "repositories": [
       ".github",
       "CI-Workflows",
-      "agent-registry",
       "archive",
       "template-service",
-      "agent-tools",
-      "agent-platform",
       "arbiter",
       "Shorts_Director",
       "Script_Writer",
       "Use-up-Plan",
       "AI_Web_School",
       "mutual",
-      "holdout"
+      "holdout",
+      "cnb-bridge"
     ]
   },
   "direct_push_exemptions": {
@@ -213,5 +213,8 @@
         "path": ".github/workflows/adversary-gate.yml"
       }
     ]
+  },
+  "notes": {
+    "adr_0085": "ADR-0085：agent-registry/agent-platform/agent-tools 退役（GitHub 归档只读）；CNB 双账号 secret 登记（EX-1 三接缝）；cnb-bridge 入 verifier 挂载面"
   }
 }

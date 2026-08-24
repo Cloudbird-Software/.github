@@ -150,48 +150,35 @@ domains:
         strength: advisory
 
   agent_runtime:
-    # 标准本体: standards/agent/{tool,skill,agent,team,event}.schema.yaml
-    # 注册条目: Cloudbird-Software/agent-registry
+    # ADR-0085 重写：多 agent 编排声明层退役（agent-registry/agent-platform/agent-tools
+    # 已归档）；角色载体=GitHub Actions 工作流（红队/验证者）+ PM 会话（规划）。
+    # 保留有现实载体的条款，声明类条款随退役废止（历史正文见 archive/retired/）。
     measures:
       - id: AR-1
-        intent: "agent/skill/tool/team 四类声明 + 模型注册表唯一落盘 agent-registry；本地运行目录仅为部署产物；运行实例可追溯到声明+版本"
+        intent: "角色治理走 GitHub 原生：开发身份=cloudbrid-agent App（AG-1）；验证者=verifier-app（ADR-0076）；红队=adversary 工作流（AR-10）；PM=任意持凭据会话+ghcb 入口协议。显式 agent/skill/tool/team 声明层退役（ADR-0085）"
         strength: enforced
-        platform: {github: {mechanism: repo, name: agent-registry, validate: agent-registry/scripts/validate.py}}
-        verify: {method: registry-validate, on: PR}
       - id: AR-2
-        intent: "引用 status!=approved 的注册条目 = CI 拒绝；proposed→approved 必须走 PR"
+        intent: "模型/工具接入一律经计量面：LLM 调用唯一入口=CI-Workflows metering wrapper（ADR-0062）；外部工具=key 经 org secret、调用经 dispatch 经纪人（providers.yaml 目录+cnb-dispatch 先例）；任何仓库/工作流配置零明文 key（AR-3 第一期形态延续，ADR-0048）"
         strength: enforced
-        platform: {github: {mechanism: script, entry: agent-registry/scripts/validate.py}}
       - id: AR-3
-        intent: "模型接入一律经 LLM Gateway：声明只引用 alias；provider key 仅存 gateway secret store；任何仓库/agent 配置零明文 key。第一期形态（IR-0001 DECISION-01/ADR-0048）——无 gateway 时允许直连 provider API，key 仅存 org secret LLM_API_KEY（expected-state §5 登记存在性），一切调用经 CI-Workflows 计量 wrapper（scripts/llm-call.sh）落盘用量；alias 语义与 AR-8 不变，回切触发条件见 ADR-0048"
+        intent: "PM 自主边界（ADR-0085 决策 1）：阶段门禁之间资源调用完全自主；不可触碰=判定语义（生成/裁决分离）、fail-closed、append-only 账本、凭据纪律。上升策略不预设——PM 实践经运行报告（archive/runs/）沉淀后再成文"
         strength: enforced
-      - id: AR-4
-        intent: "agent 凭据最小权限：per-agent/per-team 作用域 token（衔接 AG-1）；声明中只写 env 引用"
-        strength: enforced
-      - id: AR-5
-        intent: "双层控制：软引导（AGENTS.md/identity/skill 正文）+ 硬边界（工具面裁剪→权限引擎→凭据→平台防线）；冲突时硬控制优先；拦截记录进事件流"
-        strength: enforced
-      - id: AR-6
-        intent: "团队必须声明 lifecycle；ephemeral 团队 archive_to+team 侧 handoff 全部完成才允许销毁（stewardship 侧项由 curator 异步消费归档资产执行，不阻塞销毁——红队 #18 措辞对齐，ADR-0016）；persistent 团队（team:stewardship——ADR-0004 规划名 governance-core 的落地形态）对治理资产持续负责"
-        strength: enforced
-        platform: {github: {mechanism: script, entry: agent-registry/scripts/validate.py, check: lifecycle}}
-      - id: AR-7
-        intent: "过程数据三分离：声明/决策→git(registry/ADR)；事件→数据层(JSONL 起步)；原始轨迹→对象存储滚动30天；项目仓仅 AGENTS.md+team 引用行"
-        strength: enforced
-        schema: standards/agent/event.schema.yaml
-      - id: AR-8
-        intent: "agent 必须声明 archetype（九 LLM 原型封顶：builder/planner/test-author/judge/curator/adversary/researcher/deployer/responder + 六机制原型不实例化，ADR-0010）；builder↔test-author、planner↔builder 不得同一声明；test-author/judge 族级独立（models.yaml family）；新增原型须 ADR 论证"
-        strength: enforced
-        validate: agent-registry/scripts/validate.py
-      - id: AR-9
-        intent: "可信交付=失败可见：agent 内 guardrails → test-author 出题（owner 已批验收示例→冻结测试树）→ verifier 机制判卷（required check）→ persistent 团队外部审计（escape review/控制测试）→ 平台防线兜底；builder 永不自我信任；意图保真靠 owner 批验收示例（intent ratification）"
-        strength: enforced
-        validate: agent-registry/scripts/validate.py
       - id: AR-10
         intent: "红队守门 Veto 强制力：红队审计 verdict=insufficient 时状态变为 needs-human 且无法进入 wave-planned；specs/** 路径 PR 必须包含 adversary check；开发实现路径 PR 按 EXPECTED_SKIP 模式条件化豁免"
         strength: enforced
         platform: {github: {mechanism: ruleset-required-status, context: "adversary", workflow: "CI-Workflows/.github/workflows/adversary*.yml"}}
         verify: {method: adversary-run, on: PR}
+
+  external_compute:
+    # ADR-0085 / IR-0004 D 组（cnb-bridge-design 三平面）：发散与执行侧可外置免费算力；
+    # 判定与裁决永不外置。CNB=当前唯一实例（cnb-bridge 仓，可删除层）。
+    measures:
+      - id: EX-1
+        intent: "外部免费算力（当前=CNB CodeBuddy NPC 沙箱池）仅用于生成与执行侧（默认实现引擎：常规卡优先派发，强模型 PM 处理 gate 红/语义敏感）；判定锚点全部在 GitHub CI（沙箱自报数字不采信，INV-01/02 语义）"
+        strength: enforced
+        platform: {external: {bridge: cnb-bridge, removable: true,
+           removal_drill: "cnb-bridge/REMOVAL.md 单页清单；删除后 gate/org-gate/conductor 语义不变（ADR-0085 决策 6 断言）",
+           seams: "GOVERNANCE 本条目 + org secrets CNB_TOKEN_<ALIAS> + .github cnb-dispatch/cnb-audit 两工作流（隔离审计=cnb-audit 周扫，操作性引用越界即红）"}}
 
 flows:
   governance_change:
@@ -199,12 +186,12 @@ flows:
     # 授权凭证 = ADR + PR 记录；破玻璃保留但被监控
     classes:
       - id: C1
-        scope: ["governance/（整目录——含 GOVERNANCE/REPOS.yaml、rulesets、expected-state、apply/drift 脚本、policy）", standards/, models.yaml, decisions/, scripts/, ".github/（CI 门禁自身——改门禁=改治理）", CODEOWNERS, profile/, "tests/（agent-registry 验证器元测试——验证器之验证）", "template-service 脚手架面（.github/、AGENTS.md、Makefile、docs/、zizmor.yml——供应链入口：模板防线被污染=全部新仓继承后门，红队修复 P0；src/ 业务面属 C3。ADR-0021 收敛范围：整仓 C1 会与 SC-3 依赖 automerge 冲突——依赖 PR 无 ADR 不可自动合并）"]
+        scope: ["governance/（整目录——含 GOVERNANCE/REPOS.yaml、rulesets、expected-state、apply/drift 脚本、policy）", standards/, specs/, scripts/, ".github/（CI 门禁自身——改门禁=改治理）", CODEOWNERS, profile/, "tests/（agent-registry 验证器元测试——验证器之验证）", "template-service 脚手架面（.github/、AGENTS.md、Makefile、docs/、zizmor.yml——供应链入口：模板防线被污染=全部新仓继承后门，红队修复 P0；src/ 业务面属 C3。ADR-0021 收敛范围：整仓 C1 会与 SC-3 依赖 automerge 冲突——依赖 PR 无 ADR 不可自动合并）"]
         requires: [PR, "ADR（新建或引用编号）", "drift-check 本地预检", owner-merge]
         rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并。scope 与机器执法路径全集一致（.github gate：governance/standards/scripts/.github/CODEOWNERS/profile；agent-registry validate：standards/decisions/scripts/.github/CODEOWNERS/tests——评审项：声明与执行不得互斥）；template-service 的脚手架面是新仓派生源头，视同治理意图变更（gate adr-required 机器检查 + owner-only review；ADR-0021 范围收敛后与 CI-Workflows ci.yml 的 C1 路径判定一致）"
       - id: C2
-        scope: [agent-registry/registry/, 业务仓 AGENTS.md/CODEOWNERS]
-        requires: [PR, "validate.py 通过"]
+        scope: ["业务仓 AGENTS.md/CODEOWNERS"]   # agent-registry/registry/ 随 ADR-0085 退役；C2 validate 门随声明层废止
+        requires: [PR]
       - id: C3
         scope: [文档/注释/README/模板]
         requires: [PR]

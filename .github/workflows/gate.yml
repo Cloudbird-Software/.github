@@ -111,7 +111,7 @@ jobs:
     if: always()
     permissions:
       contents: read        # job 级最小权限（评审项：防后续新增 job 继承 workflow 级权限）；
-                           # 兼读公开仓 agent-registry/decisions（adr-required 存在性校验）
+                           # 兼读公开仓 archive/adr（adr-required 存在性校验，ADR-0085 家园单仓化）
       pull-requests: read   # 仅 adr-required 步骤读取 PR 文件清单
     steps:
       - name: hygiene green?
@@ -202,9 +202,9 @@ jobs:
       # adr-required（红队 #17-B/D、#18-P0 部分；对齐 agent-registry ADR-0013 同名 check）：
       # C1 路径（governance/ standards/ scripts/ .github/ CODEOWNERS）变更的 PR，
       # title/body 必须引用 ADR-NNNN——GOVERNANCE flows.governance_change "无 ADR 不合并"
-      # 的机器执行。本仓不落盘 ADR（L1 决策记录在 agent-registry/decisions/，
+      # 的机器执行。本仓不落盘 ADR（正本+索引在 archive/adr/（ADR-0085 家园单仓化），
       # 见 REPOS.yaml role）。存在性校验（ADR-0021 升级）：ADR-0020 全仓公开后，
-      # GITHUB_TOKEN 可读公开仓 contents——被引 ADR 必须真实存在于 agent-registry/decisions/
+      # GITHUB_TOKEN 可读公开仓 contents——被引 ADR 必须真实存在于 archive/adr/
       #（此前只能等 drift-check §10 后验，伪造引用有 24h 窗口；现在 PR 时点即拦）。
       # 实体性（防空壳）仍由 drift-check §10 后验；owner-only review 仍是权威人类门禁。
       - name: adr-required（C1 变更须引用 ADR）
@@ -255,7 +255,7 @@ jobs:
             exit 1
           fi
           # 存在性校验（ADR-0021）+ 索引世界（ADR-0053/W1-C1 .github#164）双世界兼容：
-          # 先试拉 agent-registry decisions/INDEX.yaml（墓碑索引）——
+          # 先试拉 archive/adr/INDEX.yaml（墓碑索引，ADR-0085 迁入）——
           #   200  → 索引世界（迁移后）：decisions/ 只留同名墓碑（文件名保留正是为了
           #          让本步骤的存在性清单与 org-gate v1.4.2 按文件名校验零改动兼容），
           #          正本在 archive 仓 adr/。被引 ADR-NNNN 必须在 INDEX entries 且
@@ -265,7 +265,7 @@ jobs:
           #   404  → 旧世界（迁移未发生/已回滚）：现有 decisions/ 清单逻辑原样。
           #   其他 → fail-closed（检测器失明不得伪装通过）。
           # 两世界共通不变量：引用不存在的编号一律 fail（防幽灵 ADR 语义不回归，#164 AC-2）。
-          ADR_INDEX_JSON=$(gh api "repos/Cloudbird-Software/agent-registry/contents/decisions/INDEX.yaml" 2>&1 >/tmp/adr_index.json; echo "rc=$?")
+          ADR_INDEX_JSON=$(gh api "repos/Cloudbird-Software/archive/contents/adr/INDEX.yaml" 2>&1 >/tmp/adr_index.json; echo "rc=$?")
           if jq -e '.content' /tmp/adr_index.json >/dev/null 2>&1; then
             ADR_WORLD="index"
             base64 -d <<<"$(jq -r .content /tmp/adr_index.json)" >/tmp/adr_index.yaml 2>/dev/null
@@ -289,13 +289,13 @@ jobs:
           elif grep -q "Not Found" <<<"$ADR_INDEX_JSON"; then
             ADR_WORLD="legacy"
           else
-            echo "::error::agent-registry decisions/INDEX.yaml 拉取失败（非 404）——索引世界判定失败，fail-closed"
+            echo "::error::archive/adr/INDEX.yaml 拉取失败（非 404）——索引世界判定失败，fail-closed（ADR-0085 家园单仓化）"
             exit 1
           fi
           if [[ "$ADR_WORLD" == "legacy" ]]; then
-            ADR_LISTING=$(gh api "repos/Cloudbird-Software/agent-registry/contents/decisions?per_page=100" --paginate --jq '.[].name' 2>/dev/null)
+            ADR_LISTING=$(gh api "repos/Cloudbird-Software/archive/contents/adr?per_page=100" --paginate --jq '.[].name' 2>/dev/null)
             if [[ -z "$ADR_LISTING" ]]; then
-              echo "::error::agent-registry/decisions 清单拉取失败——ADR 引用存在性无法校验（fail-closed）"
+              echo "::error::archive/adr 清单拉取失败——ADR 引用存在性无法校验（fail-closed）"
               exit 1
             fi
           fi
@@ -326,7 +326,7 @@ jobs:
                 MISSING=1
               fi
             elif ! grep -q "^ADR-${num}-" <<<"$ADR_LISTING"; then
-              echo "::error::引用的 ${ref} 在 agent-registry/decisions/ 无对应文件（幽灵 ADR——C1 决策背书不成立）"
+              echo "::error::引用的 ${ref} 在 archive/adr/ 无对应文件（幽灵 ADR——C1 决策背书不成立）"
               MISSING=1
             fi
           done

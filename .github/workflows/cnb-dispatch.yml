@@ -1,0 +1,177 @@
+name: cnb-dispatch
+# =============================================================================
+# CNB 派单经纪人（PM 默认实现主力入口，ADR-0085 裁决 2 / 决策 6；IR-0004 AC-14）
+#
+# 硬注释（改动前必读）：
+#   - 本工作流是治理仓 CNB 三接缝之一（GOVERNANCE EX-1 声明条目 / IFACE-01，
+#     ADR-0085 决策 6 / IR-0004）：治理仓对 CNB 的操作性引用收敛于
+#     GOVERNANCE.yaml + org secrets + cnb-dispatch/cnb-audit 两工作流；
+#     cnb-audit 第③步隔离 grep 在本文件之外的命中即红。
+#   - 判定永不外置（INV-02）：本经纪人只派发生成侧任务，NPC 产物进任何判定链
+#     前必经机械核对（INV-03：基准 SHA/差异可应用/格式校验）——沙箱自报数字不采信。
+#   - 任务文本禁止包含任何凭据（INV-06）：token 只经 org secret 注入本经纪人，
+#     永不进入 PM 上下文/任务文本/沙箱环境（DECISION-01 缓解条款）。
+#   - 无人值守护栏适用（ADR-0040）：派单前查 org 变量 AUTO_MERGE_DISABLED，
+#     置位即停（fail-closed，禁止任何绕过尝试）。
+#
+# 异步派单：不等待 NPC 回复；产物回收走 cnb-bridge `cnb_pool.py collect`
+# 或 cnb-audit 周审计。actions 只用 org 白名单内的 checkout（CI-2），
+# 其余逻辑一律 python3/bash——不引入新第三方 Action。
+# =============================================================================
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '任务文本（机器可读，IFACE-02：必含清单 ID；std/heavy 须带 tier-reason:/tier-adr: 行）'
+        required: true
+        type: string
+      card:
+        description: 关联卡 issue 编号（选填，写进派单回执审计面）
+        required: false
+        type: string
+        default: ''
+      tier:
+        description: '核时档位：light=1C（默认）/ std=2C / heavy=4C；8C 禁用（BUDGET-01）'
+        required: false
+        type: string
+        default: light
+      account:
+        description: 'CNB 池账号别名：xuemei（默认）/ p11'
+        required: false
+        type: string
+        default: xuemei
+  repository_dispatch:
+    types: [cnb-dispatch]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cnb-dispatch
+  cancel-in-progress: false   # 派单不互相挤占——排队而非取消（审计面完整）
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1（org 白名单 CI-2）
+        with:
+          persist-credentials: false
+      # ------------------------------------------------------------------
+      # 步骤 1：归一化双入口入参 + 派单前置检查（ADR-0040 护栏 / INV-06 凭据红线）
+      # ------------------------------------------------------------------
+      - name: preflight（入参归一化 + AUTO_MERGE_DISABLED + 凭据嗅探）
+        env:
+          I_TASK: '${{ inputs.task || github.event.client_payload.task }}'
+          I_CARD: '${{ inputs.card || github.event.client_payload.card }}'
+          I_TIER: '${{ inputs.tier || github.event.client_payload.tier }}'
+          I_ACCOUNT: '${{ inputs.account || github.event.client_payload.account }}'
+          # org Actions 变量（visibility=all，全仓可读，automation-limits.yaml circuit_breaker 节）
+          AUTO_MERGE_DISABLED: '${{ vars.AUTO_MERGE_DISABLED }}'
+        run: |
+          set -euo pipefail
+          [[ -n "${I_TASK:-}" ]] || { echo '::error::task 缺失（必填）——拒发'; exit 1; }
+          : "${I_TIER:=light}"
+          : "${I_ACCOUNT:=xuemei}"
+          : "${I_CARD:=}"
+          # ADR-0040：熔断标志置位即停一切派发（空=未置位；fail-closed，禁绕过）
+          if [[ "${AUTO_MERGE_DISABLED,,}" =~ ^(true|1|yes)$ ]]; then
+            echo '::error::AUTO_MERGE_DISABLED 已置位——成本熔断中，停止一切 CNB 派单（ADR-0040）'
+            exit 1
+          fi
+          # INV-06：任务文本禁含凭据字样——机械预检，命中即红（拒发即止损）
+          if grep -qiE 'CNB_TOKEN|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY' <<<"$I_TASK"; then
+            echo '::error::任务文本疑似包含凭据（INV-06）——拒发；重写任务文本，凭据只走 org secret'
+            exit 1
+          fi
+          # 多行 TASK 用 heredoc 定界符写入环境面（GITHUB_ENV 多行语法）
+          {
+            printf 'TASK<<CNB_DISPATCH_EOF\n%s\nCNB_DISPATCH_EOF\n' "$I_TASK"
+            echo "CARD=$I_CARD"
+            echo "TIER=$I_TIER"
+            echo "ACCOUNT=$I_ACCOUNT"
+          } >> "$GITHUB_ENV"
+      # ------------------------------------------------------------------
+      # 步骤 2：档位校验——真源 governance/policy/automation-limits.yaml cnb 节
+      # （已落地：tiers {light:1, std:2, heavy:4} / default_tier: light，IR-0004 AC-15；
+      # cnb 节缺失即红：fail-closed，不内置缺省档位——同 test_integrity
+      #  “本节拉取失败 = gate 红”先例，BUDGET-01）
+      # ------------------------------------------------------------------
+      - name: 档位校验（policy 为准，fail-closed）
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys, yaml
+          with open('governance/policy/automation-limits.yaml', encoding='utf-8') as f:
+              policy = yaml.safe_load(f)
+          cnb = policy.get('cnb')
+          if not isinstance(cnb, dict) or not cnb.get('tiers'):
+              print('::error::automation-limits.yaml 缺 cnb.tiers 节——IR-0004 D 组落地前 fail-closed，'
+                    '不得内置缺省档位（policy 为准原则）')
+              sys.exit(1)
+          tiers = cnb['tiers']                       # 期望形如 {light: 1, std: 2, heavy: 4}
+          tier = os.environ['TIER']
+          if tier not in tiers:
+              print(f'::error::未知/禁用档位 tier={tier}；允许集={sorted(tiers)}（8C 禁用，BUDGET-01）')
+              sys.exit(1)
+          task = os.environ['TASK']
+          if tier == 'std' and not re.search(r'tier-reason:\s*\S.{4,}', task):
+              print('::error::std=2C 须在任务文本带 tier-reason: <一句话理由>（BUDGET-01）')
+              sys.exit(1)
+          if tier == 'heavy' and not re.search(r'tier-adr:\s*ADR-\d{4}', task):
+              print('::error::heavy=4C 须在任务文本带 tier-adr: ADR-NNNN（BUDGET-01）')
+              sys.exit(1)
+          cpus = tiers[tier]
+          if int(cpus) >= 8:
+              print(f'::error::档位 {tier}={cpus}C 达禁用线（8C 禁用，BUDGET-01）')
+              sys.exit(1)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as f:
+              f.write(f'CPUS={cpus}\n')
+          print(f'tier={tier} cpus={cpus}C（policy cnb.tiers 校验通过）')
+          EOF
+      # ------------------------------------------------------------------
+      # 步骤 3：checkout cnb-bridge（L2 可删除层，ADR-0085 决策 6；main）
+      # ------------------------------------------------------------------
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Cloudbird-Software/cnb-bridge
+          ref: main
+          path: cnb-bridge
+          persist-credentials: false
+      # ------------------------------------------------------------------
+      # 步骤 4：选定账号令牌 + 派单。
+      # secret 引用必须在表达式中静态出现（GH Actions 无法动态索引 secrets）——
+      # 故用 env 映射落地 "account=xuemei→CNB_TOKEN_XUEMEI / p11→CNB_TOKEN_P11"；
+      # 两个 secret 均按 org 侧 required: false 声明（缺失不阻断表达式求值），
+      # 运行时缺失即 fail-closed 红。加账号 = owner 加 org secret + 本映射加一行（C1 PR）。
+      # 令牌只在本步进程内 export，不落 GITHUB_ENV/日志/摘要。
+      # ------------------------------------------------------------------
+      - name: dispatch（token 仅本步内存面）
+        env:
+          CNB_TOKEN_XUEMEI: ${{ secrets.CNB_TOKEN_XUEMEI }}
+          CNB_TOKEN_P11: ${{ secrets.CNB_TOKEN_P11 }}
+        run: |
+          set -euo pipefail
+          case "$ACCOUNT" in
+            xuemei) export CNB_TOKEN="${CNB_TOKEN_XUEMEI:-}" ;;
+            p11)    export CNB_TOKEN="${CNB_TOKEN_P11:-}" ;;
+            *) echo "::error::未知账号 $ACCOUNT（池内：xuemei/p11；新增=owner 加 org secret + 本 env 映射一行，C1）"; exit 1 ;;
+          esac
+          [[ -n "${CNB_TOKEN:-}" ]] || { echo "::error::org secret CNB_TOKEN_${ACCOUNT^^} 缺失——fail-closed 红（令牌通道唯一=org secret，INV-06）"; exit 1; }
+          # [run:<run-id>] 锚由 cnb_pool.py 在任务文本内附加（IFACE-02：run-id 前缀落 payload.run_id）；
+          # CLI 契约=位置参数 body + --account/--tier（档位→核数映射与 build logs 对账在 cnb-audit 侧）
+          set -- python3 cnb-bridge/cnb_pool.py dispatch "$TASK" --account "$ACCOUNT" --tier "$TIER"
+          "$@" | tee dispatch.out
+          # 审计面：窗口/账号/run_id 回执同步落 run 日志与 step summary（异步派单不等待 NPC）
+          RUN_ID=$(grep -oE 'run_id=[^ ]+' dispatch.out | head -1 || true)
+          WINDOW=$(grep -oE 'window=[^ ]+' dispatch.out | head -1 || true)
+          {
+            echo '## CNB 派单回执（异步——回收走 collect / cnb-audit 周审计）'
+            echo
+            echo "- account=$ACCOUNT tier=$TIER cpus=$CPUS card=${CARD:-（无）} ${WINDOW} ${RUN_ID}"
+            echo
+            echo '```'
+            sed -n '1,60p' dispatch.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "AUDIT | cnb-dispatch | account=$ACCOUNT | tier=$TIER | cpus=$CPUS | card=${CARD:-none} | ${WINDOW:-window=n/a} | ${RUN_ID:-run_id=n/a}"

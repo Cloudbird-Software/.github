@@ -6,7 +6,7 @@ layers:
     allowed:
       - {language: go, when: "default"}
       - {language: typescript, when: "frontend-isomorphic only", requires: [TS-1, TS-2]}
-      - {language: python, when: "agent-runtime integration only（agent-platform：openjiuwen SDK 渲染/治理执行面——不写 Python 无法落地，ADR-0025 声明适配现实）", requires: [PY-1, PY-2]}
+      # ADR-0085：agent-platform 退役，Python 准入回归默认拒绝（存量豁免先例：ADR-0023 AI_Web_School、ADR-0084 QW_Arena1）
     forbidden: [rust, java, csharp, cpp, new_language_without_org_approval]
     rationale: "训练数据海量、写法单一、编译反馈快 → LLM 产出可靠"
   llm_prompt:

@@ -10,6 +10,13 @@
 #                                        # （仅 holder 本人或 owner 可成，ADR-0054 §4）
 #   ghcb status <n> [repo]                # 只读：卡标签态（真相源）+ arbiter 租约持有者/到期
 #   ghcb card-meta <n> [repo]             # 输出 PR body 应贴的卡元数据行（Card: <org>/<repo>#<n>）
+#   —— PM 子命令（ADR-0085）——
+#   ghcb board [repo]                     # PM 全流水线视图：全部 state:* 的 IR/卡（不只 ready）
+#   ghcb dispatch <n> [repo] [--tier light|std] [--account <alias>]
+#                                         # 派 CNB：触发 .github 仓 cnb-dispatch 工作流（EX-1 经纪人，
+#                                         # key 永不入 PM 上下文）；<n>=卡 issue 号
+#   ghcb accept <IR#>                     # 生成 IR 验收报告骨架（specs/IR-XXXX/acceptance.md）到 stdout
+#   ghcb report [周号]                    # 生成运行报告骨架（archive/runs/YYYY-WNN.md 追加段）到 stdout
 #
 # next/claim/release 用调用方自己的 gh 凭据（gh auth login）；认领合法性单一真源=conductor guard
 # + arbiter CAS（ADR-0055 转介）。status 读 arbiter 仓 refs/leases/*（只读，无写权要求）。
@@ -84,6 +91,77 @@ case "$CMD" in
     echo "Card: $(norm_repo "$REPO_ARG")#$N"
     echo "提示：把上面一行原样贴进 PR body（缺失=后续关卡 exit 3）" >&2
     ;;
+  board)
+    # PM 全流水线视图（ADR-0085）：全状态 IR/卡一览——修复冷上下文 PM"只看得到 ready 卡"的断面
+    REPO_ARG="${2:-$(origin_repo)}"
+    [[ -n "$REPO_ARG" ]] || { echo "错误：不在 git 仓内且未指定仓（用法: ghcb board [repo]）" >&2; exit 2; }
+    R="$(norm_repo "$REPO_ARG")"
+    for s in ir-draft ir-signed spec redteam wave-planned ready in-progress quarantine needs-human done; do
+      echo "== state:$s =="
+      gh issue list --repo "$R" --label "state:$s" --state open --json number,title         --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null || true
+    done
+    echo "== 无状态标签的 type:intent/card（=ir-draft 约定态）=="
+    gh issue list --repo "$R" --label type:intent --state open --json number,title,labels       --jq '.[] | select([.labels[].name | startswith("state:")] | any | not) | "#\(.number) \(.title)"' 2>/dev/null || true
+    ;;
+  dispatch)
+    # CNB 派单（EX-1 三接缝的 PM 面）：key 留在 org secret，本命令只发 workflow_dispatch
+    N="${2:?用法: ghcb dispatch <issue#> [repo] [--tier light|std] [--account <alias>]}"
+    REPO_ARG="${3:-$(origin_repo)}"; shift 3 2>/dev/null || shift $#
+    TIER="light"; ACCOUNT=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --tier) TIER="$2"; shift 2 ;;
+        --account) ACCOUNT="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    CARD_REPO="$(norm_repo "$REPO_ARG")"
+    TITLE=$(gh issue view "$N" --repo "$CARD_REPO" --json title --jq .title 2>/dev/null)       || { echo "错误：卡 #$N 读取失败" >&2; exit 2; }
+    echo "派单 → CNB（卡 #$N「${TITLE}」｜档位 $TIER${ACCOUNT:+｜账号 $ACCOUNT}）"
+    echo "任务文本=卡正文+本提示；经 .github 仓 cnb-dispatch 经纪人执行（key 永不出 org secret）"
+    MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 gh workflow run cnb-dispatch.yml       -R "$ORG/.github" -f card="$CARD_REPO#$N" -f tier="$TIER" ${ACCOUNT:+-f account="$ACCOUNT"}       -f task="@card"       && echo "已触发（几分钟后在 .github 仓 Actions→cnb-dispatch 看 run；回收=gh workflow run cnb-dispatch.yml -f ... 或 cnb-audit 周扫）"       || { echo "错误：workflow 触发失败（检查 gh 凭据对 $ORG/.github 的写权）" >&2; exit 2; }
+    ;;
+  accept)
+    # IR 验收报告骨架（T9 谓词消费 specs/<IR>/acceptance.md）——PM 填证据后 PR 入仓
+    N="${2:?用法: ghcb accept <IR issue#>}"
+    IRID=$(gh issue view "$N" -R "$ORG/.github" --json title --jq .title 2>/dev/null | grep -oE 'IR-[0-9]+' | head -1)
+    [[ -n "$IRID" ]] || IRID="IR-$(printf '%04d' "$N")"
+    cat <<SKEL
+# ${IRID} 验收报告（T9 / ADR-0085）
+
+- IR: Cloudbird-Software/.github#${N}
+- 验收人: <PM 标识>　验收日期: $(date -u +%F)
+- 判据: IR 正文的"期望的可观察变化"逐条 + 运行时证据链接（SHA 锚定）
+
+## 子卡清单（曾存在性自证；全部须 state:done）
+- #<卡号> <标题> → PR <链接> <merge SHA>
+<!-- gh issue list -R Cloudbird-Software/.github --label type:card 可核对 -->
+
+## 逐条证据
+| # | 期望变化 | 证据（链接+SHA） | 结论 |
+|---|---------|-----------------|------|
+| 1 | <从 IR 抄写> | <run 链接/仓路径@SHA> | ✅ |
+
+## 残留与移交
+- <已知未竟项/后续 IR 建议——诚实申报，验收不掩盖>
+SKEL
+    ;;
+  report)
+    # 运行报告骨架（ADR-0085 决策 8）——追加到 archive/runs/YYYY-WNN.md
+    python3 - <<'PY'
+import datetime
+t = datetime.date.today(); y, w, _ = t.isocalendar()
+print(f"### run-{y}w{w:02d}-{int(datetime.datetime.now().timestamp())%100000} · {t.isoformat()} · <PM 标识>")
+print("scope: [<IR-XXXX>, #<issue>]")
+print()
+print("**事实** ——")
+print("**体感** ——")
+print("**改进点** ——")
+print("[followup] <playbook|policy|gate|tool>: <一行一提案>")
+PY
+    echo "↑ 追加到 archive/runs/$(date -u +%G)-W$(date -u +%V).md（三节式缺节即不合格；格式见 archive/runs/README.md）" >&2
+    ;;
+
   *)
     export REPO="${1:?用法: GH_TOKEN=$(ghcb <repo> [--refresh]) | ghcb next [repo] | ghcb claim <n> [repo] | ghcb release <n> [repo] | ghcb status <n> [repo] | ghcb card-meta <n> [repo]}"
     shift || true
