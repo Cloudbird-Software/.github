@@ -77,6 +77,53 @@ def test_key_ac_artifact_words():
         assert all(w in acs[ac_id] for w in words), f"{ac_id} 缺绑定工件词 {words}"
 
 
+
+
+# ---- 语义锚定 v3（adversary S1' posed-acceptance-criteria 补强，run 32686773389）----
+# 摆拍攻击=最小成本通过结构检查；以下断言把通过成本抬到"必须写出实质 spec"：
+# 概念绑定（21 概念↔21 AC）、负向断言须为条件-后果结构、证据须含两类工件、
+# then 密度下限、IR 量化常量锚定。任一不满足即红。
+
+CONCEPTS = {
+    "AC-1": ("变异",), "AC-2": ("不变量", "属性"), "AC-3": ("模糊", "fuzz"),
+    "AC-4": ("蜕变",), "AC-5": ("符号执行",), "AC-6": ("SAST", "分诊"),
+    "AC-7": ("形式化", "checklist"), "AC-8": ("DSL", "编译"), "AC-9": ("骨架",),
+    "AC-10": ("fan-out", "竞速", "early-exit"), "AC-11": ("champion", "对拍"),
+    "AC-12": ("oracle",), "AC-13": ("燃料", "淘汰路线"), "AC-14": ("接缝",),
+    "AC-15": ("配额", "档位"), "AC-16": ("runbook", "入职"), "AC-17": ("work-inbox", "租约"),
+    "AC-18": ("审计",), "AC-19": ("演练",), "AC-20": ("试点",), "AC-21": ("token",),
+}
+# IR#315 量化常量锚（防数值漂移/空洞化）
+QUANT_ANCHORS = {
+    "AC-2": ("10 条",), "AC-4": ("15 条", "3 条"), "AC-9": ("3–4", "3-4"),
+    "AC-15": ("1C", "2C", "4C"), "AC-16": ("canary",), "AC-17": ("七天", "7 天"),
+}
+ARTIFACTS = ("run", "日志", "JSON", "JSONL", "diff", "issue", "仪表盘", "记录", "构建")
+# 负向断言=条件-后果结构（非裸词）
+NEG_STRUCT = re.compile(
+    r"(缺失|为空|不足|失败|超时|未运行|停摆|摘除|越界|不一致|作废|漂移)[^。；]{0,50}(红|不通过|作废|拦截|infra 失败)|(红|不通过|作废|拦截)[^。；]{0,20}(缺失|为空|不足|失败)")
+
+
+def test_semantic_anchors():
+    fm = load_fm()[0]
+    acs = {a["id"]: a for a in fm["acceptanceCriteria"]}
+    for ac_id, concept_words in CONCEPTS.items():
+        blob = acs[ac_id]["given"] + acs[ac_id]["when"]
+        assert any(w in blob for w in concept_words), f"{ac_id} 未绑定领域概念 {concept_words}"
+    for ac_id, nums in QUANT_ANCHORS.items():
+        whole = acs[ac_id]["given"] + acs[ac_id]["when"] + acs[ac_id]["then"]
+        for q in nums:
+            assert q in whole, f"{ac_id} 缺量化锚 {q}"
+    for ac_id, a in acs.items():
+        then = a["then"]
+        assert len(then) >= 60, f"{ac_id} then 过短（<60 字）——疑似空洞 AC"
+        hits = sum(1 for w in ARTIFACTS if w in then)
+        assert hits >= 2, f"{ac_id} 运行时证据须含≥2类工件词（当前 {hits}）"
+    for ac_id in ("AC-1", "AC-2", "AC-3", "AC-5", "AC-6", "AC-11", "AC-12",
+                  "AC-13", "AC-14", "AC-15", "AC-16", "AC-17", "AC-18", "AC-19", "AC-21"):
+        assert NEG_STRUCT.search(acs[ac_id]["then"]), f"{ac_id} 负向断言非条件-后果结构（裸词不算）"
+
+
 def test_negative_assertions_present():
     """R1-C H-1/H-2/H-4：关键 fail-open 面必须有负向断言（异常/缺失即红）。"""
     fm = load_fm()[0]
