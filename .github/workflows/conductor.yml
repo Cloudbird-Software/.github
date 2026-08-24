@@ -412,13 +412,24 @@ jobs:
               gate 绿由 PR required checks 承担（合并事实即全 gate 绿的载体）；
               不信任标签事件载荷——API 重查（fail-closed：读取失败=拒绝）。"""
               target = f"{REPO}#{issue_number}"
+              # 跨仓检索（ADR-0085 实走教训：卡在治理仓、PR 可落在任意仓——
+              # archive#17/cnb-bridge#1 均为跨仓绑定，本仓清单法漏判）。
+              # search 索引分钟级延迟：命中即真（合并事实不可伪造），未命中再回退
+              # 本仓 pulls 双查，两通道皆空才判未完成（重置 done 标签即重放，幂等）。
+              q = urllib.parse.quote(f'"{target}" is:pr is:merged org:{ORG}')
+              st, hits = api(E["APP_TOKEN"], f"/search/issues?q={q}&per_page=20")
+              search_ok = st == 200
+              if search_ok:
+                  for it in hits.get("items") or []:
+                      if target in (it.get("body") or ""):
+                          return True, f"跨仓 PR 已合并：{it.get('html_url')} 绑定 {target}"
               st, prs = api(E["APP_TOKEN"], f"/repos/{REPO}/pulls?state=closed&per_page=100")
-              if st != 200:
-                  return False, f"PR 清单读取失败 HTTP {st}（fail-closed）"
+              if st != 200 and not search_ok:
+                  return False, f"PR 检索双通道均不可用（search={search_ok} pulls HTTP {st}——fail-closed）"
               for pr in prs or []:
                   if pr.get("merged_at") and target in (pr.get("body") or ""):
                       return True, f"PR #{pr['number']} 已合并（{pr['merged_at']}）绑定 {target}"
-              return False, f"无绑定 {target} 且已合并的 PR（近 100 个 closed PR 内）"
+              return False, f"无绑定 {target} 且已合并的 PR（跨仓 search{'OK' if search_ok else 'FAIL'} + 本仓 closed PR 双查均空）"
 
           if t["id"] == "T8":
               okp, reason = check_merged_pr(ISSUE)
