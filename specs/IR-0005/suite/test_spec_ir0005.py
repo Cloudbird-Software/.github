@@ -14,9 +14,19 @@ import re
 import sys
 import unittest
 
-# discover 模式下 __file__ 可能相对/含 .. 段——abspath+normpath 归一后再定位 impl 目录
-_HERE = os.path.dirname(os.path.abspath(__file__))
-IMPL = os.path.normpath(os.environ.get("IMPL_DIR", os.path.join(_HERE, "..", "..")))
+# impl 目录定位（三通道等价）：IMPL_DIR env（run-suite.sh/直跑）优先；
+# 否则从 cwd 向上探测 spec.md（gate 的 unittest discover 会把 __file__
+# 解析到不可预期的层级——弃用 __file__，2026-08-25 实测教训）
+_cwd = os.path.abspath(os.getcwd())
+IMPL = None
+if os.environ.get("IMPL_DIR"):
+    IMPL = os.path.normpath(os.environ["IMPL_DIR"])
+elif os.path.isfile(os.path.join(_cwd, "spec.md")):
+    IMPL = _cwd
+elif os.path.isfile(os.path.join(_cwd, "..", "spec.md")):
+    IMPL = os.path.normpath(os.path.join(_cwd, ".."))
+if IMPL is None:
+    raise AssertionError("无法定位 impl 目录（IMPL_DIR 未设且 cwd 上下文无 spec.md）")
 SPEC = os.path.normpath(os.path.join(IMPL, "spec.md"))
 ACC = os.path.normpath(os.path.join(IMPL, "acceptance.md"))
 
