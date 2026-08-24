@@ -19,7 +19,8 @@
 
 - 本仓治理文件与脚本（governance/ scripts/ .github/）
 - 组织 ruleset / App `cloudbrid-agent` / secret 配置异常
-- CI-Workflows 可复用工作流与 agent-registry 声明中的安全问题（转对应仓处置，本仓追踪）
+- CI-Workflows 可复用工作流中的安全问题（转对应仓处置，本仓追踪）
+- （ADR-0085：agent-registry 声明层已退役归档，不再是活处置面；历史声明安全问题按 archive 只读记录处理）
 
 ## 披露
 
