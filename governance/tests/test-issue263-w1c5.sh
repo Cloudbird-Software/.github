@@ -74,19 +74,21 @@ need("specs/" in repo_map[".github"].get("key_paths", []),
 need("pipeline/" in repo_map["CI-Workflows"].get("key_paths", []),
      "CI-Workflows key_paths 未补登 pipeline/")
 
-# --- org-required-workflows 钉点为 commit SHA 而非 tag ---
-wf = (orw.get("rules", [])[0].get("parameters", {}).get("workflows", []) + [{}])[0]
-ref = wf.get("ref", "")
-need(bool(re.fullmatch(r"[0-9a-f]{40}", ref)),
-     f"org-required-workflows.json 钉点不是 40 位 commit SHA: {ref}")
-need(wf.get("path") == ".github/workflows/org-gate.yml", "org-required-workflows 工作流路径异常")
+# --- org-required-workflows 钉点（2026-08-24 平台约束修订：SHA 恒被拒，钉分支名）---
+# ruleset API 对 required workflows 的 ref 只接受分支/标签（40 位 SHA 恒 422
+# "does not have ref"——多轮实测，ADR-0083 关联）；供应链完整性改由
+# expected-state.content 校验与 drift-check 后验承载。钉点=main + 双工作流面。
+wf_paths = [w.get("path") for w in orw.get("rules", [])[0].get("parameters", {}).get("workflows", [])]
+ref = (orw.get("rules", [])[0].get("parameters", {}).get("workflows", []) + [{}])[0].get("ref", "")
+need(ref in ("main", "master"), f"org-required-workflows.json 钉点须为分支名（平台不接受 SHA）: {ref}")
+need(".github/workflows/org-gate.yml" in wf_paths, "org-required-workflows 缺 org-gate.yml")
+need(".github/workflows/adversary-gate.yml" in wf_paths, "org-required-workflows 缺 adversary-gate.yml（ADR-0082/0083）")
 
-# expected-state 与 ruleset 一致
+# expected-state 与 ruleset 一致（ref=分支名；ref_commit 字段随平台约束废弃）
 orw_exp = expected.get("org_required_workflows", {})
 need(orw_exp.get("ref") == ref,
      f"expected-state.org_required_workflows.ref ({orw_exp.get('ref')}) 与 ruleset ({ref}) 不一致")
-need(orw_exp.get("ref_commit") == ref,
-     f"expected-state.org_required_workflows.ref_commit 应与 ref 同值")
+need("ref_commit" not in orw_exp, "ref_commit 已随 SHA 钉点废弃（平台约束）——expected-state 应删除")
 
 for e in errs:
     print("ERR", e)

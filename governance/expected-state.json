@@ -195,12 +195,19 @@
     ]
   },
   "org_required_workflows": {
-    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本（path/ref/repository_id 任何改动即漂移）；§15 校验钉点 commit 绑定（由 tag 改为直接钉 commit SHA，ISSUE-263 W1-C5）。钉点值：CI-Workflows v1.4.2（2d368c2）——v1.4.2 修复 merge_group 下 org-adr-required 设计性 skip 配 EXPECTED_SKIP（#135，CI-Workflows PR#28）。",
+    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本。2026-08-24 平台约束修订（ADR-0083 关联）：ruleset API 对 required workflows 的 ref 已只接受分支/标签名（40 位 SHA 恒 422 does not have ref——多轮实测），钉点值=main；内容完整性改由 drift-check 后验承载。同轮变更：adversary-gate.yml 纳入 required workflows（ADR-0082/0083）；CI-Workflows 中心仓自身排除（org-gate job 对中心仓自跳，required 化后产生永不满足的 skipped）。",
     "ruleset": "org-required-workflows",
     "repository": "CI-Workflows",
     "repository_id": 1337911551,
     "path": ".github/workflows/org-gate.yml",
-    "ref": "2d368c29f170eab43b83f6b866f76fad3774fba9",
-    "ref_commit": "2d368c29f170eab43b83f6b866f76fad3774fba9"
+    "ref": "main",
+    "workflows": [
+      {
+        "path": ".github/workflows/org-gate.yml"
+      },
+      {
+        "path": ".github/workflows/adversary-gate.yml"
+      }
+    ]
   }
 }
