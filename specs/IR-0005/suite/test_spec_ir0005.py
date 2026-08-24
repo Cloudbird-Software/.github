@@ -14,9 +14,11 @@ import re
 import sys
 import unittest
 
-IMPL = os.environ.get("IMPL_DIR", os.path.join(os.path.dirname(__file__), "..", ".."))
-SPEC = os.path.join(IMPL, "spec.md")
-ACC = os.path.join(IMPL, "acceptance.md")
+# discover 模式下 __file__ 可能相对/含 .. 段——abspath+normpath 归一后再定位 impl 目录
+_HERE = os.path.dirname(os.path.abspath(__file__))
+IMPL = os.path.normpath(os.environ.get("IMPL_DIR", os.path.join(_HERE, "..", "..")))
+SPEC = os.path.normpath(os.path.join(IMPL, "spec.md"))
+ACC = os.path.normpath(os.path.join(IMPL, "acceptance.md"))
 
 
 def read(path, required=True):
