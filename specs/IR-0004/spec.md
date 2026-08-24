@@ -5,10 +5,10 @@ title: 验证体系缺口闭环（变异/属性/模糊/蜕变/符号/形式化�
 irRef: Cloudbird-Software/.github#315
 amendments:
 - rev: 2
-  reason: 红队 R1 审计 insufficient（CNB 4 窗口，3 份有效报告、24 项有效命中经机械核对成立）——IR 保真度补全（AC-21 token 决策、AC-10 merger 分支、AC-12 oracle 适用判据、AC-19 月度干跑、light=1C 硬数值、checklist 结构化前提、kernel 唯一锚点、趋同度突变弱信号）；负向断言补全堵 fail-open（AC-1/3/5/14 及 AC-2/15/16/17 采信前提与交叉核对）；suite 增语义级断言；ADR 承接补引（ADR-0066 底噪扣减/聚簇、ADR-0067 恶意合规分工、ADR-0062 hash 链、ADR-0035/T-13 口径对齐）；弱模型触发侧边界明文与不适用抽样复核；nonGoals 补多平台抽象层/CNB SDK 两项
+  reason: 红队 R1 审计 insufficient（CNB 4 窗口，3 份有效报告、24 项有效命中经机械核对成立）——IR 保真度补全（AC-21 token 决策、AC-10 merger 分支、AC-12 oracle 适用判据、AC-19 月度干跑、light=1C 硬数值、checklist 结构化前提、kernel 唯一锚点、趋同度突变弱信号）；负向断言补全堵 fail-open（AC-1/3/5/14 及 AC-2/15/16/17 采信前提与交叉核对）；suite 增语义级断言；ADR 承接补引（ADR-0066 底噪扣减/聚簇、ADR-0067 恶意合规分工、ADR-0062 hash 链、ADR-0035/T-13 口径对齐）；弱模型触发侧边界明文与不适用抽样复核；nonGoals 补多平台抽象层/CNB SDK 两项；R1-B 迟归（重跑确认）补 8 项——blastRadius 漏报补登（REPOS.yaml/cost-check.sh/dashboard-update.py/CI-Workflows workflows+scripts）、试点仓真名勘误（AI_Web_School）、路径存在性语义改 planned 双向、IFACE-01 治理仓范围与执行层落点定义、IFACE-02 承接既有 cnb_bridge.py（ADR-0082）、多账号 secret 口径修订（DECISION-06）、BUDGET-01 措辞、S8 仓清单同步、凭据扫描覆盖面清单化
 acceptanceCriteria:
 - id: AC-1
-  given: aws-tb 仓 weekly 变异测试执行入口已落地
+  given: AI_Web_School 仓 weekly 变异测试执行入口已落地
   when: 该入口每周运行且 LLM 生成的定向变异体候选提交
   then: 分数与趋势出现在治理仪表盘、趋势下滑自动告警、候选经机械初筛（可执行性与被现有套件杀死率预演）后入池且淘汰率入账；分数核算与入池判定仅由 GitHub CI 执行；任一连续 7 天无变异 run 记录或分数缺失时治理仪表盘判红并自动开 issue（入口被摘除或静默失败不得默认绿）；运行时证据为 run 链接、仪表盘 JSON 与入池清单三件
 - id: AC-2
@@ -20,7 +20,7 @@ acceptanceCriteria:
   when: 深跑完成
   then: 覆盖率增量与唯一崩溃数由 GitHub 侧核算（沙箱自报数字不采信）、崩溃样本经栈哈希机械去重、LLM 产物仅标记为草稿的分诊建议；深跑产物为空、核算脚本失败或超时、GitHub 侧核算无输出时该轮记 infra 失败并红（不得静默绿）；运行时证据为语料入库历史与 GitHub 侧核算日志
 - id: AC-4
-  given: aws-tb 领域自然蜕变关系经 fan-out 盘点产出结构化候选
+  given: AI_Web_School 领域自然蜕变关系经 fan-out 盘点产出结构化候选
   when: 人类抽检完成
   then: 候选不少于 15 条且每条含机械可验证方式字段、不少于 3 条实现为常驻测试、testing.yaml 新增对应条款；运行时证据为候选清单、抽检记录与条款 diff
 - id: AC-5
@@ -38,7 +38,7 @@ acceptanceCriteria:
 - id: AC-8
   given: 验收 DSL 已定义且新 spec 以 DSL 书写验收标准
   when: spec PR 合并
-  then: DSL 验收标准机械编译为测试骨架且携带 spec hash 溯源头、手改生成测试触发 CI 红、修改 spec 重编译后转绿、spec CI 关卡（结构校验/可编译/blastRadius 申报路径存在性）在 specs 路径全部 PR 生效且关卡被摘除时 CI 必红；豁免仅经 ADR 登记通道且计数入账；与既有 T-13（ADR-0035 test-integrity）的口径对齐：hash 溯源校验管辖编译生成物（直接红），T-13 管辖一般测试文件四形态（TI-R4 为 require_adr）——同一文件双命中时从严者生效，本对齐为承接声明不修改 T-13 语义；运行时证据为编译产物、篡改红记录与一次 spec PR 全关卡绿
+  then: DSL 验收标准机械编译为测试骨架且携带 spec hash 溯源头、手改生成测试触发 CI 红、修改 spec 重编译后转绿、spec CI 关卡（结构校验/可编译/blastRadius 申报双向存在性——已存在路径必须被申报、申报中不存在路径必须标记 planned）在 specs 路径全部 PR 生效且关卡被摘除时 CI 必红；豁免仅经 ADR 登记通道且计数入账；与既有 T-13（ADR-0035 test-integrity）的口径对齐：hash 溯源校验管辖编译生成物（直接红），T-13 管辖一般测试文件四形态（TI-R4 为 require_adr）——同一文件双命中时从严者生效，本对齐为承接声明不修改 T-13 语义；运行时证据为编译产物、篡改红记录与一次 spec PR 全关卡绿
 - id: AC-9
   given: 一张卡处于 spec 阶段且骨架 fan-out 已派发（N 默认 3–4、含至少一个异构模型实例）
   when: N 份骨架（路线陈述/接口签名草稿/测试草案/假设清单四组件）齐备
@@ -58,7 +58,7 @@ acceptanceCriteria:
 - id: AC-13
   given: fan-out 产物（骨架分歧/假设/淘汰路线/对拍分歧四类）统一以结构化格式落盘（含卡 ID、spec hash、基准 SHA）
   when: 红队或意图道闸运行
-  then: 输入适配器只读该产物目录、被淘汰路线机械生成差异攻击查询（champion 是否覆盖其边界）、假设清单进入 S6–S8 扫描候选、S8 集合比对纳入产物路径、产物消费前经基准 SHA 机械核对且不符作废留痕、产物目录 append-only 校验失败即红（ADR-0062）；趋同度突变（历史免 fan-out 卡突然高分歧）作为弱信号入 metrics 观测面；运行时证据为一次真实红队消费燃料产物的全链记录与一次道闸消费留痕
+  then: 输入适配器只读该产物目录、被淘汰路线机械生成差异攻击查询（champion 是否覆盖其边界）、假设清单进入 S6–S8 扫描候选、S8 集合比对纳入产物路径且其仓识别清单同步登记本 IR 新增仓（cnb-bridge 等，防漏报盲区）、产物消费前经基准 SHA 机械核对且不符作废留痕、产物目录 append-only 校验失败即红（ADR-0062）；趋同度突变（历史免 fan-out 卡突然高分歧）作为弱信号入 metrics 观测面；运行时证据为一次真实红队消费燃料产物的全链记录与一次道闸消费留痕
 - id: AC-14
   given: cnb-bridge 仓建立且治理仓新增外部算力声明条目
   when: 隔离审计运行
@@ -90,7 +90,7 @@ acceptanceCriteria:
 - id: AC-21
   given: token 治理决策需入册
   when: 高权限 token 保持决策以 ADR 落实
-  then: ADR 记录 owner 裁决（管理简单性优先）与缓解条款——token 仅存 org secret、永不进入任何 agent 上下文与外部沙箱、泄漏应急流程（吊销→轮换→账本核查）runbook 化；任意派单任务文本经凭据形状扫描不含任何 token 形态（防回归测试常驻）；运行时证据为 ADR diff、org secret 存在性查询记录（key 不可见）与扫描测试运行记录
+  then: ADR 记录 owner 裁决（管理简单性优先）与缓解条款——token 仅存 org secret、永不进入任何 agent 上下文与外部沙箱、泄漏应急流程（吊销→轮换→账本核查）runbook 化；任意派单任务文本经凭据形状扫描不含任何 token 形态、扫描模式集按受管平台清单配置且清单外形状按登记制扩展（防回归测试常驻）；运行时证据为 ADR diff、org secret 存在性查询记录（key 不可见）与扫描测试运行记录
 blastRadius:
 - repo: .github
   path: specs/IR-0004/**
@@ -102,6 +102,12 @@ blastRadius:
   path: governance/policy/testing.yaml
 - repo: .github
   path: governance/metrics.py
+- repo: .github
+  path: governance/cost-check.sh
+- repo: .github
+  path: governance/dashboard-update.py
+- repo: .github
+  path: governance/REPOS.yaml
 - repo: .github
   path: .github/workflows/cnb-dispatch.yml
 - repo: .github
@@ -115,12 +121,16 @@ blastRadius:
 - repo: CI-Workflows
   path: pipeline/adversary/**
 - repo: CI-Workflows
-  path: pipeline/spec-template.md
-- repo: aws-tb
-  path: tests/**
-- repo: aws-tb
   path: .github/workflows/**
-- repo: aws-tb
+- repo: CI-Workflows
+  path: scripts/**
+- repo: CI-Workflows
+  path: pipeline/spec-template.md
+- repo: AI_Web_School
+  path: tests/**
+- repo: AI_Web_School
+  path: .github/workflows/**
+- repo: AI_Web_School
   path: formal/**
 - repo: cnb-bridge
   path: "**"
@@ -171,15 +181,15 @@ nonGoals:
 
 ## IFACE（契约）
 
-- **IFACE-01 三接缝**：治理仓对 CNB 的引用收敛为 GOVERNANCE 声明条目、org secrets、cnb-dispatch/cnb-audit 两个工作流；隔离审计 grep 仅命中此三处，越界即红。
-- **IFACE-02 派单协议**：任务描述机器可读、必含档位与清单 ID、输出契约（差异全文+测试原始输出含退出码+基准 SHA 确认）、run-id 前缀、投递前二次确认窗口归属、单账号并发上限可配置（默认 8）。
+- **IFACE-01 三接缝**：治理仓（Cloudbird-Software/.github 仓内）对 CNB 的引用收敛为 GOVERNANCE 声明条目、org secrets、cnb-dispatch/cnb-audit 两个工作流；隔离审计 grep 仅命中此三处，越界即红。执行层实现落点为 CI-Workflows pipeline/adversary/**（既有 cnb_bridge.py，ADR-0082）与 cnb-bridge/**——其 CNB 引用属执行层实现、不计入接缝违规，但不得进入判定路径（INV-02）。
+- **IFACE-02 派单协议**（对既有 cnb_bridge.py 的增强要求，承接 ADR-0082 通道链与 fallback 语义）：任务描述机器可读、必含档位与清单 ID、输出契约（差异全文+测试原始输出含退出码+基准 SHA 确认）、run-id 前缀、投递前二次确认窗口归属、单账号并发上限可配置（默认 8）。
 - **IFACE-03 产物目录格式**：fan-out 产物为 append-only 结构化记录，字段含类型（骨架分歧/假设/淘汰路线/对拍分歧）、卡 ID、spec hash、基准 SHA；红队与意图道闸输入适配器只读该目录。
 - **IFACE-04 spec 产物契约**：DSL 编译产物携带 spec hash 头；hash 校验为 gate 级检查；豁免仅 ADR 登记通道。
 - **IFACE-05 观测口径**：核·秒消耗与档位证实以平台 build logs（duration×labels.cpus）为对账真源，本地快照差分仅作交叉验证。
 
 ## BUDGET（预算）
 
-- **BUDGET-01 核时档位**：light=1C（默认）、std=2C、heavy=4C 须理由、八核档禁用；档位以 build logs 实际核数交叉证实（标签与实耗不一致即红）；快照差分与构建日志实耗双路对账、偏差超阈值告警。
+- **BUDGET-01 核时档位**：默认档位为 light=1C，std=2C，heavy=4C 须理由，八核档禁用；档位以 build logs 实际核数交叉证实（标签与实耗不一致即红）；快照差分与构建日志实耗双路对账、偏差超阈值告警。
 - **BUDGET-02 fan-out 纪律**：N 默认 3–4；趋同卡获免 fan-out 标签；top-2 差距小于选择器判别力时升级选择器而非加大 N；N>16 需 ADR；预算由收敛带宽决定与 token 无关。
 - **BUDGET-03 审计抽样**：产物真实性抽样比例默认 10%、可降不可免。
 
@@ -189,7 +199,8 @@ nonGoals:
 - **DECISION-02** X-04 由无条件拒绝修订为条件触发，修订经 ADR 完成（spec 不直接修改治理条款）。
 - **DECISION-03** 演练全自动零人工；物理删除为一次性退休动作不做演习，证明力边界（功能脱离经周期证明、物理删除未经演习）如实入册（owner 裁决）。
 - **DECISION-04** api_trigger 不作为依赖通道，保留月度复验探针；issue 窗口评论为当前唯一已验证机器派单通道。
-- **DECISION-05 承接引用**：条款级规格方法承接 ADR-0050；无人值守护栏适用 ADR-0040；中心审判钉点 ADR-0046；ADR 墓碑机制 ADR-0053；fail-before 语义 ADR-0061；verifier 范式 ADR-0072（红队候选生成属选择层不进判定链，不冲突）；测试防篡改口径 ADR-0035/T-13（hash 溯源管生成物、T-13 管一般测试文件，双命中从严者生效）；计量与产物 hash 链 ADR-0062（账本 append-only 校验与 token 计量口径）；语义熵分歧度量 ADR-0066（骨架 fan-out 的歧义归因复用其底噪扣减与双向蕴含聚簇——骨架 fan-out 产出 AC 候选/模糊地图/策略菜单，语义熵仪器判定歧义是否达 spec bug 级，两仪器分工不重复建设）；恶意合规 adversary ADR-0067（其套件充分性判定与 AC-2 变异裁判互补——变异裁判测杀变异能力、恶意合规测针对性偷懒抵抗力，统一为测试有效性判定族的两个机械层）；#263 的卡绑定测试与红队守门（T-14/T-15/AR-10）为上游依赖，本 spec 的 DSL 编译与骨架 fan-out 为其机械层承接，不重复建设。
+- **DECISION-05 承接引用**：条款级规格方法承接 ADR-0050；无人值守护栏适用 ADR-0040；中心审判钉点 ADR-0046；ADR 墓碑机制 ADR-0053；fail-before 语义 ADR-0061；verifier 范式 ADR-0072（红队候选生成属选择层不进判定链，不冲突）；测试防篡改口径 ADR-0035/T-13（hash 溯源管生成物、T-13 管一般测试文件，双命中从严者生效）；计量与产物 hash 链 ADR-0062（账本 append-only 校验与 token 计量口径）；语义熵分歧度量 ADR-0066（骨架 fan-out 的歧义归因复用其底噪扣减与双向蕴含聚簇——骨架 fan-out 产出 AC 候选/模糊地图/策略菜单，语义熵仪器判定歧义是否达 spec bug 级，两仪器分工不重复建设）；恶意合规 adversary ADR-0067（其套件充分性判定与 AC-2 变异裁判互补——变异裁判测杀变异能力、恶意合规测针对性偷懒抵抗力，统一为测试有效性判定族的两个机械层）；#263 的卡绑定测试与红队守门为上游依赖（T-14/T-15/AR-10；其机器化落地承接 ADR-0083 spec PR suite 强制门与红队 required check）；红队守门收口 ADR-0082（默认 verifier 范式、CNB 通道与 fallback 链——本 spec 的派单协议为其执行层增强、判定环节沿用其 verifier 范式不另设）；spec 阶段攻击面 ADR-0079、验证者身份 ADR-0076、holdout 挂载 ADR-0080、验证者写豁免 ADR-0081（本 spec DSL 编译产物与燃料产物写入路径按其身份面执行）；本 spec 的 DSL 编译与骨架 fan-out 为 #263 体系的机械层承接，不重复建设。
+- **DECISION-06** 多账号扩展对 ADR-0082"配置面恰为 1 org secret"口径的修订：每账号恰 1 个同形 org secret（CNB_TOKEN_<alias>）+ 共享 org variable，配置面膨胀（存在非登记 secret）判红；该修订随本 IR 以 ADR 落实。
 
 ## ASSUMPTION（假设）
 

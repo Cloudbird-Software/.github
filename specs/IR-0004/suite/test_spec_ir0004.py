@@ -56,8 +56,8 @@ def test_clauses_unique_and_referenced():
     body = text.split("---", 2)[2]
     ids = re.findall(r"^\s*[-\s]*\*{0,2}(INV|BEH|IFACE|BUDGET|DECISION|ASSUMPTION)-\d+\*{0,2}", body, re.M)
     assert len(ids) >= 30, f"正文条款过少: {len(ids)}"
-    flat = re.findall(r"(?:INV|BEH|IFACE|BUDGET|DECISION|ASSUMPTION)-\d+", body)
-    assert len(flat) == len(set(flat)), "正文条款 ID 有重复定义"
+    defs = re.findall(r"^- \*\*((?:INV|BEH|IFACE|BUDGET|DECISION|ASSUMPTION)-\d+)\*\*", body, re.M)
+    assert len(defs) == len(set(defs)), f"正文条款定义行有重复: {[k for k in defs if defs.count(k) > 1]}"
     # BEH 条款须引用其承接的 AC
     for m in re.finditer(r"BEH-\d+（(AC-[0-9/, ]+)）", body):
         for ref in re.findall(r"AC-\d+", m.group(1)):
