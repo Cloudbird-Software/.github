@@ -22,6 +22,88 @@ jobs:
     # hash 即 CI-Workflows v1 tag 当前指向，升级 v1 须同步换 hash
     uses: Cloudbird-Software/CI-Workflows/.github/workflows/hygiene.yml@61191f87c537f6e887695517121c6e530a838261 # v1
 
+  t14-spec-suite:
+    # T-14 第一面（ADR-0083 决策 1/2，testing.yaml T-14，#263 W2-C3 .github#275）：
+    #   1) specs/** 变更的 PR 必须携带同目录 suite/（≥1 非空测试文件且含真实
+    #      断言）——缺失即红（合并阻断；fail-closed：files API 失败视同 specs 变更）。
+    #   2) suite 可执行性证明：全部 specs/*/suite 在本 job 真实执行（unittest 风格、
+    #      零第三方依赖）——"存在但摆拍"的红队层兜底（S1'/S2'）之外的机器底线。
+    # T-14 第二面（fail-before 逐变更 + 实现 PR 卡测试解析 + holdout 注册校验）
+    # 随后续波次落地，本 job 只锁第一面。
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: hygiene
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: hygiene green?
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          if echo "$NEEDS" | jq -e '[to_entries[] | select(.value.result != "success")] | length > 0' >/dev/null; then
+            echo "::error::hygiene 未通过（skipped 不算绿——ADR-0032 严格断言）"; exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: T-14 spec PR suite 强制（PR 事件）
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_API: "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}"
+        run: |
+          set -euo pipefail
+          # 分页拉全量文件清单（fail-closed：任何页失败=红——不能因盲而放行）
+          PAGE=1; SPECS_HIT=0; SPEC_DIRS=""
+          while :; do
+            PAGEJSON=$(gh api "$PR_API/files?per_page=100&page=$PAGE")
+            if ! jq -e 'type == "array"' <<<"$PAGEJSON" >/dev/null 2>&1; then
+              echo "::error::files API 第 $PAGE 页失败——T-14 判定完整性无法保证（fail-closed）"; exit 1
+            fi
+            N=$(jq 'length' <<<"$PAGEJSON")
+            DIRS=$(jq -r '[.[].filename | select(startswith("specs/")) | split("/")[1] | select(. != "")] | unique | .[]' <<<"$PAGEJSON")
+            if [[ -n "$DIRS" ]]; then SPECS_HIT=1; SPEC_DIRS="$(printf '%s\n%s' "$SPEC_DIRS" "$DIRS" | sort -u)"; fi
+            [[ $N -lt 100 ]] && break
+            PAGE=$((PAGE+1))
+          done
+          if [[ $SPECS_HIT -ne 1 ]]; then echo "非 specs/** 变更，T-14 presence 检查跳过"; exit 0; fi
+          MISSING=0
+          for d in $SPEC_DIRS; do
+            SUITE="specs/$d/suite"
+            if [[ ! -d "$SUITE" ]]; then
+              echo "::error::T-14：specs/$d 变更但缺 $SUITE/（spec PR 必须携带测试套件——ADR-0083 决策 1）"; MISSING=1; continue
+            fi
+            if ! ls "$SUITE"/*.py >/dev/null 2>&1; then
+              echo "::error::T-14：$SUITE 无 .py 测试文件"; MISSING=1; continue
+            fi
+            HAS_ASSERT=0
+            for tf in "$SUITE"/*.py; do
+              [[ -s "$tf" ]] && grep -q "assert" "$tf" && HAS_ASSERT=1 && break
+            done
+            if [[ $HAS_ASSERT -ne 1 ]]; then
+              echo "::error::T-14：$SUITE 测试文件无真实断言（须含 assert——摆拍套件见红队 S1'/S2' 攻击面）"; MISSING=1
+            fi
+          done
+          [[ $MISSING -eq 0 ]] && echo "OK T-14 presence：$SPEC_DIRS 均携带含断言的 suite/"
+          exit $MISSING
+      - name: T-14 suite 真实执行（全部 specs/*/suite）
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          suites=(specs/*/suite)
+          shopt -u nullglob
+          if [[ ${#suites[@]} -eq 0 ]]; then
+            echo "::error::specs/ 下无任何 suite/——治理仓 spec 目录存在但测试面丢失（fail-closed）"; exit 1
+          fi
+          for s in "${suites[@]}"; do
+            echo "-- 执行 $s"
+            ( cd "$(dirname "$s")" && python3 -m unittest discover -s suite -p 'test_*.py' -v )
+          done
+          echo "OK 全部 specs suite 执行通过"
+
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10   # testing.yaml T-01 "gate<5min" 原则的硬上限（红队 #18 P2：无 timeout 的 job 失控可挂 6h）

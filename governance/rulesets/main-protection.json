@@ -60,8 +60,7 @@
             "context": "org-gate"
           },
           {
-            "context": "adversary",
-            "integration_id": 0
+            "context": "adversary"
           }
         ]
       }

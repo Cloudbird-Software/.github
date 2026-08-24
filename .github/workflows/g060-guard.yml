@@ -12,7 +12,7 @@ on:
       - 'specs/*/suite/**'
   schedule:
     # 每 6 小时巡检一次（与 butler 系列对齐）
-    - cron: '0 */6 * * *'
+    - cron: '17 */6 * * *'
   workflow_dispatch:
     inputs:
       issue:
