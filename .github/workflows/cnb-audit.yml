@@ -1,0 +1,204 @@
+name: cnb-audit
+# =============================================================================
+# CNB 周审计 + 三接缝隔离审计（IR-0004 AC-14/AC-19，BEH-17 周审计项之一）
+#
+# 硬注释（改动前必读）：
+#   - 本工作流是治理仓 CNB 三接缝之一（GOVERNANCE EX-1 声明条目 / IFACE-01，
+#     ADR-0085 决策 6 / IR-0004）：与 cnb-dispatch.yml、GOVERNANCE 声明条目
+#     共同构成治理仓对 CNB 的全部合法引用面。
+#   - 判定永不外置（INV-02）：本审计只核资源面（配额/窗口/隔离），不消费
+#     NPC 输出作为任何 gate 输入；沙箱自报数字不采信（INV-01）。
+#   - 凭据纪律（INV-06）：token 只经 org secret 注入，不落日志/摘要/issue；
+#     配额数字与窗口状态不含敏感值，可进审计面。
+#   - 无人值守护栏适用（ADR-0040）：本审计产出即护栏输入——配额告警开
+#     cost 类 issue（cost-infra），供派单前置检查消费。
+#   - ADR-0085 决策 6 审计口径：第③步 grep 匹配**操作性引用**
+#     （endpoint=cnb.cool / token 名=CNB_TOKEN / 派单协议=@CodeBuddy），
+#     目录导航性提及（如仓库名 cnb-bridge、工作流名）不计入——故 pattern
+#     刻意只列三样；排除清单=接缝本体+既有声明/登记面（逐项依据见第③步注释）。
+#   - fail-closed（INV-04）：配额查询失败、账号清单不可读、隔离 grep 非 0
+#     一律红；窗口停摆仅 WARN（观测面非判定面）。
+# =============================================================================
+on:
+  schedule:
+    - cron: "41 3 * * 1"   # 周一 03:41 UTC 错峰（避 archive gate 周扫 04:23 / runs-digest 04:37 / Scorecard 05:00+，ADR-0011 谱系）
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cnb-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1（org 白名单 CI-2）
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Cloudbird-Software/cnb-bridge   # L2 可删除层（ADR-0085 决策 6）
+          ref: main
+          path: cnb-bridge
+          persist-credentials: false
+      # ------------------------------------------------------------------
+      # ①配额活性：逐账号查余量；任一低于 policy 阈值（cnb.quota_alert_pct，现值 20）
+      # → LOW=1（下一步开 cost 类 issue）；配额查询失败（含 org secret 缺失）
+      # = fail-closed 红（INV-04/AC-15）。
+      # secret 经 env 映射静态引用（GH Actions 无法动态索引 secrets）；
+      # 加账号 = owner 加 org secret + 本映射加一行（C1 PR）。
+      # ------------------------------------------------------------------
+      - name: quota（配额活性，fail-closed）
+        env:
+          CNB_TOKEN_XUEMEI: ${{ secrets.CNB_TOKEN_XUEMEI }}
+          CNB_TOKEN_P11: ${{ secrets.CNB_TOKEN_P11 }}
+        run: |
+          set -euo pipefail
+          # 账号清单真源 = cnb-bridge/accounts.yaml（无明文 token，ADR-0085 决策 6）
+          mapfile -t ACCOUNTS < <(python3 - <<'EOF'
+          import sys, yaml
+          with open('cnb-bridge/accounts.yaml', encoding='utf-8') as f:
+              doc = yaml.safe_load(f)
+          aliases = [a['alias'] for a in (doc.get('accounts') or [])]
+          if not aliases:
+              print('::error::accounts.yaml 无账号条目——清单不可读即红（fail-closed）', file=sys.stderr)
+              sys.exit(1)
+          print('\n'.join(aliases))
+          EOF
+          )
+          # 进程替换不传递 python 退出码——空清单兜底再拦一次（fail-closed，堵 fail-open）
+          [[ ${#ACCOUNTS[@]} -gt 0 ]] || { echo '::error::账号清单为空/不可读——fail-closed 红'; exit 1; }
+          FAIL=0
+          : > quota-report.txt
+          for A in "${ACCOUNTS[@]}"; do
+            VAR="CNB_TOKEN_$(printf '%s' "$A" | tr '[:lower:]' '[:upper:]')"
+            TOKEN="${!VAR:-}"
+            if [[ -z "$TOKEN" ]]; then
+              echo "::error::org secret ${VAR} 缺失（账号 ${A} 无法查配额）——fail-closed 红"
+              FAIL=1; continue
+            fi
+            # token 已按池契约注入 step env（CNB_TOKEN_<ALIAS>，cnb_pool.py 直接读
+            # os.environ[secret_ref]）——不做二次中转，零冗余变量（INV-06）
+            if ! python3 cnb-bridge/cnb_pool.py quota --account "$A" | tee -a quota-report.txt; then
+              echo "::error::账号 ${A} 配额查询失败——fail-closed 红（INV-04：平台失效必须可见）"
+              FAIL=1
+            fi
+          done
+          [[ $FAIL -eq 0 ]] || exit 1
+          # 告警阈值真源 = automation-limits.yaml cnb.quota_alert_pct（当前 20，IR-0004 AC-15）；
+          # cnb 节缺失即红（policy 为准，不内置缺省）
+          ALERT_PCT=$(python3 - <<'EOF'
+          import sys, yaml
+          with open('governance/policy/automation-limits.yaml', encoding='utf-8') as f:
+              cnb = (yaml.safe_load(f) or {}).get('cnb')
+          if not isinstance(cnb, dict):
+              print('::error::automation-limits.yaml 缺 cnb 节——阈值真源不可少（fail-closed）', file=sys.stderr)
+              sys.exit(1)
+          print(int(cnb.get('quota_alert_pct', 20)))
+          EOF
+          ) || exit 1
+          # 余量 <阈值 → LOW=1；quota 行契约：account=<a> remaining_pct=<n>
+          grep -E 'remaining_pct=[0-9]+' quota-report.txt | awk -F'remaining_pct=' -v pct="$ALERT_PCT" '{split($2,a," "); if (a[1]+0 < pct) print}' > quota-low.txt || true
+          LOW=0; [[ -s quota-low.txt ]] && LOW=1
+          echo "LOW=$LOW" >> "$GITHUB_ENV"
+          {
+            echo '## CNB 周审计（配额活性）'
+            echo
+            echo '```'; cat quota-report.txt; echo '```'
+            echo
+            [[ $LOW -eq 1 ]] && echo '**告警**：以下账号余量 <20%——已开 cost 类 issue：' && sed 's/^/- /' quota-low.txt || echo '全部账号余量 ≥20%'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "AUDIT | cnb-audit | quota | accounts=${#ACCOUNTS[@]} | low=$LOW"
+      # ------------------------------------------------------------------
+      # 开 cost 类 issue（.github 仓，cloudbrid-agent App 令牌——archive 仓
+      # runs-digest.yml 同款铸币模式：CB_APP_ID/AGENT_APP_SECRET org secrets，
+      # REPO=.github；本仓即 .github，脚本取自本 checkout，无需二次 sparse）。
+      # 开 issue 失败 = 红（消费链停摆必须可见，fail-closed）。
+      # ------------------------------------------------------------------
+      - name: open-cost-issue（余量 <20% 时）
+        if: env.LOW == '1'
+        env:
+          CB_APP_ID: ${{ secrets.CB_APP_ID }}
+          AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(REPO=".github" CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
+                  bash scripts/gh-app-token.sh)
+          {
+            echo '## CNB 配额告警（cnb-audit 周审计自动开出，IR-0004 AC-15）'
+            echo
+            echo '以下账号余量 <20%（处置前 cnb-dispatch 对该账号降频/换账号）：'
+            echo
+            sed 's/^/- /' quota-low.txt
+            echo
+            echo '---'
+            echo '来源：.github 仓 cnb-audit 周一 03:41 UTC run（本 issue 存在期间，'
+            echo 'AGENTS.md 无人值守护栏 (d) 视为存在未决 cost issue——派单前置检查会拦）。'
+          } > cost-body.md
+          GH_TOKEN="$TOKEN" gh issue create -R Cloudbird-Software/.github \
+            -t 'CNB 配额告警：账号余量 <20%（周审计）' -b "$(cat cost-body.md)" -l cost-infra \
+            || { echo '::error::cost issue 创建失败——审计消费链停摆，fail-closed'; exit 1; }
+      # ------------------------------------------------------------------
+      # ②窗口停扰扫描：占用中窗口数与 build logs 交叉（IFACE-05 对账真源=平台
+      # build logs，交叉在 cnb_pool.py windows 内完成，本步只消费产出）；
+      # 占用率 ≥阈值（policy cnb.window_warn_pct，缺省 80）→ 输出 WARN 行
+      # （观测面非判定面，不红）。脚本失败本身=红（INV-04）。
+      # ------------------------------------------------------------------
+      - name: windows（停摆扫描，WARN 口径）
+        run: |
+          set -euo pipefail
+          python3 cnb-bridge/cnb_pool.py windows | tee windows.out
+          TOTAL=$(grep -cE '^window=[0-9]+ status=' windows.out || true)
+          OCCUPIED=$(grep -cE '^window=[0-9]+ status=occupied' windows.out || true)
+          WARN_PCT=$(python3 - <<'EOF'
+          import yaml
+          try:
+              with open('governance/policy/automation-limits.yaml', encoding='utf-8') as f:
+                  cnb = (yaml.safe_load(f) or {}).get('cnb') or {}
+              print(int(cnb.get('window_warn_pct', 80)))
+          except Exception:
+              print(80)   # 巡检旋钮（warn 不红，非判定面）；policy 可加 window_warn_pct 覆盖
+          EOF
+          )
+          if [[ "$TOTAL" -gt 0 && $(( OCCUPIED * 100 / TOTAL )) -ge "$WARN_PCT" ]]; then
+            echo "::warn::WARN | cnb-audit | windows | occupied=${OCCUPIED}/${TOTAL}（≥${WARN_PCT}%，池近饱和——派单侧降频或等回收）"
+            echo "WARN | cnb-audit | windows | occupied=${OCCUPIED}/${TOTAL} >= ${WARN_PCT}% 池近饱和" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "AUDIT | cnb-audit | windows | occupied=${OCCUPIED}/${TOTAL}（阈值 ${WARN_PCT}%）"
+          fi
+      # ------------------------------------------------------------------
+      # ③三接缝隔离 grep（IFACE-01，ADR-0085 决策 6 审计口径）：
+      # 治理仓内操作性引用（cnb.cool / CNB_TOKEN / @CodeBuddy）只允许出现在
+      # 接缝本体与既有声明/登记面；命中数必须为 0，非 0 即红并列出命中文件。
+      # 排除清单（逐项依据，ADR-0085 决策 6"目录导航性/声明性提及不计入"）：
+      #   - governance/GOVERNANCE.yaml            EX-1 声明条目本体（三接缝之一）
+      #   - .github/workflows/cnb-dispatch.yml    接缝之二（派单经纪人）
+      #   - .github/workflows/cnb-audit.yml       接缝之三（本审计）
+      #   - governance/expected-state.json        secret/工作流登记表（声明面：登记名非使用点）
+      #   - governance/policy/automation-limits.yaml  cnb 配置节（EX-1 政策面：加账号=改配置零代码）
+      #   - governance/providers.yaml              工具目录（声明面：secret_ref 登记名非值/非使用点，ADR-0085 决策 7）
+      #   - specs/IR-0004/spec.md                 制度文本（DECISION-06 对 token 形态的规范性条款）
+      # 新增排除项必须走 ADR（C1）——本清单是被审计对象的一部分。
+      # ------------------------------------------------------------------
+      - name: isolation-grep（三接缝隔离，命中非 0 即红）
+        run: |
+          set -euo pipefail
+          HITS=$(git grep -nE 'cnb\.cool|CNB_TOKEN|@CodeBuddy' -- \
+            ':!governance/GOVERNANCE.yaml' \
+            ':!.github/workflows/cnb-dispatch.yml' \
+            ':!.github/workflows/cnb-audit.yml' \
+            ':!governance/expected-state.json' \
+            ':!governance/policy/automation-limits.yaml' \
+            ':!governance/providers.yaml' \
+            ':!specs/IR-0004/spec.md' || true)
+          if [[ -n "$HITS" ]]; then
+            echo "$HITS"
+            echo "::error::操作性引用越界（IFACE-01 接缝与声明面之外，命中 $(echo "$HITS" | grep -c '' ) 行）——上列文件须收敛引用或走 ADR 修订接缝定义"
+            exit 1
+          fi
+          echo 'AUDIT | cnb-audit | isolation | grep hits=0（接缝与声明面外零操作性引用）' >> "$GITHUB_STEP_SUMMARY"
+          echo 'AUDIT | cnb-audit | isolation | grep hits=0'

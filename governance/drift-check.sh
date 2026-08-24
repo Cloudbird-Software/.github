@@ -298,7 +298,7 @@ done
 # 起进一步校验 archive 正本可达性。本节后验实体性（防空壳）并独立复核存在性：
 # 窗口内合并 PR 的 ADR-NNNN 引用必须有实质决策结构——伪造/幽灵 ADR 最长 24h 内
 # 检出（与 §8 直推检测同为 post-hoc 防线；C1 的权威人类门禁仍是 owner-only review）。
-# 内容源双世界（ADR-0053）：agent-registry/decisions/INDEX.yaml（墓碑索引）存在 →
+# 内容源双世界（ADR-0053；ADR-0085 家园单仓化后唯一世界）：archive/adr/INDEX.yaml（索引随正本同居）存在 →
 # decisions/ 只剩同名墓碑（无实质结构），实体性改验 INDEX 指向的 archive 仓正本
 # （字节保真原件）；INDEX 404（迁移前/回滚）→ 旧逻辑对 decisions/ 本体验证。
 ADR_RE='ADR-[0-9]{4}'
@@ -333,7 +333,7 @@ adr_substantive() { # $1=四位编号 → stdout: missing|ok|shell|unreadable
           [[ -n "$_c" ]] && decoded=$(base64 -d <<<"$_c" 2>/dev/null || true)
         fi
       else
-        content=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/$apath" | jq -r '.content // empty')
+        content=$(api "https://api.github.com/repos/$ORG/archive/contents/$apath" | jq -r '.content // empty')
         [[ -z "$content" ]] && continue
         decoded=$(base64 -d <<<"$content" 2>/dev/null || true)
       fi
@@ -354,16 +354,16 @@ adr_substantive() { # $1=四位编号 → stdout: missing|ok|shell|unreadable
 # 独立 7 天窗口（不用 §8 的 SINCE——那是 policy_effective 起算的直推检测窗口，
 # 而 ADR 引用后验须覆盖 policy 生效前已合并、引用了伪造 ADR 的 PR）
 ADR_SINCE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
-ADR_DIR_LISTING=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/decisions")
+ADR_DIR_LISTING=$(api "https://api.github.com/repos/$ORG/archive/contents/adr")
 if ! jq -e 'type == "array"' <<<"$ADR_DIR_LISTING" >/dev/null 2>&1; then
-  drift "ADR 真源 agent-registry/decisions 读取失败，引用存在性无法后验（fail-closed）: $(jq -r '.message // "非数组"' <<<"$ADR_DIR_LISTING" 2>/dev/null || echo 传输失败)"
+  drift "ADR 真源 archive/adr 读取失败，引用存在性无法后验（fail-closed，ADR-0085）: $(jq -r '.message // "非数组"' <<<"$ADR_DIR_LISTING" 2>/dev/null || echo 传输失败)"
 else
   # 墓碑索引探测（ADR-0053）：200 → 索引世界（map：编号→archive 正本路径）；
   # 404 → 旧世界；其他失败 → 报漂移（fail-closed：检测器失明不得伪装无漂移），
   # 并降级旧世界继续跑完本节（漂移行已置红，后续节不受影响）。
   ADR_INDEX_MODE=""
   ADR_INDEX_MAP=""
-  ADR_INDEX_JSON=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/decisions/INDEX.yaml")
+  ADR_INDEX_JSON=$(api "https://api.github.com/repos/$ORG/archive/contents/adr/INDEX.yaml")
   if jq -e '.content' <<<"$ADR_INDEX_JSON" >/dev/null 2>&1; then
     ADR_INDEX_MAP=$(base64 -d <<<"$(jq -r '.content' <<<"$ADR_INDEX_JSON")" 2>/dev/null | awk '
       /^[[:space:]]*-[[:space:]]*number:/ { n=$3; gsub(/[^0-9]/, "", n); cur=sprintf("%04d", n+0); ap="" }
@@ -400,7 +400,7 @@ else
             if [[ -n "$ADR_INDEX_MODE" ]]; then
               where="INDEX entries 无此编号"
             else
-              where="agent-registry/decisions/ 无 ADR-${num}-*.md"
+              where="archive/adr/ 无 ADR-${num}-*.md"
             fi
             drift "repo '$r' PR#$pnum 引用幽灵 ADR ${ref}（${where}——C1 变更的决策背书不成立）"
             GHOST=1 ;;

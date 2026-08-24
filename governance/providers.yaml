@@ -1,0 +1,37 @@
+version: 1
+# ============================================================================
+# providers.yaml —— 外部工具/模型资源目录（ADR-0085 决策 7：池化资源的最小凭据方案）
+# 铁律：本文件【无任何密钥】——secret_ref 只登记 org secret 名；key 永不进仓库、
+#       永不进 agent/PM 上下文。调用一律借道 dispatch 经纪人工作流（工作流内取
+#       org secret → 调用 → 产物写回 run 日志/issue/artifact）。
+# 加工具 = owner 加一条 org secret + 本目录一条登记，零代码。
+# CNB 池的账号级配置在 cnb-bridge/accounts.yaml（可删除层，EX-1 隔离）；本目录
+# 只登记入口（三接缝口径：目录条目属导航性提及，不计入操作性引用）。
+# ============================================================================
+entries:
+  - name: cnb-pool
+    kind: compute           # 免费沙箱算力池（默认实现引擎）
+    entry: cnb-dispatch（.github 仓 workflow）/ ghcb dispatch <卡#>
+    broker: .github/workflows/cnb-dispatch.yml
+    secrets: [CNB_TOKEN_XUEMEI, CNB_TOKEN_P11]
+    catalog: Cloudbird-Software/cnb-bridge accounts.yaml
+    limits: automation-limits.yaml#cnb（档位 light/std/heavy、并发、配额告警线）
+    removal: cnb-bridge/REMOVAL.md（可删除层，删除后核心治理语义不变）
+  - name: llm-verifier
+    kind: model             # 红队/verifier 判定模型（kimi k2.7）
+    entry: adversary 工作流（repository_dispatch / workflow_dispatch）
+    secrets: [LLM_API_KEY1]
+    vars: [LLM_ENDPOINT1, MODEL1]
+    metering: CI-Workflows pipeline/metering/metering-wrapper.sh（ADR-0062 账本）
+    note: 判定链唯一 LLM 通道；NPC 无 logprobs 永不做判定（ADR-0082）
+  - name: llm-spec-author
+    kind: model             # spec 起草快速通道（可选——PM 自著等价，ADR-0085）
+    entry: CI-Workflows spec-author.yml（workflow_dispatch）
+    secrets: [LLM_API_KEY]
+    metering: 同上
+    note: 冷上下文流水线（INV-04）；产出仍须过 suite 门+红队
+  - name: github-apps
+    kind: identity          # 写仓身份（AG-1：开发/验证分离）
+    entry: scripts/gh-app-token.sh（单仓作用域 1h 令牌）
+    secrets: [CB_APP_ID, AGENT_APP_SECRET]
+    note: cloudbrid-agent（开发）+ verifier-app（仅测试/验证路径写权，ADR-0076）

@@ -13,7 +13,7 @@ org: Cloudbird-Software
 # ============================================================================
 layers:
   L0: 标准与治理（intent：GOVERNANCE / 标准 schema / 工作流实现）
-  L1: 注册条目（声明：agent / skill / tool / team / 模型别名 / ADR）
+  L1: 记忆与试卷（ADR 正本+索引 / 运行报告 / 验收场景封存）——ADR-0085：声明层退役
   L2: 实现（代码：框架、工具、业务项目）
   L3: 数据（不进 git：事件流 / 轨迹 / 团队运行态）
 
@@ -36,21 +36,16 @@ repos:
   - name: agent-registry
     layer: L1
     visibility: public
-    status: active
-    role: 注册层——agent/skill/tool/team 声明 + 模型注册表(models.yaml) + ADR；AR-2 状态门禁校验器
-    key_paths: [registry/, decisions/, standards/, scripts/validate.py, scripts/simulate-wave.py]
-                                      # ADR-0021：standards/（协作标准）与 simulate-wave.py（CI required
-                                      # 门禁，ADR-0015）此前不在组织地图——门禁自身逃逸治理地图
-    policies: [agent_runtime]
+    status: retired   # ADR-0085：多 agent 编排声明层退役，GitHub 归档只读；快照=archive/retired/；ADR 家园已迁 archive/adr/
+    role: （退役）注册层——声明快照见 archive/retired/agent-registry/；git 历史即正本存档
 
   - name: archive
     layer: L1
     visibility: public
     status: active
-    role: 记忆层——ADR 归档正本（append-only，字节保真）+规划回归集+事件 JSONL+红队报告
-      落位（宪法 §1/§13 推论二，W1-C1 .github#164/ADR-0053）；ADR 状态真源=agent-registry
-      decisions/INDEX.yaml 墓碑索引（ADR-0053）
-    key_paths: [adr/, scripts/verify_migration.py]
+    role: 记忆层——ADR 家园（正本+INDEX 索引同仓，ADR-0085 单仓化）+退役快照 retired/
+      +PM 运行报告 runs/（[followup] 周度 digest 消费）+规划回归集+事件 JSONL+红队报告落位
+    key_paths: [adr/, runs/, retired/, scripts/verify_migration.py]
 
   - name: template-service
     layer: L2
@@ -63,18 +58,13 @@ repos:
   - name: agent-tools
     layer: L2
     visibility: public
-    status: active
-    role: 自研工具实现仓——被 tool 声明的 implementation 字段引用（ADR-0021：approved 工具
-      gitcode-pr 引用本仓，planned=悬空供应链引用；已按 flows.new_repo 从 template-service
-      派生并跑 new-repo-init）
+    status: retired   # ADR-0085：TS 工具服务器随编排框架退役，GitHub 归档只读
+    role: （退役）工具实现仓——指针页 archive/retired/agent-tools.md
   - name: agent-platform
     layer: L2
     visibility: public
-    status: active
-    role: 执行层仓——agent-registry 声明渲染到 openjiuwen/jiuwenswarm 运行时（ADR-0025）：
-      渲染器/SwarmFlow workflow 编译器/机制原型执行面/TUI 可观测+agentctl 干预/渲染漂移门禁；
-      Python 仓（languages.yaml PY-* 规则，声明适配现实——openjiuwen SDK 为 Python）
-    key_paths: [src/agentplatform/, tests/, docker/, Makefile]
+    status: retired   # ADR-0085：渲染层随编排框架退役，GitHub 归档只读
+    role: （退役）执行层仓——指针页 archive/retired/agent-platform.md
 
   - name: arbiter
     layer: L2
@@ -143,18 +133,15 @@ repos:
       仅用于测试/验证路径写权（DECISION-02 隔离不变量，drift-check §18 断言）
     key_paths: [entries/, schema/, canary/]
 
-# 上游依赖（不属于本组织；不 fork、不 submodule）
-# 治理方式：声明于此 + 部署渲染时 clone 并 pin tag（ADR-0002 rev1）
-external_upstreams:
-  - name: openjiuwen-runtime
-    repo: openJiuwen-ai/jiuwenswarm
-    role: 多智能体编排框架运行时（AgentServer/Gateway/Team/权限引擎/A2A）
-    consumed_by: [agent-registry 的声明渲染]
-  - name: openjiuwen-sdk
-    repo: openJiuwen-ai/agent-core
-    role: agent 内核 SDK（openjiuwen：DeepAgent/TeamAgent/SwarmFlow 引擎；PyPI 钉版消费，ADR-0025）
-    consumed_by: [agent-platform 渲染产物/ArchetypeWorkerBackend/治理 rails]
-  - name: openjiuwen-a2x
-    repo: openJiuwen-ai/agent-protocol
-    role: A2X 注册中心（分布式 Team 控制面）
-    consumed_by: [分布式 team 部署]
+  - name: cnb-bridge
+    layer: L2
+    visibility: public
+    status: active
+    role: CNB 免费算力桥接仓（可删除层，EX-1/ADR-0085/IR-0004 D 组）——多账号池
+      accounts.yaml（无明文 token）+派单协议 cnb_pool.py+work-inbox PM 自起协议+
+      REMOVAL.md 单页删除清单；判定永不外置（INV-02）
+    key_paths: [accounts.yaml, cnb_pool.py, work-inbox.yaml, REMOVAL.md]
+
+# 上游依赖（ADR-0085：openjiuwen 双上游随编排框架退役停止消费；未来引入新上游时
+# 恢复本节声明——部署渲染 pin tag 的治理方式不变）
+external_upstreams: []

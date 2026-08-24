@@ -395,6 +395,56 @@ jobs:
                   api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3Awave-planned", "DELETE")
                   raise SystemExit(0)
 
+          # ---- ADR-0085：T8 卡完成谓词（存在绑定本卡且已合并的 PR）----
+          def check_merged_pr(issue_number):
+              """卡完成谓词：存在 body 含 Card: <repo>#<n> 绑定行且已合并的 PR。
+              gate 绿由 PR required checks 承担（合并事实即全 gate 绿的载体）；
+              不信任标签事件载荷——API 重查（fail-closed：读取失败=拒绝）。"""
+              target = f"{REPO}#{issue_number}"
+              st, prs = api(E["APP_TOKEN"], f"/repos/{REPO}/pulls?state=closed&per_page=100")
+              if st != 200:
+                  return False, f"PR 清单读取失败 HTTP {st}（fail-closed）"
+              for pr in prs or []:
+                  if pr.get("merged_at") and target in (pr.get("body") or ""):
+                      return True, f"PR #{pr['number']} 已合并（{pr['merged_at']}）绑定 {target}"
+              return False, f"无绑定 {target} 且已合并的 PR（近 100 个 closed PR 内）"
+
+          if t["id"] == "T8":
+              okp, reason = check_merged_pr(ISSUE)
+              audit(f"T8 合并 PR 谓词: ok={okp} reason={reason}")
+              if not okp:
+                  audit(f"verdict=DENIED-no-merged-pr T8 拒绝——{reason}")
+                  api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3Adone", "DELETE")
+                  raise SystemExit(0)
+
+          # ---- ADR-0085：T9 IR 验收谓词（全部子卡收口 + 验收报告存在）----
+          def check_ir_acceptance(issue_number, title):
+              """IR 验收谓词（Gate 4）：①无 open 子卡引用本 IR（子卡=body 含
+              "父意图: #<n>"；全部收口=done+closed）②specs/<IR-NNNN>/acceptance.md
+              存在于本仓工作区（=事件时点默认分支）。子卡曾存在性由验收报告自证
+              （报告须列子卡清单与逐 AC 证据）。"""
+              st, cards = api(E["APP_TOKEN"], f"/repos/{REPO}/issues?state=open&per_page=100&labels=type%3Acard")
+              if st != 200:
+                  return False, f"子卡清单读取失败 HTTP {st}（fail-closed）"
+              pending = [c["number"] for c in cards or []
+                         if f"父意图: #{issue_number}" in (c.get("body") or "")]
+              if pending:
+                  return False, f"尚有 open 子卡未收口: {pending}"
+              m = re.search(r"(IR-\d+)", title or "")
+              task_id = m.group(1) if m else f"ISSUE-{issue_number}"
+              acc = os.path.join(os.getcwd(), "specs", task_id, "acceptance.md")
+              if not os.path.isfile(acc):
+                  return False, f"验收报告缺失: specs/{task_id}/acceptance.md"
+              return True, f"全部子卡收口 + 验收报告存在（{task_id}）"
+
+          if t["id"] == "T9":
+              okp, reason = check_ir_acceptance(ISSUE, iss.get("title") or "")
+              audit(f"T9 IR 验收谓词: ok={okp} reason={reason}")
+              if not okp:
+                  audit(f"verdict=DENIED-acceptance-incomplete T9 拒绝——{reason}")
+                  api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3Adone", "DELETE")
+                  raise SystemExit(0)
+
           # ---- 执行转移（状态标签写=App 身份，INV-02；写失败=fail-closed，
           # /claim 已建租约时先补偿回滚——杜绝"租约在、卡未变"的不一致面，ADR-0055）----
           class WriteFail(Exception):

@@ -8,7 +8,7 @@ version: 1
 #                 | label:<非state判定标签>（W3-C1 Bug 流扩展：label:bug/label:reproduced
 #                 ——判定标签驱动的转移，见 B1/B2 注）
 #   to_state    = 转移后状态（conductor 以 App 身份换标签：移除 from、置上 to）
-#   action      = invoke:spec-author | claim | noop（W0 全集）
+#   action      = claim | noop（W0 全集；invoke:spec-author 已随 ADR-0085 退役——产出方式不再由状态机指定）
 #   guard       = 布尔表达式；变量白名单：sender_role（owner|agent|none）、
 #                 author_association（OWNER|MEMBER|COLLABORATOR|CONTRIBUTOR|NONE）、
 #                 label_set（当前标签名集合）
@@ -27,16 +27,18 @@ transitions:
     # from_state=ir-signed：label 事件送达时签署标签已生效（当前态即 ir-signed）——
     # 首版误写 ir-draft 导致必然 no-op（#143 实测 AUDIT: from=ir-signed verdict=noop）。
     # 守卫不过=回退该标签（退回 ir-draft）；幂等：已在 spec 态则无匹配=no-op。
+    # ADR-0085：action 降级 noop——spec 产出方式不再由状态机指定（PM 自著与
+    # spec-author 流水线制度等价，PR338 先例；流水线保留为可选快速通道）。
     from_state: ir-signed
     event: label:state:ir-signed
     to_state: spec
-    action: invoke:spec-author
+    action: noop
     guard: "sender_role in ['owner', 'agent'] and 'type:intent' in label_set"
-  - id: T2  # owner 评论 /start 等价签署（AC-1 的 comment 路径）
+  - id: T2  # owner 评论 /start 等价签署（AC-1 的 comment 路径；ADR-0085 同 T1 降级 noop）
     from_state: ir-draft
     event: comment:/start
     to_state: spec
-    action: invoke:spec-author
+    action: noop
     guard: "sender_role == 'owner' and 'type:intent' in label_set"
   - id: T3  # 认领：先到先得（当前态必须 ready，否则 no-op）（BEH-08）
     from_state: ready
@@ -86,6 +88,32 @@ transitions:
   # needs-human → wave-planned 转移不在本表列 = 禁止（conductor no-op）。
   # 该断言作为 required check 在 CI 常驻强制运行（conductor-negtest 模式），
   # 确保没有任何路径可从 needs-human 直跳 wave-planned。
+  # ---------- PM 优先范式收口（ADR-0085：T7/T8/T9——卡生命周期补洞 + IR 验收门）----------
+  - id: T7  # 卡就绪：波次卡进入可认领态（ADR-0085 决策 5；此前 wave-planned→ready
+    # 无转移=conductor 永不执行，卡就绪靠手动标签——收口为机器路径）
+    from_state: wave-planned
+    event: label:state:ready
+    to_state: ready
+    action: noop
+    guard: "sender_role in ['owner', 'agent'] and 'type:card' in label_set"
+  - id: T8  # 卡完成：谓词=存在绑定本卡且已合并的 PR（body 含 Card: 行）——
+    # "完成工作卡+测试通过"的机械定义（gate 绿由 PR required checks 承担，
+    # 本谓词只认合并事实，ADR-0085 决策 5）
+    from_state: in-progress
+    event: label:state:done
+    to_state: done
+    action: noop
+    guard: "sender_role in ['owner', 'agent'] and 'type:card' in label_set"
+    merged_pr_required: true   # conductor 运行时重查（不信任标签事件载荷）
+  - id: T9  # IR 全面验收（Gate 4）：谓词=①全部子卡 state:done ②验收报告
+    # specs/<IR>/acceptance.md 存在于本仓——两条件 conductor 运行时重查；
+    # 子卡=body 含"父意图: #<本 IR>"的 open issue（ADR-0085 决策 5）
+    from_state: wave-planned
+    event: label:state:done
+    to_state: done
+    action: noop
+    guard: "sender_role in ['owner', 'agent'] and 'type:intent' in label_set"
+    acceptance_required: true  # conductor 运行时重查（全子卡 done + 验收报告存在）
   # ---------- Bug 流（W3-C1 .github#218 / ADR-0064，宪法 §3）----------
   # 执行者：CI-Workflows pipeline/bugflow（bug-reproduce.yml 以 App 身份写标签）。
   # conductor 对 label:bug/label:reproduced 等非 state 标签事件静默 no-op——

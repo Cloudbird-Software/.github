@@ -55,7 +55,7 @@ repos:
     migrations: null
 
   # 盘点备注（不声明、不接线）：
-  #   agent-registry 之外的注册表消费方 agent-platform —— 仅 vendor/ 拷贝，
+  #   （ADR-0085：agent-platform 退役，本条历史注释保留备查）agent-platform —— 仅 vendor/ 拷贝，
   #     源头真身在 agent-registry（vendor 漂移属另一关注面，不在本卡范围）
   #   mutual —— spec/01-schemas.md 为散文 schema，不可机判；落地 JSON Schema 后再声明
   #   Script_Writer / agent-tools / Use-up-Plan / .github / CI-Workflows —— 无契约面
