@@ -1,0 +1,60 @@
+"""IR-0004 spec 结构自测（suite/——#263 T-14：spec PR 必含非空测试文件且含有效断言）。
+
+校验 specs/IR-0004/spec.md 的结构完整性：frontmatter 可解析、AC 三段俱全、
+id 唯一且映射 IR 20 条期望变化、blastRadius/nonGoals 非空、正文条款 ID 唯一。
+"""
+import re
+from pathlib import Path
+
+import yaml
+
+SPEC = Path(__file__).resolve().parents[1] / "spec.md"
+IR_ITEM_COUNT = 20  # IR #315 期望的可观察变化共 20 条，AC 一一映射
+
+
+def test_frontmatter_parses():
+    text = SPEC.read_text(encoding="utf-8")
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    assert m, "frontmatter 定界符缺失或未闭合"
+    fm = yaml.safe_load(m.group(1))
+    assert fm["taskId"] == "IR-0004"
+    assert fm["specVersion"] == 1
+    assert fm["irRef"] == "Cloudbird-Software/.github#315"
+    return fm, text
+
+
+def test_acs_complete_and_unique(fm):
+    acs = fm["acceptanceCriteria"]
+    assert len(acs) == IR_ITEM_COUNT, f"AC 数 {len(acs)} != IR 期望变化数 {IR_ITEM_COUNT}"
+    ids = [a["id"] for a in acs]
+    assert ids == [f"AC-{i}" for i in range(1, IR_ITEM_COUNT + 1)], "AC 编号不连续"
+    for a in acs:
+        for seg in ("given", "when", "then"):
+            assert str(a.get(seg, "")).strip(), f"{a['id']} 的 {seg} 段为空"
+        assert "运行时证据" in a["then"], f"{a['id']} 缺运行时证据子句"
+
+
+def test_blastradius_and_nongoals(fm):
+    assert fm["blastRadius"], "blastRadius 为空"
+    for b in fm["blastRadius"]:
+        assert set(b) >= {"repo", "path"}, f"blastRadius 条目缺字段: {b}"
+    assert len(fm["nonGoals"]) >= 5, "nonGoals 过少"
+
+
+def test_clauses_unique_and_referenced():
+    text = SPEC.read_text(encoding="utf-8")
+    body = text.split("---", 2)[2]
+    ids = re.findall(r"^\s*[-\s]*\*{0,2}(INV|BEH|IFACE|BUDGET|DECISION|ASSUMPTION)-\d+\*{0,2}", body, re.M)
+    assert len(ids) >= 30, f"正文条款过少: {len(ids)}"
+    flat = re.findall(r"(?:INV|BEH|IFACE|BUDGET|DECISION|ASSUMPTION)-\d+", body)
+    assert len(flat) == len(set(flat)), "正文条款 ID 有重复定义"
+    # BEH 条款须引用其承接的 AC
+    for m in re.finditer(r"BEH-\d+（(AC-[0-9/, ]+)）", body):
+        for ref in re.findall(r"AC-\d+", m.group(1)):
+            assert ref in text
+
+
+def test_no_exemption_of_governance():
+    text = SPEC.read_text(encoding="utf-8")
+    for bad in ("跳过 gate", "绕过 gate", "豁免 gate", "无视 ADR"):
+        assert bad not in text, f"出现治理豁免措辞: {bad}"
