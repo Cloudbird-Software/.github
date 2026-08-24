@@ -154,7 +154,7 @@
     ]
   },
   "direct_push_exemptions": {
-    "comment": "§8 直推检测豁免——两类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃；arbiter 建仓 bootstrap 同理（W1-C2 .github#165/ADR-0054）。archive（W1-C1 .github#164/ADR-0053）：bootstrap README commit 同属 (b) 类——注意 ADR-0046 后 org-required-workflows ruleset 无 bypass，空仓首推被 required workflow 拦截，豁免操作=对 org ruleset 的 archive 仓库做秒级临时 exclude 后经 contents API 建 commit 并即刻还原（全程约 5 秒，已留痕于 #164）；ruleset 最终态与落盘定义一致（drift-check §1 不受影响）。QW_Arena1（.github#345/ADR-0084）：(b) 类空仓变体——模板派生未生效（空仓无 base 分支、PR 不可行，org-required-workflows 无 bypass 构成死锁），template-service 基线 72 文件由 owner 凭据经临时 bootstrap 分支落盘、建 main 后切换默认分支完成导入（全程未触碰组织 rulesets，main 根树与 template-service 逐文件 sha 一致）。",
+    "comment": "§8 直推检测豁免——两类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃；arbiter 建仓 bootstrap 同理（W1-C2 .github#165/ADR-0054）。archive（W1-C1 .github#164/ADR-0053）：bootstrap README commit 同属 (b) 类——注意 ADR-0046 后 org-required-workflows ruleset 无 bypass，空仓首推被 required workflow 拦截，豁免操作=对 org ruleset 的 archive 仓库做秒级临时 exclude 后经 contents API 建 commit 并即刻还原（全程约 5 秒，已留痕于 #164）；ruleset 最终态与落盘定义一致（drift-check §1 不受影响）。QW_Arena1（.github#345/ADR-0084）：(b) 类空仓变体——模板派生未生效（空仓无 base 分支、PR 不可行，org-required-workflows 无 bypass 构成死锁），template-service 基线 72 文件由 owner 凭据经临时 bootstrap 分支落盘、建 main 后切换默认分支完成导入（全程未触碰组织 rulesets，main 根树与 template-service 逐文件 sha 一致）。；cnb-bridge（ADR-0085/IR-0005）：(b) 类空仓 bootstrap——README 首commit 经 contents API（Git Data API 对空仓 409），ruleset 未动（与 QW_Arena1 的 exclude 法不同路径，同为建仓时序豁免）",
     ".github": [
       "9b056b3a925038484a8f6655ea45f81f071d5df6",
       "416f5f57fd459f6ece3587f3aa20b772148ad335"
@@ -196,6 +196,9 @@
     "QW_Arena1": [
       "d5ea693874917cbc3fbc45401c9c9a937dc71b9f",
       "bdb8493ab5f2e80ad56d9c5a4327d253db57c191"
+    ],
+    "cnb-bridge": [
+      "6a43a24ba859a64ca9770c18fb1254050917984b"
     ]
   },
   "org_required_workflows": {

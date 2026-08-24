@@ -115,7 +115,7 @@ repos=c if isinstance(c,list) else c.get('repos',c)
 names=[r['name'] if isinstance(r,dict) else r for r in (repos.values() if isinstance(repos,dict) else repos)] if repos else []
 print(' '.join(n for n in names if n))" 2>/dev/null) \
   || infra "REPOS.yaml 解析"
-[[ -n "$REPOS" ]] || REPOS="Use-up-Plan template-service agent-registry Script_Writer AI_Web_School Shorts_Director mutual agent-tools CI-Workflows"
+[[ -n "$REPOS" ]] || REPOS="Use-up-Plan template-service QW_Arena1 Script_Writer AI_Web_School Shorts_Director mutual cnb-bridge arbiter CI-Workflows"   # ADR-0085：退役仓出列、新仓入列（REPOS.yaml 拉取失败时的兜底清单）
 
 TMP=$(mktemp -d)
 for R in $REPOS; do
