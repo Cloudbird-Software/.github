@@ -101,7 +101,7 @@
     "CB_APP_ID",
     "AGENT_APP_SECRET",
     "GOVERNANCE_TOKEN",
-    "LLM_API_KEY"
+    "LLM_API_KEY1"
   ],
   "github_app": {
     "name": "cloudbrid-agent",
