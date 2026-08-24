@@ -7,7 +7,10 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 IMPL="${1:?用法: run-suite.sh <impl-dir>}"
 [[ -f "$IMPL/spec.md" ]] || { echo "impl 目录缺 spec.md: $IMPL" >&2; exit 2; }
-PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
+PY="${METERING_PYTHON:-}"
+if [[ -z "$PY" ]]; then
+  PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
+fi
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/specs/IR-0004/suite" "$TMP/governance/policy" "$TMP/governance/rulesets" "$TMP/.github/ISSUE_TEMPLATE"
 cp "$DIR"/suite/*.py "$TMP/specs/IR-0004/suite/"
