@@ -69,11 +69,42 @@ def test_negative_assertions_present():
     fm = load_fm()[0]
     acs = {a["id"]: a["then"] for a in fm["acceptanceCriteria"]}
     negative_words = ("红", "不通过", "作废", "失败", "拦截")
-    for ac_id in ("AC-1", "AC-3", "AC-5", "AC-14", "AC-18"):
+    # R2-B H-3：覆盖面与 amendments 声明对齐（fail-open 修复面全集）
+    for ac_id in ("AC-1", "AC-2", "AC-3", "AC-5", "AC-6", "AC-11", "AC-12",
+                  "AC-13", "AC-14", "AC-15", "AC-16", "AC-17", "AC-18"):
         assert any(w in acs[ac_id] for w in negative_words), f"{ac_id} 缺负向断言（fail-open 缝隙）"
+
+
+def test_blastradius_planned_discipline():
+    """R2-C H-2：双向存在性自洽——本仓内非 planned 条目必须真实存在；计划路径必须带 planned。"""
+    fm = load_fm()[0]
+    root = SPEC.parents[2]  # 仓库根
+    for b in fm["blastRadius"]:
+        planned = b.get("planned", False)
+        if b["repo"] != ".github":
+            continue  # 跨仓存在性由 spec CI 关卡核验（suite 无网络依赖原则）
+        path = b["path"]
+        if planned:
+            continue
+        if path.endswith("/**"):
+            assert (root / path[:-3]).is_dir(), f"非 planned 目录前缀不存在: {path}"
+        else:
+            assert (root / path).exists(), f"非 planned 路径不存在（须标 planned 或补存在）: {path}"
+
+
+def test_decision06_sequence_guard():
+    """R2-B H-1：DECISION-06 时序护栏存在（ADR-0082 修订落地前多账号不生效）。"""
+    body = SPEC.read_text(encoding="utf-8").split("---", 2)[2]
+    assert "修订 ADR 落地前不生效" in body, "DECISION-06 缺时序护栏"
+    assert "实施证据出现即判红" in body or "使用证据出现即判红" in body, "时序护栏缺判红断言"
 
 
 def test_no_exemption_of_governance():
     text = SPEC.read_text(encoding="utf-8")
-    for bad in ("跳过 gate", "绕过 gate", "豁免 gate", "无视 ADR"):
-        assert bad not in text, f"出现治理豁免措辞: {bad}"
+    # R2-B H-4：黑名单扩为词族（同义替换绕过防护）
+    import re as _re
+    # 否定前缀（不/未/无/没）修饰的除外；"豁免…ADR"为制度内通道（ADR-0035 escape_hatch 同款），不视为违规
+    family = _re.compile("(?<![不未无没])(跳过|绕过|无视|免检|略过)[^，。；]{0,6}(gate|关卡|判定|审计|ADR)")
+    family2 = _re.compile("(?<![不未无没])豁免[^，。；]{0,6}(gate|关卡|判定|审计)")
+    hits = family.findall(text) + family2.findall(text)
+    assert not hits, f"出现治理豁免措辞词族命中: {hits}"
