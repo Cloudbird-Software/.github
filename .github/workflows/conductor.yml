@@ -209,7 +209,18 @@ jobs:
           states = [n[len("state:"):] for n in labels if n.startswith("state:")]
           current = states[0] if states else "ir-draft"
           if len(states) > 1:
-              audit(f"verdict=abort 多状态标签并存: {states}"); raise SystemExit(1)
+              # 标签写序现实（ADR-0085，T8 首次实走实测 2026-08-25）：actor 置新态时
+              # 旧态仍在——labeled 事件天然携带 [旧,新] 双态窗口，先 abort 则标签触发
+              # 的转移全族（T5/T7/T8/T9）不可达。收敛规则：事件标签=新态、另一态=
+              # 转移前态（from_state 候选）；swap_state 随后移旧置新，终态单态。
+              # 非 label:state: 事件或两态均非事件标签 → 维持 abort（真并存/未知写序）。
+              ev_label_name = ev[len("label:"):] if ev.startswith("label:") else ""
+              others = [s for s in states if f"state:{s}" != ev_label_name]
+              if ev.startswith("label:state:") and len(others) == 1:
+                  current = others[0]
+                  audit(f"双态窗口收敛: {states} → 转移前态={current}（事件标签={ev_label_name}；ADR-0085 写序语义）")
+              else:
+                  audit(f"verdict=abort 多状态标签并存: {states}"); raise SystemExit(1)
 
           # ---- W4-C1：needs-human 不可直跳 wave-planned 断言（AC-12）----
           # 任何试图从 needs-human 直接进入 wave-planned 的转移一律拒绝
