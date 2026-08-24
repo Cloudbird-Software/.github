@@ -167,7 +167,7 @@ llm_channel_account() {
     # <repo>-<sha>/records-*.jsonl——须带 */ 前缀（旧 pattern "*-records-*.jsonl"
     # 对该形态恒不匹配 → 恒 INFRA，2026-08-24 独立验证定位）。
     if ! tar -xzf "$led.tar.gz" -C "$led" --strip-components=1 --wildcards \
-         "*/records-*.jsonl" "records-*.jsonl" 2>/dev/null; then
+         "*/records-*.jsonl" 2>/dev/null; then
       printf 'INFRA\tmetering 账本 tar 解包失败（strip-components=1 + records-*.jsonl）\n'
       return 0
     fi
