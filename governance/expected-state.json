@@ -1,6 +1,6 @@
 {
   "org": "Cloudbird-Software",
-  "comment": "组织治理期望状态。drift-check.sh 据此检测漂移；apply.sh 据此幂等修复。ruleset 完整定义在 rulesets/ 目录。",
+  "comment": "组织治理期望状态。drift-check.sh 据此检测漂移；apply.sh 据此幂等修复。ruleset 完整定义在 rulesets/ 目录。 merge_queue 已移除（2026-08-24）：required workflow 不在 merge queue 分支运行，队列条目恒等缺失 check 60min 超时弹回（agent-registry#95 实测）——与 required checks 制度结构性冲突先摘除，GitHub 支持后按 ADR-0042 恢复；关联 ADR-0083。",
   "actions_policy": {
     "allowed_actions": "selected",
     "github_owned_allowed": true,
@@ -101,7 +101,7 @@
     "CB_APP_ID",
     "AGENT_APP_SECRET",
     "GOVERNANCE_TOKEN",
-    "LLM_API_KEY"
+    "LLM_API_KEY1"
   ],
   "github_app": {
     "name": "cloudbrid-agent",
@@ -194,29 +194,20 @@
       "a32f0fcea2bc7b422ad8ad1463a8ad4a92cbeb60"
     ]
   },
-  "merge_queue": {
-    "comment": "P2-7 ADR-0042：merge queue 为 repo 级 ruleset（org rulesets API 不支持 merge_queue 规则类型）。串行保守起步；扩围须修订 ADR-0042。",
-    "repos": [
-      "agent-registry",
-      "template-service"
-    ],
-    "params": {
-      "merge_method": "squash",
-      "check_response_timeout_minutes": 60,
-      "max_entries_to_build": 5,
-      "min_entries_to_merge": 1,
-      "max_entries_to_merge": 1,
-      "min_entries_to_merge_wait_minutes": 0,
-      "grouping_strategy": "ALLGREEN"
-    }
-  },
   "org_required_workflows": {
-    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本（path/ref/repository_id 任何改动即漂移）；§15 校验钉点 commit 绑定（由 tag 改为直接钉 commit SHA，ISSUE-263 W1-C5）。钉点值：CI-Workflows v1.4.2（2d368c2）——v1.4.2 修复 merge_group 下 org-adr-required 设计性 skip 配 EXPECTED_SKIP（#135，CI-Workflows PR#28）。",
+    "comment": "P3-1（#95/ADR-0046）：gate 审判上移中心仓钉点。drift-check §1 对账 ruleset 文本。2026-08-24 平台约束修订（ADR-0083 关联）：ruleset API 对 required workflows 的 ref 已只接受分支/标签名（40 位 SHA 恒 422 does not have ref——多轮实测），钉点值=main；内容完整性改由 drift-check 后验承载。同轮变更：adversary-gate.yml 纳入 required workflows（ADR-0082/0083）；CI-Workflows 中心仓自身排除（org-gate job 对中心仓自跳，required 化后产生永不满足的 skipped）。",
     "ruleset": "org-required-workflows",
     "repository": "CI-Workflows",
     "repository_id": 1337911551,
     "path": ".github/workflows/org-gate.yml",
-    "ref": "2d368c29f170eab43b83f6b866f76fad3774fba9",
-    "ref_commit": "2d368c29f170eab43b83f6b866f76fad3774fba9"
+    "ref": "main",
+    "workflows": [
+      {
+        "path": ".github/workflows/org-gate.yml"
+      },
+      {
+        "path": ".github/workflows/adversary-gate.yml"
+      }
+    ]
   }
 }

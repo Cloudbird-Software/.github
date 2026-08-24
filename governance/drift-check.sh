@@ -23,6 +23,14 @@ api() { curl -sS -H "Authorization: Bearer ${GH_TOKEN:?需要 org admin GH_TOKEN
 
 # ---------- 1. Rulesets：存在性 / enforcement / 核心规则 ----------
 ACTUAL_RULESETS=$(api "https://api.github.com/orgs/$ORG/rulesets?per_page=100")
+# fail-closed（ADR-0083 决策 4）：清单非数组（token 失效/网络失败/权限丢失）时，
+# §1 的「不存在」判定全部是伪读数——2026-08-23 GOVERNANCE_TOKEN 失效期间曾把
+# 四个真实存在的 ruleset 全报「不存在」+ jq 对字符串行报错刷屏。检测器失明
+# 不得伪装成漂移或无漂移：显式 exit 2（与 §4 仓库清单 loud-failure 契约一致）。
+if ! jq -e 'type == "array"' <<<"$ACTUAL_RULESETS" >/dev/null 2>&1; then
+  echo "FATAL: org ruleset 清单拉取失败（$(jq -r '.message // "非数组"' <<<"$ACTUAL_RULESETS" 2>/dev/null || echo 传输失败)），drift 检测失明——中止" >&2
+  exit 2
+fi
 for f in "$DIR"/rulesets/*.json; do
   name=$(jq -r .name "$f")
   want_enf=$(jq -r .enforcement "$f")
@@ -316,8 +324,14 @@ adr_substantive() { # $1=四位编号 → stdout: missing|ok|shell|unreadable
     while IFS= read -r apath; do
       [[ -n "$apath" ]] || continue
       if [[ -n "${ADR_INDEX_MODE:-}" ]]; then
-        # 索引世界：archive raw 正本（公开仓，字节保真原件）；拉取失败留空→按不可判定处理
-        decoded=$(curl -sSf --max-time 20 "https://raw.githubusercontent.com/$ORG/archive/main/${apath}" 2>/dev/null || true)
+        # 索引世界：archive raw 正本（公开仓，字节保真原件）。raw 在 runner 上有
+        # 瞬时拒连抖动（2026-08-24 实测整批 unreadable）——重试 3 次后回退
+        # contents API（api.github.com 通道稳定），双通道皆失败才按不可判定处理。
+        decoded=$(curl -sSf --retry 3 --retry-delay 2 --max-time 20                     "https://raw.githubusercontent.com/$ORG/archive/main/${apath}" 2>/dev/null || true)
+        if [[ -z "$decoded" ]]; then
+          _c=$(api "https://api.github.com/repos/$ORG/archive/contents/${apath}" 2>/dev/null | jq -r '.content // empty' 2>/dev/null || true)
+          [[ -n "$_c" ]] && decoded=$(base64 -d <<<"$_c" 2>/dev/null || true)
+        fi
       else
         content=$(api "https://api.github.com/repos/$ORG/agent-registry/contents/$apath" | jq -r '.content // empty')
         [[ -z "$content" ]] && continue
