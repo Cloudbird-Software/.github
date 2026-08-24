@@ -121,3 +121,15 @@ def test_no_exemption_of_governance():
     family2 = _re.compile("(?<![不未无没])豁免[^，。；]{0,6}(gate|关卡|判定|审计)")
     hits = family.findall(text) + family2.findall(text)
     assert not hits, f"出现治理豁免措辞词族命中: {hits}"
+
+
+if __name__ == "__main__":
+    # stdlib 执行适配（adversary run-suite.sh 契约：无 pytest 环境可跑）
+    import sys as _sys
+    import unittest as _unittest
+
+    _suite = _unittest.TestSuite()
+    for _name in sorted(n for n in dir() if n.startswith("test_")):
+        _suite.addTest(_unittest.FunctionTestCase(globals()[_name]))
+    _result = _unittest.TextTestRunner(verbosity=2).run(_suite)
+    _sys.exit(0 if _result.wasSuccessful() else 1)
