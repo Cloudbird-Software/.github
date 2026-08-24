@@ -64,14 +64,27 @@ def test_clauses_unique_and_referenced():
             assert ref in text
 
 
+def test_key_ac_artifact_words():
+    """R3-A H-5：关键 AC 的运行时证据绑定具体工件词（防宽泛词空洞交差）。"""
+    fm = load_fm()[0]
+    acs = {a["id"]: a["then"] for a in fm["acceptanceCriteria"]}
+    binding = {
+        "AC-1": ("变异",), "AC-2": ("变异体清单",), "AC-5": ("复算",),
+        "AC-8": ("hash", "编译"), "AC-15": ("cpus", "build logs"),
+        "AC-9": ("交集",), "AC-12": ("硬区",), "AC-18": ("五项",),
+    }
+    for ac_id, words in binding.items():
+        assert all(w in acs[ac_id] for w in words), f"{ac_id} 缺绑定工件词 {words}"
+
+
 def test_negative_assertions_present():
     """R1-C H-1/H-2/H-4：关键 fail-open 面必须有负向断言（异常/缺失即红）。"""
     fm = load_fm()[0]
     acs = {a["id"]: a["then"] for a in fm["acceptanceCriteria"]}
     negative_words = ("红", "不通过", "作废", "失败", "拦截")
     # R2-B H-3：覆盖面与 amendments 声明对齐（fail-open 修复面全集）
-    for ac_id in ("AC-1", "AC-2", "AC-3", "AC-5", "AC-6", "AC-11", "AC-12",
-                  "AC-13", "AC-14", "AC-15", "AC-16", "AC-17", "AC-18"):
+    for ac_id in ("AC-1", "AC-2", "AC-3", "AC-4", "AC-5", "AC-6", "AC-10", "AC-11", "AC-12",
+                  "AC-13", "AC-14", "AC-15", "AC-16", "AC-17", "AC-18", "AC-19", "AC-21"):
         assert any(w in acs[ac_id] for w in negative_words), f"{ac_id} 缺负向断言（fail-open 缝隙）"
 
 

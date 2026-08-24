@@ -1,6 +1,6 @@
 ---
 taskId: IR-0004
-specVersion: 3
+specVersion: 4
 title: 验证体系缺口闭环（变异/属性/模糊/蜕变/符号/形式化条件触发/SAST 台账）+ spec 质量测量（DSL 编译与骨架 fan-out）+ 实现 fan-out 生命周期（early-exit/champion/oracle/红队燃料管道）+ CNB 临时算力底座条款级规格
 irRef: Cloudbird-Software/.github#315
 amendments:
@@ -8,6 +8,8 @@ amendments:
   reason: 红队 R1 审计 insufficient（CNB 4 窗口，3 份有效报告、24 项有效命中经机械核对成立）——IR 保真度补全（AC-21 token 决策、AC-10 merger 分支、AC-12 oracle 适用判据、AC-19 月度干跑、light=1C 硬数值、checklist 结构化前提、kernel 唯一锚点、趋同度突变弱信号）；负向断言补全堵 fail-open（AC-1/3/5/14 及 AC-2/15/16/17 采信前提与交叉核对）；suite 增语义级断言；ADR 承接补引（ADR-0066 底噪扣减/聚簇、ADR-0067 恶意合规分工、ADR-0062 hash 链、ADR-0035/T-13 口径对齐）；弱模型触发侧边界明文与不适用抽样复核；nonGoals 补多平台抽象层/CNB SDK 两项；R1-B 迟归（重跑确认）补 8 项——blastRadius 漏报补登（REPOS.yaml/cost-check.sh/dashboard-update.py/CI-Workflows workflows+scripts）、试点仓真名勘误（AI_Web_School）、路径存在性语义改 planned 双向、IFACE-01 治理仓范围与执行层落点定义、IFACE-02 承接既有 cnb_bridge.py（ADR-0082）、多账号 secret 口径修订（DECISION-06）、BUDGET-01 措辞、S8 仓清单同步、凭据扫描覆盖面清单化
 - rev: 3
   reason: 红队 R2 复审 insufficient（3 窗口，4 blocking/9 hardening/6 advisory）——DECISION-06 补时序护栏（ADR-0082 修订落地前多账号条款不生效、实施证据即红）；blastRadius 四条计划路径补 planned 标记（自身双向存在性自洽）；AC-8 声明与 spec-check.py 并存分工+DSL 编译以验证者 APP 身份执行（g060/ADR-0081 边界）；IFACE-02 补现状→目标增量映射；AC-2 补 ≥10 条量化锚点；AC-5 补复算锚点（复算命令+SHA 基准+CI 重放）；AC-7 抽样复核绑定 10%/月度下限；AC-11/12 补对拍停摆负向断言；ADR-0062 措辞改迁移思路、ADR-0081 燃料产物归属留待承接修订、ADR-0083 注明正本待迁以墓碑为准；熔断/死开关/停摆正交性声明；suite 负向断言覆盖扩展+词表收紧
+- rev: 4
+  reason: 红队 R3 终审收敛（2 窗口；R3-B 判"无 blocking 级新缝隙"，R3-A 剩余 2 blocking 均系文本级）——ADR-0083 引用修正（正本已迁 archive 且 sha256 与 INDEX 一致，撤回"待迁"过时陈述）；AC-8 时态澄清（spec CI 关卡为 W2-C1 实施后的验收状态，实施前由 ADR-0083 suite 门+adversary 守门）；DECISION-06 时序护栏补检测载体（周审计 secret 清单对账+隔离审计 grep）；AC-4/10/19/21 补显式负向断言；suite 负向覆盖扩至 17 AC+关键 AC 工件词绑定
 acceptanceCriteria:
 - id: AC-1
   given: AI_Web_School 仓 weekly 变异测试执行入口已落地
@@ -24,7 +26,7 @@ acceptanceCriteria:
 - id: AC-4
   given: AI_Web_School 领域自然蜕变关系经 fan-out 盘点产出结构化候选
   when: 人类抽检完成
-  then: 候选不少于 15 条且每条含机械可验证方式字段、不少于 3 条实现为常驻测试、testing.yaml 新增对应条款；运行时证据为候选清单、抽检记录与条款 diff
+  then: 候选不少于 15 条且每条含机械可验证方式字段（产出不足 15 条该轮记 infra 失败并红）、不少于 3 条实现为常驻测试、testing.yaml 新增对应条款；运行时证据为候选清单、抽检记录与条款 diff
 - id: AC-5
   given: 符号执行试点已在解析/实例化纯函数目标上运行
   when: 试点数据齐备
@@ -40,7 +42,7 @@ acceptanceCriteria:
 - id: AC-8
   given: 验收 DSL 已定义且新 spec 以 DSL 书写验收标准
   when: spec PR 合并
-  then: DSL 验收标准机械编译为测试骨架且携带 spec hash 溯源头、手改生成测试触发 CI 红、修改 spec 重编译后转绿、spec CI 关卡（结构校验/可编译/blastRadius 申报双向存在性——已存在路径必须被申报、申报中不存在路径必须标记 planned）在 specs 路径全部 PR 生效且关卡被摘除时 CI 必红；豁免仅经 ADR 登记通道且计数入账；与既有 spec-check.py（g010 过渡版，ADR-0050）为并存分工——spec-check.py 保留 frontmatter 结构与注入双扫，本关卡新增 DSL 可编译与 blastRadius 双向存在性，重叠面从严者生效、不重复建设；DSL 编译以验证者 APP 身份执行（ADR-0076/0081），生成物写入 suite 目录走验证者写豁免并绑定对应卡 Card 引用，g060 边界沿用 ADR-0081（开发 APP 改测试路径仍锁）；与既有 T-13（ADR-0035 test-integrity）的口径对齐：hash 溯源校验管辖编译生成物（直接红），T-13 管辖一般测试文件四形态（TI-R4 为 require_adr）——同一文件双命中时从严者生效，本对齐为承接声明不修改 T-13 语义；运行时证据为编译产物、篡改红记录与一次 spec PR 全关卡绿
+  then: DSL 验收标准机械编译为测试骨架且携带 spec hash 溯源头、手改生成测试触发 CI 红、修改 spec 重编译后转绿、spec CI 关卡（结构校验/可编译/blastRadius 申报双向存在性——已存在路径必须被申报、申报中不存在路径必须标记 planned）随实施卡落地后须在 specs 路径全部 PR 生效且关卡被摘除时 CI 必红（本句为实施后的验收状态；实施前 specs 路径 PR 由 ADR-0083 suite 门与 adversary 红队 required check 守门）；豁免仅经 ADR 登记通道且计数入账；与既有 spec-check.py（g010 过渡版，ADR-0050）为并存分工——spec-check.py 保留 frontmatter 结构与注入双扫，本关卡新增 DSL 可编译与 blastRadius 双向存在性，重叠面从严者生效、不重复建设；DSL 编译以验证者 APP 身份执行（ADR-0076/0081），生成物写入 suite 目录走验证者写豁免并绑定对应卡 Card 引用，g060 边界沿用 ADR-0081（开发 APP 改测试路径仍锁）；与既有 T-13（ADR-0035 test-integrity）的口径对齐：hash 溯源校验管辖编译生成物（直接红），T-13 管辖一般测试文件四形态（TI-R4 为 require_adr）——同一文件双命中时从严者生效，本对齐为承接声明不修改 T-13 语义；运行时证据为编译产物、篡改红记录与一次 spec PR 全关卡绿
 - id: AC-9
   given: 一张卡处于 spec 阶段且骨架 fan-out 已派发（N 默认 3–4、含至少一个异构模型实例）
   when: N 份骨架（路线陈述/接口签名草稿/测试草案/假设清单四组件）齐备
@@ -48,7 +50,7 @@ acceptanceCriteria:
 - id: AC-10
   given: 实现决策矩阵（决策密度×可判定性）已入政策
   when: 一张卡进入实现阶段
-  then: 决策矩阵三分支机械生效——高决策密度且高可判定为阻塞式 fan-out、语义敏感为组合模式（merger 合成）、低决策密度为单实例加机械门禁（自动获得免 fan-out 标签）；通过 gating 的卡以 N 路并行实现（策略来自骨架策略菜单）、第一个通过全部既有 gate 的实现立即合并且不跳过任何 gate、其余实现转后台执行全量评价；运行时证据为标签记录、三分支路由记录与多路实现的完整时间线
+  then: 决策矩阵三分支机械生效——高决策密度且高可判定为阻塞式 fan-out、语义敏感为组合模式（merger 合成）、低决策密度为单实例加机械门禁（自动获得免 fan-out 标签）；通过 gating 的卡以 N 路并行实现（策略来自骨架策略菜单）、第一个通过全部既有 gate 的实现立即合并且不跳过任何 gate、其余实现转后台执行全量评价；运行时证据为标签记录、三分支路由记录与多路实现的完整时间线（路由记录缺失即红）
 - id: AC-11
   given: 后台实现完成全量 gate、性能基准与对拍
   when: 后台结果优于现任 champion 且对拍等价
@@ -84,7 +86,7 @@ acceptanceCriteria:
 - id: AC-19
   given: 功能演练脚本就绪
   when: 月度静态干跑与季度功能演练自动执行
-  then: 月度静态干跑（隔离不变式验证）自动产出审计 issue；季度功能演练全程零人工——置位死开关→发散链切换付费 API 回退完成一轮真实任务→gate 全绿→自动复位→计时报告；物理删除仅为一次性退休动作不做演习且此证明力边界已入册；运行时证据为干跑 issue 链、演练计时与回退任务 run 链接
+  then: 月度静态干跑（隔离不变式验证）自动产出审计 issue；季度功能演练全程零人工——置位死开关→发散链切换付费 API 回退完成一轮真实任务→gate 全绿→自动复位→计时报告；物理删除仅为一次性退休动作不做演习且此证明力边界已入册；干跑或演练未按期自动产出 issue 即红；运行时证据为干跑 issue 链、演练计时与回退任务 run 链接
 - id: AC-20
   given: 本 IR 的一张高可判定实现卡进入执行
   when: 走完骨架 fan-out→策略菜单→N 路竞速→early-exit 合并→后台对拍→亚军冻结 oracle 全链
@@ -92,7 +94,7 @@ acceptanceCriteria:
 - id: AC-21
   given: token 治理决策需入册
   when: 高权限 token 保持决策以 ADR 落实
-  then: ADR 记录 owner 裁决（管理简单性优先）与缓解条款——token 仅存 org secret、永不进入任何 agent 上下文与外部沙箱、泄漏应急流程（吊销→轮换→账本核查）runbook 化；任意派单任务文本经凭据形状扫描不含任何 token 形态、扫描模式集按受管平台清单配置且清单外形状按登记制扩展（防回归测试常驻）；运行时证据为 ADR diff、org secret 存在性查询记录（key 不可见）与扫描测试运行记录
+  then: ADR 记录 owner 裁决（管理简单性优先）与缓解条款——token 仅存 org secret、永不进入任何 agent 上下文与外部沙箱、泄漏应急流程（吊销→轮换→账本核查）runbook 化；任意派单任务文本经凭据形状扫描不含任何 token 形态、扫描模式集按受管平台清单配置且清单外形状按登记制扩展、扫描步骤缺失或未运行即红（防回归测试常驻）；运行时证据为 ADR diff、org secret 存在性查询记录（key 不可见）与扫描测试运行记录
 blastRadius:
 - repo: .github
   path: specs/IR-0004/**
@@ -205,8 +207,8 @@ nonGoals:
 - **DECISION-02** X-04 由无条件拒绝修订为条件触发，修订经 ADR 完成（spec 不直接修改治理条款）。
 - **DECISION-03** 演练全自动零人工；物理删除为一次性退休动作不做演习，证明力边界（功能脱离经周期证明、物理删除未经演习）如实入册（owner 裁决）。
 - **DECISION-04** api_trigger 不作为依赖通道，保留月度复验探针；issue 窗口评论为当前唯一已验证机器派单通道。
-- **DECISION-05 承接引用**：条款级规格方法承接 ADR-0050；无人值守护栏适用 ADR-0040；中心审判钉点 ADR-0046；ADR 墓碑机制 ADR-0053；fail-before 语义 ADR-0061；verifier 范式 ADR-0072（红队候选生成属选择层不进判定链，不冲突）；测试防篡改口径 ADR-0035/T-13（hash 溯源管生成物、T-13 管一般测试文件，双命中从严者生效）；计量与产物 hash 链 ADR-0062（token 计量口径；账本族 append-only 校验系迁移其 hash 链思路的扩展应用，非正本直接条款）；语义熵分歧度量 ADR-0066（骨架 fan-out 的歧义归因复用其底噪扣减与双向蕴含聚簇——骨架 fan-out 产出 AC 候选/模糊地图/策略菜单，语义熵仪器判定歧义是否达 spec bug 级，两仪器分工不重复建设）；恶意合规 adversary ADR-0067（其套件充分性判定与 AC-2 变异裁判互补——变异裁判测杀变异能力、恶意合规测针对性偷懒抵抗力，统一为测试有效性判定族的两个机械层）；#263 的卡绑定测试与红队守门为上游依赖（T-14/T-15/AR-10；其机器化落地承接 ADR-0083 spec PR suite 强制门与红队 required check（ADR-0083 正本待迁 archive，引用暂以墓碑摘要为准，迁移缺口已另行上报））；红队守门收口 ADR-0082（默认 verifier 范式、CNB 通道与 fallback 链——本 spec 的派单协议为其执行层增强、判定环节沿用其 verifier 范式不另设；死开关置位建议/租约停摆告警与其连续 3 次 fallback 熔断为不同触发源、分别入账互不遮蔽，fallback 计数熔断语义沿用不另设）；spec 阶段攻击面 ADR-0079、验证者身份 ADR-0076、holdout 挂载 ADR-0080、验证者写豁免 ADR-0081（DSL 编译产物位于 suite 豁免路径内、以验证者 APP 身份执行；燃料产物写入主体不在 ADR-0081 豁免面，随实施卡以承接修订显式补登）；本 spec 的 DSL 编译与骨架 fan-out 为 #263 体系的机械层承接，不重复建设。
-- **DECISION-06** 多账号扩展对 ADR-0082"配置面恰为 1 org secret"口径的修订：每账号恰 1 个同形 org secret（CNB_TOKEN_<alias>）+ 共享 org variable，配置面膨胀（存在非登记 secret）判红；该修订随本 IR 以 ADR 落实。时序护栏（同 ADR-0076 决策 6 范式）：ADR-0082 修订 ADR 未合并前，任何多账号 org secret 的创建或使用证据出现即判红；本条多账号条款在修订 ADR 落地前不生效（单账号先行）。
+- **DECISION-05 承接引用**：条款级规格方法承接 ADR-0050；无人值守护栏适用 ADR-0040；中心审判钉点 ADR-0046；ADR 墓碑机制 ADR-0053；fail-before 语义 ADR-0061；verifier 范式 ADR-0072（红队候选生成属选择层不进判定链，不冲突）；测试防篡改口径 ADR-0035/T-13（hash 溯源管生成物、T-13 管一般测试文件，双命中从严者生效）；计量与产物 hash 链 ADR-0062（token 计量口径；账本族 append-only 校验系迁移其 hash 链思路的扩展应用，非正本直接条款）；语义熵分歧度量 ADR-0066（骨架 fan-out 的歧义归因复用其底噪扣减与双向蕴含聚簇——骨架 fan-out 产出 AC 候选/模糊地图/策略菜单，语义熵仪器判定歧义是否达 spec bug 级，两仪器分工不重复建设）；恶意合规 adversary ADR-0067（其套件充分性判定与 AC-2 变异裁判互补——变异裁判测杀变异能力、恶意合规测针对性偷懒抵抗力，统一为测试有效性判定族的两个机械层）；#263 的卡绑定测试与红队守门为上游依赖（T-14/T-15/AR-10；其机器化落地承接 ADR-0083 spec PR suite 强制门与红队 required check（正本 archive/adr/ADR-0083-t14-suite-gate.md，sha256 与 INDEX 登记逐字节一致，经 R3 实测核实））；红队守门收口 ADR-0082（默认 verifier 范式、CNB 通道与 fallback 链——本 spec 的派单协议为其执行层增强、判定环节沿用其 verifier 范式不另设；死开关置位建议/租约停摆告警与其连续 3 次 fallback 熔断为不同触发源、分别入账互不遮蔽，fallback 计数熔断语义沿用不另设）；spec 阶段攻击面 ADR-0079、验证者身份 ADR-0076、holdout 挂载 ADR-0080、验证者写豁免 ADR-0081（DSL 编译产物位于 suite 豁免路径内、以验证者 APP 身份执行；燃料产物写入主体不在 ADR-0081 豁免面，随实施卡以承接修订显式补登）；本 spec 的 DSL 编译与骨架 fan-out 为 #263 体系的机械层承接，不重复建设。
+- **DECISION-06** 多账号扩展对 ADR-0082"配置面恰为 1 org secret"口径的修订：每账号恰 1 个同形 org secret（CNB_TOKEN_<alias>）+ 共享 org variable，配置面膨胀（存在非登记 secret）判红；该修订随本 IR 以 ADR 落实。时序护栏（同 ADR-0076 决策 6 范式）：ADR-0082 修订 ADR 未合并前，任何多账号 org secret 的创建或使用证据出现即判红（检测载体：周审计的 org secret 清单对账 + 隔离审计 grep——发现未登记 CNB_TOKEN_* 形态 secret 即开 issue 判红）；本条多账号条款在修订 ADR 落地前不生效（单账号先行）。
 
 ## ASSUMPTION（假设）
 
