@@ -55,28 +55,37 @@ jobs:
           # 分通道（红队 #66-G1）：exit 2（token 缺失）与 API 故障不是漂移——
           # 此前一律按漂移开口径开 issue，限流/传输故障会在整点被误报为漂移。
           # 判据：报告里存在 DRIFT 行=真漂移；否则=检测器自身故障（标题/处置路径不同）。
+          # 2026-08-25 补全（#366 会话发现）：分通道此前只分了 TITLE——BODY 仍一律
+          # "发现以下漂移…修复方式 apply.sh"，且 infra 通道指纹=sha256(空报告)，
+          # 与历史 infra 评论互撞后静默跳过——token 失效 30+ 小时只在 log 里可见。
+          # 修法：infra 通道用独立指纹（FATAL 行归一化）+ 独立 BODY（指向凭据轮换，
+          # 不误导 apply.sh）；两通道指纹空间不相交（前缀 infra:）。
           if ! grep -q '^DRIFT' drift-report.txt 2>/dev/null; then
             TITLE="drift-check 运行失败（基础设施故障——非漂移）"
+            FP="infra:$(grep -E '^(FATAL|##\[error\])' drift-report.txt 2>/dev/null | sed -E 's/run [0-9]+/run <ID>/g; s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+Z/<TS>/g' | sort -u | sha256sum | cut -d' ' -f1)"
+            BODY="drift-check 检测器自身故障（运行 #${{ github.run_id }}）——报告无 DRIFT 行，判定通道与漂移分离（ADR-0021 分通道）。
+
+          $(cat drift-report.txt 2>/dev/null || echo "（报告文件缺失——检测器在产出报告前即失败）")
+
+          处置：多为 org secret \`GOVERNANCE_TOKEN\` 失效/限流/传输故障（owner 面凭据轮换，勿跑 apply.sh——组织配置本身未检出漂移）。
+
+          @randypanding
+
+          <!-- drift-fingerprint: $FP -->"
           else
             TITLE="治理漂移检测：组织配置与 governance/ 落盘不一致"
-          fi
-          # 归属标记（评审项）：issue 归属判定用专属 label 而非标题搜索——
-          # 标题搜索会把人工/其他来源的同名 issue 误当作本检测器的报告去评论/关闭
-          LABEL="auto-drift-report"
-          gh label create "$LABEL" --repo "$REPO" --description "governance-drift 工作流自动报告（勿手工使用）" --color d73a4a >/dev/null 2>&1 || true
-          EXISTING=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq 'length')
-          # 评论去重（红队 RB-B2，ADR-0016 决策 7）：漂移指纹=稳定漂移集合的 sha256。
-          # 同一指纹只报一次——未变化的漂移不每日重复评论（防 issue 评论无限膨胀：
-          # 破玻璃未回填等长期漂移此前每日+1 评论）；漂移集变化=新指纹=新评论。
-          # 指纹稳定性（评审项：全量报告含每次运行都变的字段——§8 回填时限秒数随
-          # 时间增长、OK 行的检测窗口/commit 数随日期漂移，同一漂移会天天得到新
-          # 指纹使去重失效）：只取 DRIFT 行、归一化时长秒数（回填时限=NNNs→<AGE>s）、
-          # 排序去重后哈希——语义集合不变则指纹跨日恒定，漂移新增/消除/内容实质
-          # 变化才产生新指纹。
-          # §13 liveness 行含逐秒增长的年龄字段（updated NNNNs 前 / 已 NNNNs / 创建 NNNNs），
-          # 不归一化则同一卡死/活体缺失每小时产生新指纹、去重失效（RB-B2 同款）
-          FP=$(grep '^DRIFT' drift-report.txt | sed -E 's/回填时限=[0-9]+s/回填时限=<AGE>s/g; s/updated [0-9]+s 前/updated <AGE>s 前/g; s/已 [0-9]+s/已 <AGE>s/g; s/创建 [0-9]+s/创建 <AGE>s/g' | sort -u | sha256sum | cut -d' ' -f1)
-          BODY="自动化检测发现以下漂移（运行 #${{ github.run_id }}）：
+            # 评论去重（红队 RB-B2，ADR-0016 决策 7）：漂移指纹=稳定漂移集合的 sha256。
+            # 同一指纹只报一次——未变化的漂移不每日重复评论（防 issue 评论无限膨胀：
+            # 破玻璃未回填等长期漂移此前每日+1 评论）；漂移集变化=新指纹=新评论。
+            # 指纹稳定性（评审项：全量报告含每次运行都变的字段——§8 回填时限秒数随
+            # 时间增长、OK 行的检测窗口/commit 数随日期漂移，同一漂移会天天得到新
+            # 指纹使去重失效）：只取 DRIFT 行、归一化时长秒数（回填时限=NNNs→<AGE>s）、
+            # 排序去重后哈希——语义集合不变则指纹跨日恒定，漂移新增/消除/内容实质
+            # 变化才产生新指纹。
+            # §13 liveness 行含逐秒增长的年龄字段（updated NNNNs 前 / 已 NNNNs / 创建 NNNNs），
+            # 不归一化则同一卡死/活体缺失每小时产生新指纹、去重失效（RB-B2 同款）
+            FP=$(grep '^DRIFT' drift-report.txt | sed -E 's/回填时限=[0-9]+s/回填时限=<AGE>s/g; s/updated [0-9]+s 前/updated <AGE>s 前/g; s/已 [0-9]+s/已 <AGE>s/g; s/创建 [0-9]+s/创建 <AGE>s/g' | sort -u | sha256sum | cut -d' ' -f1)
+            BODY="自动化检测发现以下漂移（运行 #${{ github.run_id }}）：
 
           $(cat drift-report.txt)
 
@@ -85,6 +94,12 @@ jobs:
           @randypanding
 
           <!-- drift-fingerprint: $FP -->"
+          fi
+          # 归属标记（评审项）：issue 归属判定用专属 label 而非标题搜索——
+          # 标题搜索会把人工/其他来源的同名 issue 误当作本检测器的报告去评论/关闭
+          LABEL="auto-drift-report"
+          gh label create "$LABEL" --repo "$REPO" --description "governance-drift 工作流自动报告（勿手工使用）" --color d73a4a >/dev/null 2>&1 || true
+          EXISTING=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq 'length')
           if [[ "$EXISTING" != "0" ]]; then
             NUM=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq '.[0].number')
             # 全量评论比对（coderabbit review：只看最近 10 条时，同一指纹若在

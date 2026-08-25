@@ -21,6 +21,13 @@ conductor / 红队 / 验证者在 GitHub CI 内机械判定，你与外部沙箱
 上升策略不预设（ADR-0085 背景裁决 1）：没有"什么情况必须找人"的成文清单——该自己上就上
 （gate 红、语义敏感、机械核对不符），事后把判断过程写进运行报告 §6，经 digest 沉淀后再成文。
 
+**persona 边界**（#366 项 4）：你的写仓身份=GitHub App `cloudbrid-agent`（AG-1，
+单仓作用域令牌，`scripts/gh-app-token.sh` 铸造）。**任何路径都能提 PR**——包括
+`.github/workflows/`、CODEOWNERS、`governance/`：生成侧全开放，不存在"PM 碰不得的
+路径"。恒不在你手里的只有三样：合并权（owner-only review + merge，含你自己开的 PR）、
+GOVERNANCE_TOKEN / org secret 凭据面（§7）、判定语义（红线 1）。判据不在路径在动作：
+提 PR=能，自批自合=永不能。
+
 ## §1 入职三步
 
 1. **看版图**：读 `governance/REPOS.yaml`——L0 治理三仓（.github / CI-Workflows / archive）、
@@ -153,8 +160,16 @@ IR 级收口，证据可机械回查。门禁=T9 谓词（ADR-0085 决策 5）�
    走——多引一个 ADR 的成本远低于走错流程的返工。
 2. **ADR**：新决策=新写 ADR（PR 至 archive `adr/ADR-NNNN-*.md` + 更新 INDEX.yaml）；
    执行性变更（既有决策的落地）=引用既有 ADR-NNNN 即可。
-3. **本地预检**：`make gates-pr`（gate.yml 本地等价面）。drift-check 是 owner/CI 面
-   （org admin PAT）——你跑不了不是你的问题，agent 侧等价预检就是 gates-pr。
+   双仓联动排序：**archive 的 ADR PR 先合并**，.github 的引用 PR 后合并——
+   adr-required / drift §10 查的是 archive main 上的正本，反序会让 .github PR
+   在窗口期引用幽灵 ADR（gate 红；archive 合并后重触发即解除）。
+3. **本地预检**：`make gates-pr`（gate.yml 本地等价面；CI-Workflows 仓同款目标已就位）。
+   drift-check 是 owner/CI 面（org admin PAT）——你跑不了不是你的问题，agent 侧
+   等价预检就是 gates-pr。**只读查漂移态**（#366 项 2 替代路径，零凭据要求）：
+   `gh run list --workflow governance-drift.yml -R Cloudbird-Software/.github --limit 3`
+   ——success=无漂移；failure 且 log 含 `DRIFT` 行=真漂移；failure 且含 `FATAL`/exit 2
+   =检测器自身故障（多为 GOVERNANCE_TOKEN 失效，owner 面处置）。`gh run view <id> --log`
+   可读全文；漂移处置是 owner 面动作，你只消费结论。
 4. **PR**：title/body 引用 ADR-NNNN（gate adr-required 机器拦，幽灵 ADR 不放行）；
    bug 修复关联 bug 单（B3 状态回写靠它）。
 5. **合并**：owner-only review + merge。你的自主性在生成侧（写什么、怎么写），
