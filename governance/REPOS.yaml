@@ -124,6 +124,18 @@ repos:
       bootstrap 直推豁免空仓变体（ADR-0084）；2026-08-31 赛后按 ADR-0084 退役条款处置
     key_paths: [src/, tests/, quality/, docs/]
 
+  - name: Viral_Radar
+    layer: L2
+    visibility: public
+    status: active
+    role: 产品仓——全网多平台爆款对标分析与脚本生成系统（视频号/抖音/小红书对标账号采集×
+      ASR+OCR 多模态提取×LLM 秒级拆解×报告×仿写脚本，IR Viral_Radar#1）；Python 语言
+      （languages.yaml 对本仓整体豁免，ADR-0091"生态复用"型：多模态推理链 Python 垄断+
+      无 Go/TS 等价物+IR 明示复用优先，豁免仅语言规范面、治理基线不豁免）；建仓经
+      template-service generate endpoint 官方实例化（非直推）；采集层 MediaCrawler/
+      wx_channel 按 ADR-0091 决策 5"参考不依赖"（非商用许可风险隔离）
+    key_paths: [src/, tests/, quality/, specs/, docs/]
+
   - name: holdout
     layer: L1
     visibility: public
