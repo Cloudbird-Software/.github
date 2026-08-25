@@ -219,7 +219,11 @@ jobs:
           SEED: ${{ steps.select.outputs.seed }}
         run: |
           set -euo pipefail
-          git config user.name drill-seed-bot && git config user.email drill-bot@users.noreply.github.com
+          # --global 必须：台账是独立 clone（ledger/），git -C ledger commit 读不到
+          # 工作区仓库的 local config——无全局身份=Author identity unknown，commit 失败、
+          # push 永不发生、drill-ledger 分支从未创建（run 32852203969 实证，台账记录
+          # 随 runner 销毁丢失=append-only 被无声违反，仅 run 变红兜底可见）
+          git config --global user.name drill-seed-bot && git config --global user.email drill-bot@users.noreply.github.com
           if ! git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger -b drill-ledger 2>/dev/null; then
             git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger
             git -C ledger checkout -b drill-ledger
@@ -288,7 +292,8 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          git config user.name drill-seed-bot && git config user.email drill-bot@users.noreply.github.com
+          # --global 必须：同 drill job——ledger 独立 clone 读不到工作区 local config
+          git config --global user.name drill-seed-bot && git config --global user.email drill-bot@users.noreply.github.com
           if ! git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger -b drill-ledger 2>/dev/null; then
             git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger
             git -C ledger checkout -b drill-ledger
