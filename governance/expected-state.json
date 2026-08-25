@@ -191,11 +191,15 @@
       "7b1a65234b1697bde11cea2ebdacd8ee0efc44c4"
     ],
     "archive": [
-      "a32f0fcea2bc7b422ad8ad1463a8ad4a92cbeb60"
+      "a32f0fcea2bc7b422ad8ad1463a8ad4a92cbeb60",
+      "1d24dea9a1515714749be6e3964efb0a83ceceb1"
     ],
     "QW_Arena1": [
       "d5ea693874917cbc3fbc45401c9c9a937dc71b9f",
-      "bdb8493ab5f2e80ad56d9c5a4327d253db57c191"
+      "bdb8493ab5f2e80ad56d9c5a4327d253db57c191",
+      "eb5da0dc9f42a88129648a04b0783bdb6bb8c40b",
+      "ed67646d796f9e9d2ec48bdf8073a20d40ce0399",
+      "63397801a130db173341ee1ff680c02100b8e0ea"
     ],
     "cnb-bridge": [
       "6a43a24ba859a64ca9770c18fb1254050917984b"
