@@ -519,8 +519,18 @@ fi
 # 触发的 required workflow（org-gate.yml 的 on:），其活体证据只能来自 ruleset
 # 生效后的 PR head——push-only / 生效前 PR 的 head 缺失属 (a)「从未接入」
 # （OK/INFO 计数，非漂移）；仅 (b) 生效后 PR head 缺失才报裸奔。
-# 生效时刻 = org-required-workflows ruleset 创建时刻（API 实测）。
-ORG_GATE_EFFECTIVE="2026-08-20T07:43:21Z"
+# 生效时刻 = 各 required check 线上生效锚点（(a)/(b) 形态判据：晚于锚点的 PR
+# head 才可能携带该 check run，锚点之后的缺失才是"接入后消失"）：
+#   org-gate：org-required-workflows ruleset 创建时刻（API 实测，2026-08-20）
+#   adversary：2026-08-24 W2-C3 落地——main-protection 纳入 required check
+#   （ruleset updated_at 00:21:24Z）+ adversary-gate.yml 入 CI-Workflows（首版
+#   00:30:30Z、merge_group 修正 02:17:02Z）；取最晚者，防落地窗口的假 (b) 裸奔
+#   gate：各仓本地 workflow，早于一切 PR 活动（治理基线自 2026-08-18）——无
+#   锚点，缺失即 (b)
+declare -A CHECK_EFFECTIVE=(
+  [org-gate]="2026-08-20T07:43:21Z"
+  [adversary]="2026-08-24T02:17:02Z"
+)
 
 # @ir0002-s12-classify-begin —— IR-0002（spec PR#152）(a)/(b) 缺失形态分类器。
 # governance/tests/test-ir0002.sh 按本标记对提取函数体做 fixture 自测（(b) 检出
@@ -533,12 +543,14 @@ s12_classify() {
   if [[ $QUERY_FAIL -eq 1 ]]; then
     drift "repo '$r' check-runs 查询失败，required check '$ctx' 活体无法验证（fail-closed）"
     return 2
-  elif [[ "$ctx" == "org-gate" ]] && ! jq -e --arg eff "$eff" \
+  elif [[ -n "$eff" ]] && ! jq -e --arg eff "$eff" \
       '[.[] | select((.state == "open" or .merged_at != null) and (.updated_at >= $eff))] | length > 0' \
       <<<"$PRS_RECENT" >/dev/null 2>&1; then
-    # IR-0002 (a) 形态：org-gate ruleset 生效后该仓无 PR 活动——从未接入，
-    # 非裸奔（待接入清单；本地 gate 的活体验证不受影响，照常执行）
-    echo "OK    required-check-live '$r'：'$ctx' 待接入（ruleset 生效后无 PR 活动——IR-0002 (a) 形态）"
+    # IR-0002 (a) 形态（2026-08-25 泛化：任何带生效锚点的 check 均适用——
+    # org-gate / adversary 同款判据）：required 声明生效后该仓无 PR 活动——
+    # 从未接入，非裸奔（待接入清单；本地 gate 的活体验证不受影响，照常执行）。
+    # eff 为空 = 无锚点 check（早于一切 PR 活动）——不适用本分支
+    echo "OK    required-check-live '$r'：'$ctx' 待接入（required 声明生效后无 PR 活动——IR-0002 (a) 形态）"
     return 0
   elif [[ "${HAS_PR_ACTIVITY:-1}" -eq 0 ]]; then
     # IR-0002 (a) 泛化：无 PR 仓的 degenerate 采样下任意 required check 缺失=
@@ -623,7 +635,7 @@ for r in $REPOS; do
     done <<<"$CONCL_SHAS"
     if [[ $FOUND -ne 1 ]]; then
       rc=0
-      s12_classify "$r" "$ctx" "$QUERY_FAIL" "${HAS_PR_ACTIVITY:-1}" "$PRS_RECENT" "$ORG_GATE_EFFECTIVE" "$N_CONCL" || rc=$?
+      s12_classify "$r" "$ctx" "$QUERY_FAIL" "${HAS_PR_ACTIVITY:-1}" "$PRS_RECENT" "${CHECK_EFFECTIVE[$ctx]:-}" "$N_CONCL" || rc=$?
       case $rc in
         0) REPO_PENDING=$((REPO_PENDING+1)); S12_PENDING=$((S12_PENDING+1)) ;;
         1) LIVE_MISS=1 ;;
@@ -699,13 +711,17 @@ done
 # ref 为 tag 时，tag 指针被移动（ruleset 文本不变、内容换了）——钉点的 commit 绑定
 # 必须与 expected-state.org_required_workflows.ref_commit 一致；钉点 tag 还必须是
 # CI-Workflows 当前发布不变式（§11：vN==最高 vN.x.y）认可的物。fail-closed。
+# 2026-08-24 平台约束修订（ADR-0083 关联）：ruleset API 对 required workflows 的
+# ref 只接受分支/标签名（40 位 SHA 恒 422），钉点值=main——分支钉点随合并移动是
+# 合法常态，commit 绑定不适用；内容完整性改由本节「审判源文件存在性后验」+
+# §12 required check 活体后验承载（expected-state.json 同款口径）。
 ORW_CFG=$(jq -c '.org_required_workflows // empty' "$EXPECTED")
 if [[ -n "$ORW_CFG" ]]; then
   WANT_RULESET=$(jq -r '.ruleset' <<<"$ORW_CFG")
   WANT_REPO_ID=$(jq -r '.repository_id' <<<"$ORW_CFG")
   WANT_PATH=$(jq -r '.path' <<<"$ORW_CFG")
   WANT_REF=$(jq -r '.ref' <<<"$ORW_CFG")
-  WANT_COMMIT=$(jq -r '.ref_commit' <<<"$ORW_CFG")
+  WANT_COMMIT=$(jq -r '.ref_commit // empty' <<<"$ORW_CFG")
   ORW_LIST=$(api "https://api.github.com/orgs/$ORG/rulesets?per_page=100")
   ORW_ID=$(jq -r --arg n "$WANT_RULESET" '.[] | select(.name == $n) | .id' <<<"$ORW_LIST" 2>/dev/null | head -1)
   if [[ -z "$ORW_ID" || "$ORW_ID" == "null" ]]; then
@@ -724,24 +740,55 @@ if [[ -n "$ORW_CFG" ]]; then
     if [[ -n "$BAD" ]]; then
       drift "org-required-workflows 钉点漂移:$BAD（期望 path=$WANT_PATH ref=$WANT_REF repo_id=$WANT_REPO_ID）——审判源被改指（ADR-0046 §15）"
     fi
-    # commit 绑定校验（tag 或直接 SHA；ISSUE-263 W1-C5 改为直接钉 commit SHA）
+    # 钉点解引用与 commit 绑定（ADR-0083 关联修订）。三类形态：
+    #   - 40 位 SHA：校验对象在目标仓可达（历史形态，保留兼容）
+    #   - 分支名：指针随合并移动是合法常态——无 commit 绑定可比（ref_commit 声明
+    #     了也不比，main 每次合并都动），只校验可解引用（分支被删/改名=审判源
+    #     脱钩，fail-closed）
+    #   - tag 名：指针移动检测（ruleset 文本不变、tag 被移=审判内容被换）——
+    #     与声明 ref_commit 比对
     if [[ "$WANT_REF" =~ ^[0-9a-f]{40}$ ]]; then
-      # 直接钉 commit SHA：校验该对象在目标仓可达
+      REFKIND="sha"
       COMMIT_OBJ=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/commits/$WANT_REF")
       TAGCOMMIT=$(jq -r '.sha // empty' <<<"$COMMIT_OBJ")
     else
-      SHORTREF="${WANT_REF#refs/tags/}"
-      TAGROW=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/ref/tags/$SHORTREF")
-      TAGCOMMIT=$(jq -r '.object.sha // empty' <<<"$TAGROW")
+      # 先按分支解引用（当前钉点形态：main），失败再按 tag（历史/发布钉点）
+      BRANCH_ROW=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/ref/heads/${WANT_REF#refs/heads/}")
+      TAGCOMMIT=$(jq -r '.object.sha // empty' <<<"$BRANCH_ROW")
+      if [[ -n "$TAGCOMMIT" ]]; then
+        REFKIND="branch"
+      else
+        SHORTREF="${WANT_REF#refs/tags/}"
+        TAGROW=$(api "https://api.github.com/repos/$ORG/CI-Workflows/git/ref/tags/$SHORTREF")
+        TAGCOMMIT=$(jq -r '.object.sha // empty' <<<"$TAGROW")
+        REFKIND="tag"
+      fi
     fi
     if [[ -z "$TAGCOMMIT" ]]; then
-      drift "org-required-workflows 钉点 $WANT_REF 解引用/校验失败（fail-closed，ADR-0046 §15）"
-    elif [[ "$TAGCOMMIT" != "$WANT_COMMIT" ]]; then
+      drift "org-required-workflows 钉点 $WANT_REF 解引用/校验失败（heads/tags 两径均不可达——fail-closed，ADR-0046 §15）"
+    elif [[ "$REFKIND" != "branch" && -n "$WANT_COMMIT" && "$TAGCOMMIT" != "$WANT_COMMIT" ]]; then
       drift "org-required-workflows 钉点 $WANT_REF 已移动：${TAGCOMMIT:0:8} ≠ 声明 ${WANT_COMMIT:0:8}——审判内容被换（ADR-0046 §15；还原或更新 expected-state）"
     elif [[ -n "$BAD" ]]; then
       :   # 钉点漂移已上报，不再输出 OK 行（避免同段 OK/DRIFT 并存的误导）
     else
-      ok "org-required-workflows 钉点完整（$WANT_REF == ${TAGCOMMIT:0:8}，path/repository_id 一致）"
+      # 内容完整性后验（ADR-0083 关联口径：分支钉点移动是常态，commit 绑定不
+      # 适用——改验「声明的每个审判源文件在钉点 ref 上真实存在」）。文件被删/
+      # 改名 = required workflow 静默失效（PR 不再跑审判），此处即时检出，不等
+      # §12 的 PR head 采样兜底。expected-state.workflows[] 为声明全集。
+      WF_OK_N=0
+      while IFS= read -r wp; do
+        [[ -n "$wp" ]] || continue
+        WF_META=$(api "https://api.github.com/repos/$ORG/CI-Workflows/contents/${wp}?ref=$WANT_REF")
+        if jq -e 'type == "object" and (has("sha") or has("content"))' <<<"$WF_META" >/dev/null 2>&1; then
+          WF_OK_N=$((WF_OK_N+1))
+        else
+          drift "org-required-workflows 审判源 '$wp' 在 $WANT_REF 上不存在/不可读——required workflow 静默失效（ADR-0046 §15 内容后验，fail-closed）"
+          BAD="$BAD missing:$wp"
+        fi
+      done <<<"$(jq -r '(.workflows // [{path: .path}])[].path' <<<"$ORW_CFG")"
+      if [[ -z "$BAD" ]]; then
+        ok "org-required-workflows 钉点完整（${REFKIND} $WANT_REF → ${TAGCOMMIT:0:8}，path/repository_id 一致，$WF_OK_N 个审判源文件在册）"
+      fi
     fi
   fi
 fi
