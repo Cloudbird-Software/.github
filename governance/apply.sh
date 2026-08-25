@@ -118,7 +118,8 @@ while :; do
   fi
   N=$(jq 'length' <<<"$CHUNK")
   [[ "$N" -eq 0 ]] && break
-  jq -r '.[].name' <<<"$CHUNK" >>"$REPOS_TMP"
+  # archived（retired，ADR-0085）仓只读——写操作恒 403，跳过而非计 FAIL
+  jq -r '.[] | select(.archived == false) | .name' <<<"$CHUNK" >>"$REPOS_TMP"
   [[ "$N" -lt 100 ]] && break
   PAGE=$((PAGE+1))
 done
