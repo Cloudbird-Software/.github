@@ -136,6 +136,17 @@ repos:
       登记（ADR-0092）；README 待首个正式 PR 脱离模板文案
     key_paths: [src/, tests/, quality/, docs/]
 
+  - name: Media-Monitor
+    layer: L2
+    visibility: public
+    status: active
+    role: 产品仓——多平台媒体与受众监控工具（合同驱动的采集引擎：关键词搜索/评论/
+      用户资料含 uid+sec_uid 与地区标签、直播间行为事件流、群成员枚举、ADB 手机
+      自动化与 GUI 视觉模型层、MCP/CLI 接口；go 语言（默认准入，languages.yaml
+      go default）；治理面随 bootstrap PR 一次落地：gate（CI-Workflows@v1 聚合）/
+      AGENTS.md 入口协议块/CODEOWNERS/dependabot；登记依据 flows.new_repo step 4，
+      引用 ADR-0024 申报+bootstrap 先例与 ADR-0092；bootstrap 走 PR 路径）
+    key_paths: [cmd/, internal/, adapt/, docs/, .github/workflows/]
   - name: holdout
     layer: L1
     visibility: public
