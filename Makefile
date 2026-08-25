@@ -8,7 +8,7 @@ CARD ?=
 # 注释须独立成行：行尾注释会把 # 前的尾随空格并入 REPO 值，gh -R 解析失败且被吞。
 REPO ?= Cloudbird-Software/.github
 
-.PHONY: card-test gates-pr
+.PHONY: card-test gates-pr drift-check
 card-test: ## 读卡 AC 列表并提示测试先行：make card-test CARD=<issue#>
 	@test -n "$(CARD)" || { echo "用法: make card-test CARD=<issue#>（缺 CARD）" >&2; exit 2; }
 	@echo "== 卡 $(REPO)#$(CARD) 的 AC（测试先行：先按 AC 写红测试再实现）=="
@@ -28,3 +28,7 @@ gates-pr: ## 本地等价关卡清单（gate.yml 语义）：make gates-pr
 	  && echo "OK   治理自测（governance/tests；需 jq）"
 	@python3 -c "import glob,yaml;[yaml.safe_load(open(f,encoding='utf-8')) for f in glob.glob('governance/**/*.yaml',recursive=True)+glob.glob('standards/**/*.yaml',recursive=True)+glob.glob('.github/workflows/*.yml')];print('OK   yaml 解析（governance/standards/workflows）')"
 	@echo "== 开 PR 前检查单（机器不可判部分）：PR body 引用 ADR-NNNN（C1）/ body 带 Card: 元数据行 / diff<400 行 =="
+
+
+drift-check: ## C1 本地预检（owner/CI 面，需 org admin PAT）：GH_TOKEN=<org admin> make drift-check
+	@bash governance/drift-check.sh

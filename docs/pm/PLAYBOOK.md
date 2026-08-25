@@ -41,6 +41,13 @@ worker 视角的认领/开工协议（AGENTS.md entry-protocol v1 块）对 PM �
   - 你自己写——完全合法，且是深度理解 IR 的最好方式；
   - spec-author 快速通道：CI-Workflows `spec-author.yml` 流水线生成骨架你再修。
   模板：CI-Workflows `pipeline/spec-template.md`（正文条款结构 / AC given-when-then / INV-BEH-IFACE 分节）。
+- **spec 放哪**（#363 落点）：治理 specs 在 `.github/specs/IR-XXXX/`；
+  产品 feature specs 落产品仓本仓 `specs/<IR-NNNN>/`——IR 一律在 .github 仓开
+  （编号全局唯一），spec 与 suite 随实现仓走（suite 门 T-14/T5 按所在仓生效）。
+- **g060 会拦你的 suite**（不是故障，是设计）：`specs/*/suite/**` 被锁定
+  （ADR-0061/0081），授权身份仅 owner 与 verifier-app；你的 spec PR 含 suite 变更
+  会被 g060 拦下（exit 2）并自动开裁决 issue，owner 以 `/g060-adopt <证据>` 采纳
+  （TTL 72h，dead-man 兜底）。首次创建 suite 同样走此路径——无豁免通道。
 - **spec PR 必带**：
   - `suite/` 目录（ADR-0083 suite 门；至少一个非空可解析测试文件——T5 `suite_ready_required`
     谓词会现场重查，T-14 亦要求）；注意 `specs/*/suite/**` 在 g060 锁定集内
@@ -132,3 +139,26 @@ IR 级收口，证据可机械回查。门禁=T9 谓词（ADR-0085 决策 5）�
 | 验证者 | 独立验收/封存场景考试 | holdout 仓（owner 直管）+ CI-Workflows `pipeline/verifier-exam/`、`verifier-exam.yml` | verifier 档 token（计量入账，automation-limits.yaml） |
 | 治理政策 | 无人值守阈值/测试政策/语言准入 | `governance/policy/`（automation-limits.yaml ADR-0040 · testing.yaml T-01..T-15 · languages.yaml） | 读它比违约便宜 |
 | 运行报告 | 经验沉淀与改进燃料 | `archive/runs/YYYY-WNN.md`（追加）；digest=archive `runs-digest.yml` | 10 分钟/次；不写=下周 PM 重复踩坑 |
+| conductor / arbiter | 生命周期转移与 CAS 租约（T1–T9） | **无需也无法手动调用**：conductor 监听 issue 事件（`state:*` 标签、`/start` `/claim` `/retry` 评论），arbiter 由 conductor 转介 | 零（App 身份自动执行） |
+| 全入口路由 | 任何入口落地后 30 秒定位该做什么 | `.github` 仓 `docs/NAVIGATION.md`（入口矩阵+高频困惑 FAQ） | 一次阅读 |
+
+## §9 发起治理变更（C1 runbook，#363 落点）
+
+你主动改治理面（governance/ standards/ scripts/ .github/ specs/ profile/ CODEOWNERS，
+及按 AGENTS.md 硬规则视同 C1 的 docs/ 与 Makefile）时：**不需要卡**——卡流程
+（T7→T8）只承载 spec 派生的实现工作，治理变更的授权凭证是 ADR + PR 记录
+（GOVERNANCE.yaml `flows.governance_change`）。
+
+1. **分类**：查 `flows.governance_change` classes（C1/C2/C3 真源）；拿不准按 C1
+   走——多引一个 ADR 的成本远低于走错流程的返工。
+2. **ADR**：新决策=新写 ADR（PR 至 archive `adr/ADR-NNNN-*.md` + 更新 INDEX.yaml）；
+   执行性变更（既有决策的落地）=引用既有 ADR-NNNN 即可。
+3. **本地预检**：`make gates-pr`（gate.yml 本地等价面）。drift-check 是 owner/CI 面
+   （org admin PAT）——你跑不了不是你的问题，agent 侧等价预检就是 gates-pr。
+4. **PR**：title/body 引用 ADR-NNNN（gate adr-required 机器拦，幽灵 ADR 不放行）；
+   bug 修复关联 bug 单（B3 状态回写靠它）。
+5. **合并**：owner-only review + merge。你的自主性在生成侧（写什么、怎么写），
+   判定与合并归 owner 与 gate（§0 红线）——包括 `.github/workflows/`：能提 PR，
+   不能自批。
+
+迷路时先读 `docs/NAVIGATION.md`（全入口路由），再回来翻本手册对应阶段。
