@@ -14,6 +14,9 @@ PM（项目经理）工作契约（ADR-0085，索引型；治理仓豁免行数�
 6. front-desk 命令（卡 issue 评论，conductor 转介 arbiter 处理）：/claim 认领 · /release 释放租约 · /retry 隔离回流
 
 <!-- /entry-protocol -->
+
+迷路了（从别的仓/入口进来）？全入口路由表：docs/NAVIGATION.md（入口矩阵+高频困惑 FAQ，ADR-0055/0085，#363 收口）。
+
 ## PM 优先（ADR-0085）
 
 - **入职三步**：① `governance/REPOS.yaml` 看版图 → ② `docs/pm/PLAYBOOK.md`（阶段手册：资源/用法/代价/报告格式）→ ③ 最近 4 周运行报告（`Cloudbird-Software/archive` 仓 `runs/`）
@@ -32,7 +35,7 @@ PM（项目经理）工作契约（ADR-0085，索引型；治理仓豁免行数�
 
 ## 硬规则
 
-- 治理文件（governance/ standards/ scripts/ .github/ CODEOWNERS profile/ Makefile docs/）= C1 路径：PR 必须引用 ADR-NNNN（家园=archive/adr/，ADR-0085），owner-only review
+- 治理文件（governance/ standards/ scripts/ .github/ CODEOWNERS profile/ Makefile docs/）= C1 路径：PR 必须引用 ADR-NNNN（家园=archive/adr/，ADR-0085），owner-only review；**治理变更不需要卡**（卡只承载 spec 派生的实现工作）。spec 位置：治理 specs=`specs/IR-XXXX/`（本仓），产品 feature specs=产品仓 `specs/<IR-NNNN>/`
 - 写仓身份 = GitHub App `cloudbrid-agent`（AG-1）；令牌经 scripts/gh-app-token.sh，单仓作用域、1h 过期（本仓驻留 agent 直接用 `scripts/ghcb`）。例外：org 级 Project 写与成员判定用 GOVERNANCE_TOKEN（仅 workflow secrets 面，不落 agent 手）
 - ADR 落盘：PR 至 `archive/adr/ADR-NNNN-*.md` + 更新同目录 INDEX.yaml（家园单仓化，ADR-0085）
 - 红队守门（ADR-0082）：spec/测试设计路径 PR 必须经红队审计；g060 锁定 specs/*/suite/**（ADR-0061/0081）
@@ -42,14 +45,14 @@ PM（项目经理）工作契约（ADR-0085，索引型；治理仓豁免行数�
 ## 常用命令（本仓驻留）
 
 - 校验本仓声明：`.github/workflows/gate.yml`（本地等价：`make gates-pr`）
-- 漂移检测/修复（owner/CI 专属，需 org admin PAT）：`GH_TOKEN=<org admin> bash governance/drift-check.sh`（每日 CI 自动跑）· `GH_TOKEN=<org admin> bash governance/apply.sh`（幂等）
+- 漂移检测/修复（owner/CI 专属，需 org admin PAT）：`GH_TOKEN=<org admin> make drift-check`（等价 `bash governance/drift-check.sh`，每日 CI 自动跑；agent 侧预检=`make gates-pr`）· `GH_TOKEN=<org admin> bash governance/apply.sh`（幂等）
 - 修复循环上限执法：`GH_TOKEN=<org admin> bash governance/auto-fix-limit.sh` · 成本熔断：`GH_TOKEN=<org admin> bash governance/cost-check.sh`
 - 取 App 令牌：`GH_TOKEN=$(scripts/ghcb <repo>)`（缓存命中零网络，ADR-0044）
 - CNB 池运维：`Cloudbird-Software/cnb-bridge` 仓（accounts.yaml/cnb_pool.py/REMOVAL.md）；周审计=本仓 cnb-audit 工作流（EX-1 三接缝之一）
 
 ## 索引（用到再读）
 
-- 治理总声明 governance/GOVERNANCE.yaml（agent_runtime/external_compute 域=ADR-0085 新范式）· 组织地图 governance/REPOS.yaml · 期望状态 governance/expected-state.json
+- 全入口路由 docs/NAVIGATION.md（从哪进来→去哪→怎么走；断链=test-navigation.sh 红）· 治理总声明 governance/GOVERNANCE.yaml（agent_runtime/external_compute 域=ADR-0085 新范式）· 组织地图 governance/REPOS.yaml · 期望状态 governance/expected-state.json
 - 政策集 governance/policy/（languages/testing/automation-limits 含 cnb: 节）
 - 状态机 governance/transitions.yaml（T7 卡就绪/T8 卡完成/T9 IR 验收——conductor 唯一定义源）
 - PM 手册 docs/pm/PLAYBOOK.md · 工具目录 governance/providers.yaml（无密钥） · 运行报告 archive 仓 runs/
