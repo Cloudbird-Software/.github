@@ -48,6 +48,7 @@ budget: |
   BUDGET-01 CNB 档位与配额参数真源=automation-limits.yaml cnb 节（IR-0004 AC-15 承接）。
   BUDGET-02 报告环仅两个机械件（append 校验+周度 digest），不建指标面（范式稳定后再议）。
 decision: |
+---
   DECISION-01 本 IR 为 owner 直授权直执行形态：ADR-0085 即决策背书，spec 为事后条款化
   追认；IR#348 生命周期收口（是否补签署→spec→红队仪式或直接关单）留 owner 裁决，
   三选项见 acceptance.md 残留节。
