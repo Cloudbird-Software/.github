@@ -41,8 +41,10 @@
   治理变更走 C1：PR + 引用 ADR-NNNN（新建或引既有）+ owner-only review + merge。
   同一 PR 不混两种性质。
 - **C1 的「drift-check 本地预检」跑不了**：drift-check 需 org admin PAT（owner/CI 专属面）。
-  agent 侧等价预检 = `make gates-pr`（.github 仓）；owner 可 `make drift-check`。
-  治理漂移的最终判定是每日 CI drift（GOVERNANCE_TOKEN），不靠你本地。
+  agent 侧等价预检 = `make gates-pr`（.github 仓；CI-Workflows 仓同款目标已就位）；owner 可 `make drift-check`。
+  **只读查漂移态**（零凭据）：`gh run list --workflow governance-drift.yml -R Cloudbird-Software/.github --limit 3`
+  ——success=无漂移；failure 且 log 含 `DRIFT` 行=真漂移；failure 且 log 含 `FATAL`/exit 2=检测器自身故障
+  （多为 GOVERNANCE_TOKEN 失效，owner 面处置，你只消费结论）。
 - **g060 拦截了你的 suite 变更**：不是故障，是设计。`specs/*/suite/**` 被锁定
   （ADR-0061/0081），授权身份仅 owner 与 verifier-app；你的 spec PR 含 suite 变更会被
   g060 拦下（exit 2）并自动开裁决 issue，owner 以 `/g060-adopt <证据>` 采纳或
