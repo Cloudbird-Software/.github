@@ -41,6 +41,13 @@ for f in "$DIR"/rulesets/*.json; do
   fi
   got_enf=$(jq -r .enforcement <<<"$row")
   [[ "$got_enf" == "$want_enf" ]] || drift "ruleset '$name' enforcement=$got_enf 期望=$want_enf"
+  # 组织基线不变量（ADR-0090）：所有 ruleset 必须 org admin 可 bypass——对落盘声明执法。
+  # §1 的文件↔线上 diff 守不住"两侧同时摘除 bypass"的侵蚀路径（改文件+跑 apply 即
+  # 无声去除，diff 两边一致不报）；本断言把政策本身变成机械判据（INV-01/02）。
+  # 新 ruleset 文件落地即受检（含 bypass_mode 须为 always——pull_request 类仅
+  # when_approved 的半 bypass 不满足"可以 bypass"基线）。
+  jq -e '[.bypass_actors[]? | select(.actor_type == "OrganizationAdmin" and .bypass_mode == "always")] | length > 0' "$f" >/dev/null \
+    || drift "ruleset '$name' 缺 OrganizationAdmin bypass 声明（ADR-0090 组织基线：所有 ruleset 必须 org admin 可 bypass——恢复声明并跑 apply.sh）"
   # 线上完整定义（含 id）对比规则集
   rid=$(jq -r .id <<<"$row")
   detail=$(api "https://api.github.com/orgs/$ORG/rulesets/$rid")
