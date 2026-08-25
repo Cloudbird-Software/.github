@@ -87,7 +87,7 @@ rejected:  # 翻案需新证据；引用 revisit_when
      note: "ADR-0037 边界：拒绝的是全局覆盖率门槛；diff 口径（T-12，分母=本次变更行）不受该攻击面影响，另立"}
   - {id: X-02, name: canary_release, reason: "客户本地部署无在线流量", alternative: R-05_smoke, revisit_when: hosted_service}
   - {id: X-03, name: chaos_engineering, reason: "无 k8s 舰队", alternative: "失败模式写单测(磁盘满/断网/超时)", revisit_when: multi_node_prod}
-  - {id: X-04, name: formal_tla, reason: "无调度器/共识组件", revisit_when: "写分布式协调组件"}
+  - {id: X-04, name: formal_tla, trigger: "risk_level 缺失或 checklist.yaml 正条件命中", tool: "trigger.py + checklist.yaml", revisit_when: "PM 评估需运行时模型检查"}
   - {id: X-05, name: soak_test, reason: "投入产出失衡", alternative: "T-03+G-03", revisit_when: "客户报内存类问题"}
   - {id: X-06, name: a11y_i18n, reason: "无 UI", revisit_when: "有 Web UI"}
 
