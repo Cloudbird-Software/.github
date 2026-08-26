@@ -152,7 +152,7 @@ except Exception: pass
 esc = f"{(rev+p0)/len(merged):.3f}" if merged else "N/A"
 # 抽样：seed = ISO 周（可复现）
 isoweek = now.isocalendar()
-seed = int(f"{isoweek[0]}-W{isoweek[1]}".replace("-W","") ) if False else hash(f"{isoweek[0]}-W{isoweek[1]}") & 0xffffffff
+seed = hash(f"{isoweek[0]}-W{isoweek[1]}") & 0xffffffff  # 注意：str hash 进程级加盐，非跨进程可复现（历史行为保留；换稳定 seed 是行为变更，另行评审）
 sample = random.Random(seed).sample(agent_merged, min(k, len(agent_merged))) if agent_merged else []
 print(f"auto_merge_rate={rate} ({len(agent_merged)}/{len(merged)})")
 print(f"escape_rate={esc} (reverts={rev}+p0={p0} / merged={len(merged)}, drills_excluded={drills_excluded})")
@@ -197,7 +197,7 @@ $REPORT
 BOD
 
 gh issue create --repo "$GOV_REPO" --title "SLI 周报 $WEEK（自动合并门禁自身指标）" \
-  --body-file "$TMP/body.md" || die "周报 issue 创建失败" \n  || gh issue create --repo "$GOV_REPO" --title "SLI 周报 $WEEK（自动合并门禁自身指标）" --body-file "$TMP/body.md"
+  --body-file "$TMP/body.md" || die "周报 issue 创建失败"
 
 # 抽样审计 issue
 SAMPLES=$(grep '^SAMPLE=' "$TMP/metrics.txt" || true)

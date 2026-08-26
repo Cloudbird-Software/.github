@@ -558,8 +558,6 @@ def _metering_tokens():
         except Exception as e:
             print(f"WARN cost: metering 账本拉取失败 {e}——token 指标 pending")
             return None
-        if not os.path.isdir(td):
-            return None
         since = NOW.strftime("%Y-%m-01")
         try:
             r = subprocess.run([sys.executable, os.path.join(td, "metering.py"), "aggregate",
