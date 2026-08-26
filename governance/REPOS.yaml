@@ -32,6 +32,7 @@ repos:
     status: active
     role: 可复用工作流仓——全部项目仓 gate 的唯一实现，业务仓引用 @v1
     key_paths: [.github/workflows/, pipeline/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: agent-registry
     layer: L1
@@ -46,6 +47,7 @@ repos:
     role: 记忆层——ADR 家园（正本+INDEX 索引同仓，ADR-0085 单仓化）+退役快照 retired/
       +PM 运行报告 runs/（[followup] 周度 digest 消费）+规划回归集+事件 JSONL+红队报告落位
     key_paths: [adr/, runs/, retired/, scripts/verify_migration.py]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: template-service
     layer: L2
@@ -73,6 +75,7 @@ repos:
     role: 仲裁内核——确定性裁决/CAS 租约/防重放台账（宪法 §1）；无 LLM、默认拒绝、
       自带测试与误放行台账（ADR-0054）
     key_paths: [arbiter/, capabilities.yaml, tests/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: Shorts_Director
     layer: L2
@@ -80,6 +83,7 @@ repos:
     status: active
     role: 产品仓——短视频导演工具（ADR-0021：线上存在但未申报=GM-4 漂移，补申报；治理面
       随首个正式 PR 落地 AGENTS.md/CODEOWNERS 接入）
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: Script_Writer
     layer: L2
@@ -87,6 +91,7 @@ repos:
     status: active
     role: 产品仓——剧本创作工具（ADR-0021：建仓未申报=GM-4 漂移，补申报；治理面随首个
       正式 PR 落地 AGENTS.md/CODEOWNERS 接入，路径同 Shorts_Director）
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: Use-up-Plan
     layer: L2
@@ -95,6 +100,7 @@ repos:
     role: 产品仓——AI 多 plan 额度管理与路由调度工具（额度审计/规则标准化描述/最优
       分配求解/实时切换；立项意图见仓内 Intent.md，ADR-0024 申报入图+bootstrap 直推
       豁免；README 待首个正式 PR 脱离模板文案）
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: AI_Web_School
     layer: L2
@@ -103,6 +109,7 @@ repos:
     role: 产品仓——小学语数英个性化练习平台（Python/FastAPI 存量栈，语言准入按 ADR-0023
       存量豁免，仅面向新服务选型）；治理面已接入：gate（CI-Workflows@v1 聚合）/automerge/
       scorecard/CODEOWNERS/dependabot + App 挂载（AG-4）+ production environment（RL-1）
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: mutual
     layer: L2
@@ -113,6 +120,7 @@ repos:
       Python 基线为一次性存量导入豁免——仅作重写参照与 golden fixtures 来源，重写合并后
       语言面收敛为 Go+BAML）
     key_paths: [src/mutual/, spec/, tests/golden/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: QW_Arena1
     layer: L2
@@ -123,6 +131,7 @@ repos:
       外部契约优先/比赛沙箱部署/有限生命周期三条件，豁免仅语言规范面、治理基线不豁免）；建仓
       bootstrap 直推豁免空仓变体（ADR-0084）；2026-08-31 赛后按 ADR-0084 退役条款处置
     key_paths: [src/, tests/, quality/, docs/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: Viral_Radar
     layer: L2
@@ -135,6 +144,7 @@ repos:
       复用优先，豁免仅语言规范面、治理基线不豁免）；建仓 bootstrap 直推 (b) 类豁免
       登记（ADR-0092）；README 待首个正式 PR 脱离模板文案
     key_paths: [src/, tests/, quality/, docs/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: Media-Monitor
     layer: L2
@@ -147,6 +157,8 @@ repos:
       AGENTS.md 入口协议块/CODEOWNERS/dependabot；登记依据 flows.new_repo step 4，
       引用 ADR-0024 申报+bootstrap 先例与 ADR-0092；bootstrap 走 PR 路径）
     key_paths: [cmd/, internal/, adapt/, docs/, .github/workflows/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
+
   - name: holdout
     layer: L1
     visibility: public
@@ -155,6 +167,7 @@ repos:
       ADR-0056/ADR-0080）；owner 直管；cloudbrid-agent 严禁挂载，验证者 APP 可挂载并
       仅用于测试/验证路径写权（DECISION-02 隔离不变量，drift-check §18 断言）
     key_paths: [entries/, schema/, canary/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
   - name: cnb-bridge
     layer: L2
@@ -164,6 +177,8 @@ repos:
       accounts.yaml（无明文 token）+派单协议 cnb_pool.py+work-inbox PM 自起协议+
       REMOVAL.md 单页删除清单；判定永不外置（INV-02）
     key_paths: [accounts.yaml, cnb_pool.py, work-inbox.yaml, REMOVAL.md]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
+
 
 # 上游依赖（ADR-0085：openjiuwen 双上游随编排框架退役停止消费；未来引入新上游时
 # 恢复本节声明——部署渲染 pin tag 的治理方式不变）

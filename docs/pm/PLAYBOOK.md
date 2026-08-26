@@ -36,20 +36,27 @@ GOVERNANCE_TOKEN / org secret 凭据面（§7）、判定语义（红线 1）。
 3. **读最近 4 周运行报告**：`archive/runs/`（格式见 `archive/runs/README.md`）+
    .github 仓 `pm-digest` 标签的 digest issue——前人踩过的坑不用再踩（ADR-0085 决策 8）。
 
-worker 视角的认领/开工协议（AGENTS.md entry-protocol v1 块）对 PM 同样适用——PM 也是执行者之一。
+worker 视角的认领/开工协议（AGENTS.md entry-protocol v2 块）对 PM 同样适用——PM 也是执行者之一；
+按意图选路的角色指引见 [docs/agent/](../agent/)（ADR-0095）。
 
 ## §2 阶段一：IR→spec
 
 把意图变成可红队审计的 spec + suite。门禁=签署（T1/T2）+ spec PR 过 suite 门与红队。
+角色指引（ADR-0095）：开 IR → [docs/agent/ROLE-IR.md](../agent/ROLE-IR.md)；
+写 spec → [docs/agent/ROLE-SPEC.md](../agent/ROLE-SPEC.md)——**开 spec 的 agent 不得直接实现**。
 
-- **开 IR**：用 .github 仓 issue 模板 `intent.yml`（打 `type:intent` 标签）。字段全必填（IFACE-01，IR-0001）。
+- **开 IR**（ADR-0095）：**feature IR 开在对应产品仓**的 issue（issue 即 IR，无需
+  PR；`intent.yml` 模板经 org 级 `.github/ISSUE_TEMPLATE` 继承，打 `type:intent`
+  标签）；治理 IR 开 .github 仓。字段全必填（IFACE-01，IR-0001）；编号 IR-NNNN
+  全局唯一（标题前缀，开立前 `bash ghcb board` 查重）。
 - **签署**：owner 评论 `/start`（T2）或打 `state:ir-signed` 标签（T1）——只有 owner 能签，你不代签。
+  （机器面现状：conductor 事件面限 .github 仓，产品仓 IR 签署由 owner 手动换签——ADR-0095 机器面边界。）
 - **spec 谁写**：两条制度等价路径（ADR-0085 决策 5，PR338 先例追认）：
   - 你自己写——完全合法，且是深度理解 IR 的最好方式；
   - spec-author 快速通道：CI-Workflows `spec-author.yml` 流水线生成骨架你再修。
   模板：CI-Workflows `pipeline/spec-template.md`（正文条款结构 / AC given-when-then / INV-BEH-IFACE 分节）。
-- **spec 放哪**（#363 落点）：治理 specs 在 `.github/specs/IR-XXXX/`；
-  产品 feature specs 落产品仓本仓 `specs/<IR-NNNN>/`——IR 一律在 .github 仓开
+- **spec 放哪**（#363 落点 + ADR-0095）：治理 specs 在 `.github/specs/IR-XXXX/`；
+  产品 feature specs 落产品仓本仓 `specs/<IR-NNNN>/`——**IR 开在对应产品仓**
   （编号全局唯一），spec 与 suite 随实现仓走（suite 门 T-14/T5 按所在仓生效）。
 - **g060 会拦你的 suite**（不是故障，是设计）：`specs/*/suite/**` 被锁定
   （ADR-0061/0081），授权身份仅 owner 与 verifier-app；你的 spec PR 含 suite 变更
@@ -59,6 +66,14 @@ worker 视角的认领/开工协议（AGENTS.md entry-protocol v1 块）对 PM �
   - `suite/` 目录（ADR-0083 suite 门；至少一个非空可解析测试文件——T5 `suite_ready_required`
     谓词会现场重查，T-14 亦要求）；注意 `specs/*/suite/**` 在 g060 锁定集内
     （`g060-guard.yml` + `scripts/g060-lock.sh`，非授权身份 exit 2 开裁决 issue，ADR-0061/0081）。
+  - **测试设计逐类讨论**（ADR-0095）：spec 含「测试设计」节，对 `governance/policy/testing.yaml`
+    清单逐类 adopt-or-reject 留痕——差分（T-09，重写项目=gate 必选）/属性（T-01）/
+    模糊（T-04）/变异（T-10）/蜕变（L-03）/LLM 产品族/重写族/触发族……「不需要」
+    也要写明理由；rejected 清单（X-01..）不许私自启用。红队会攻击你的测试设置
+    是否合理（恶意合规/模板句/该开没开即 insufficient，ADR-0082）。
+  - **holdout 测试设计**（ADR-0095，必备）：封存验收场景条目经验证者 APP 注册到
+    holdout 仓（`scripts/holdout-register.sh`，verifier-app 令牌调用；cloudbrid-agent
+    严禁挂载 holdout，DECISION-02）；spec/卡/PR 引用仅 `id@sha8`，禁引 payload。
   - 红队 required check `adversary`（`adversary-gate.yml`，ADR-0082）：survived 才绿，
     fail-closed——漏配/摘除/跳过即红。
 - spec PR 是治理 C1 路径：引用 ADR-NNNN、owner-only review（AGENTS.md 硬规则）。
@@ -78,6 +93,9 @@ worker 视角的认领/开工协议（AGENTS.md entry-protocol v1 块）对 PM �
 ## §4 阶段三：实现
 
 默认派 CNB 免费算力，你做编排与机械核对。门禁=卡完成 + 全 gate 绿（T8）。
+角色指引（ADR-0095）：[docs/agent/ROLE-IMPLEMENT.md](../agent/ROLE-IMPLEMENT.md)——
+弱模型优先（自带子 agent 或 CNB 池）、边做边推 PR、**弱模型 3 次不过=PM 自己接手完成**、
+holdout 失败=修实现不修试卷（quarantine + needs-human）。
 
 - **派单**（默认路径，IR-0004 低决策密度分支执行者=CNB）：
   - `bash ghcb dispatch`（ADR-0085 决策 4 子命令），或
@@ -102,6 +120,8 @@ worker 视角的认领/开工协议（AGENTS.md entry-protocol v1 块）对 PM �
 ## §5 阶段四：验收
 
 IR 级收口，证据可机械回查。门禁=T9 谓词（ADR-0085 决策 5）。
+角色指引（ADR-0095）：[docs/agent/ROLE-ACCEPT.md](../agent/ROLE-ACCEPT.md)——
+人类让你处理 issues（验收 / 完成度盘点 / bug 修复）时按该文件走。
 
 - 全部子卡 `state:done` 后，写 `specs/IR-XXXX/acceptance.md`：**逐 AC** 列运行时证据
   （gate run / build log / 红队报告链接）+ SHA 锚（证据所属 commit/产物基准）。

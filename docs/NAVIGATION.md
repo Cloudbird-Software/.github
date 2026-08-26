@@ -3,40 +3,49 @@
 > 目的：任何 agent / 人从任意入口（org 首页、任意仓、issue 表单、Actions）落地后，
 > 30 秒内定位「该做什么、怎么做」。这是 #362 治理可达性审计（32 次 PM 模拟运行，
 > 置信度 4.8/10）的收口件之一。
-> 依据：ADR-0055（统一入口协议）· ADR-0085（PM 优先范式）· ADR-0064（Bug 流）。
+> 依据：ADR-0055（统一入口协议）· ADR-0085（PM 优先范式）· ADR-0095（角色路由 +
+> IR 挂靠产品仓）· ADR-0064（Bug 流）。
 > 维护契约：新增入口面（仓 / 模板 / 表单 / 工作流）须同步本表；本表引用的本仓文件
 > 必须真实存在——断链由 `governance/tests/test-navigation.sh` 机械检测（gate 每 PR 跑）。
 
 ## §0 三句话版本
 
-1. **在产品/支撑仓干活** → 唯一工作凭证是卡：`bash ghcb next <owner/repo>` 找
-   `state:ready` 卡 → `bash ghcb claim <n>` 认领 → 实现 → PR body 带 `Card: <owner>/<repo>#<n>` 行。
-2. **要改治理面**（governance/ standards/ scripts/ .github/ specs/ profile/ CODEOWNERS，
+1. **先按意图定角色**（ADR-0095，指引文件在 [docs/agent/](agent/)）：
+   开 IR → [ROLE-IR.md](agent/ROLE-IR.md) · 把已签署 IR 写成 spec →
+   [ROLE-SPEC.md](agent/ROLE-SPEC.md) · 实现卡片（PM）→
+   [ROLE-IMPLEMENT.md](agent/ROLE-IMPLEMENT.md) · 验收 / 处理 issues →
+   [ROLE-ACCEPT.md](agent/ROLE-ACCEPT.md)。
+2. **在产品/支撑仓干活**（实现角色）→ 唯一工作凭证是卡：`bash ghcb next <owner/repo>` 找
+   `state:ready` 卡 → `bash ghcb claim <n>` 认领 → 实现 → PR body 带 `Card: <owner>/<repo>#<n>` 行；
+   弱模型优先（子 agent / CNB 池），3 次熔断后 PM 接手。
+3. **要改治理面**（governance/ standards/ scripts/ .github/ specs/ profile/ CODEOWNERS，
    以及按 AGENTS.md 硬规则视同 C1 的 docs/ 与 Makefile）→ **不需要卡**：直接开 PR +
    引用 ADR-NNNN + owner review（C1 流程，见 §2）。
-3. **带全局职责进来（PM）** → [AGENTS.md](../AGENTS.md)「PM 优先」节 +
-   [docs/pm/PLAYBOOK.md](pm/PLAYBOOK.md) 全文 + archive 仓 `runs/` 最近 4 周运行报告。
 
 ## §1 入口矩阵
 
 | 你在哪 / 你是谁 | 先读 | 然后 |
 |---|---|---|
 | org 首页（profile/README.md） | 本表 §0 | 按角色下钻；仓库全量真源 [governance/REPOS.yaml](../governance/REPOS.yaml) |
-| 产品仓（AI_Web_School / mutual / QW_Arena1 …） | 该仓根部 AGENTS.md 的入口协议块 | 取 ghcb（AGENTS.md 内钉 SHA 命令）→ `ghcb next <owner/repo>` 找卡；无卡不开工，新想法走 intent 表单 |
+| 任意仓、任意图 | §0 角色路由 | 按意图读对应 ROLE-*.md（本仓 docs/agent/） |
+| 产品仓（AI_Web_School / mutual / QW_Arena1 …） | 该仓根部 AGENTS.md 的入口协议块+角色路由节 | 取 ghcb（AGENTS.md 内钉 SHA 命令）→ `ghcb next <owner/repo>` 找卡；无卡不开工，新想法走该仓 intent 表单 |
 | 治理仓 .github | [AGENTS.md](../AGENTS.md)（本仓契约） | 治理变更走 C1（§2，无需卡）；卡工作照入口协议块 |
 | 治理仓 CI-Workflows | 该仓 AGENTS.md | workflow/pipeline 变更=C1 面（.github/ 路径）：PR 引 ADR + owner review |
 | 治理仓 archive | `runs/README.md` | 运行报告只追加（append-only）；ADR 落 `adr/` + 更新 INDEX.yaml |
 | 支撑仓 cnb-bridge | 仓内 `REMOVAL.md` + `accounts.yaml` | 池运维 owner 面；派单一律经 .github 仓 `cnb-dispatch` 工作流（key 不入上下文） |
 | 支撑仓 arbiter / holdout | —（owner 直管） | 你不直接调用（见 §2「conductor/arbiter」）；holdout 对 agent 只读 |
-| 发现 bug | [.github/ISSUE_TEMPLATE/bug.yml](../.github/ISSUE_TEMPLATE/bug.yml) | 提交即机器复现（B1–B5，ADR-0064）：reproduced → 修复合入 → fixed → done |
-| 有新意图（feature/治理意图） | [.github/ISSUE_TEMPLATE/intent.yml](../.github/ISSUE_TEMPLATE/intent.yml) | IR 流：owner 签署 → spec（自著合法）→ 红队 → 开卡（PLAYBOOK §2–§3） |
+| 发现 bug | [.github/ISSUE_TEMPLATE/bug.yml](../.github/ISSUE_TEMPLATE/bug.yml)（org 级继承，各仓可用） | 提交即机器复现（B1–B5，ADR-0064）：reproduced → 修复合入 → fixed → done；处理 issues 的完整指引=[ROLE-ACCEPT.md](agent/ROLE-ACCEPT.md) |
+| 有新意图（feature/治理意图） | [ROLE-IR.md](agent/ROLE-IR.md) | **feature IR 开在对应产品仓**（issue 即 IR，无需 PR；intent.yml 模板 org 级继承）；治理 IR 开 .github 仓。IR 流：owner 签署 → spec（[ROLE-SPEC.md](agent/ROLE-SPEC.md)）→ 红队 → 开卡 |
 | 想看全局进度 | `bash ghcb board` | 全状态流水线（ir-draft…done 的 IR 与卡，非只 ready 卡） |
 
 ## §2 高频困惑（#362 实测断裂点，逐条落点）
 
-- **spec 放哪**：治理 specs 在 `.github/specs/IR-XXXX/`；产品 feature specs 落产品仓
-  本仓 `specs/<IR-NNNN>/`（IR 一律在 .github 仓开，编号全局唯一；spec 与 suite 随实现仓走，
-  suite 门 T-14/T5 按所在仓生效）。
+- **IR 开在哪 / spec 放哪**（ADR-0095）：feature IR 一律开在**对应产品仓**的 issue
+  （编号 IR-NNNN 全局唯一，标题前缀；`bash ghcb board` 查重）；治理 IR 开 .github 仓。
+  spec 与 suite 随实现仓走：产品 feature specs 落产品仓本仓 `specs/<IR-NNNN>/`，
+  治理 specs 在 `.github/specs/IR-XXXX/`（suite 门 T-14/T5 按所在仓生效）。
+  spec PR 必带测试设计逐类讨论（testing.yaml 清单 adopt-or-reject，差分/属性/模糊/
+  蜕变等）+ holdout 测试设计；开 spec 的 agent **不得直接实现**（ADR-0095）。
 - **治理变更要不要开卡**：不要。卡流程（T7→T8）只承载 spec 派生的实现工作；
   治理变更走 C1：PR + 引用 ADR-NNNN（新建或引既有）+ owner-only review + merge。
   同一 PR 不混两种性质。
@@ -51,7 +60,8 @@
   `/g060-reject` 驳回（TTL 72h）。首次创建 suite 同样走此路径——无豁免通道是刻意的。
 - **conductor / arbiter 怎么触发**：不用也无法手动调用。conductor 监听 issue 事件
   （`state:*` 标签、评论 `/start` `/claim` `/retry`），arbiter 由 conductor 转介执行
-  CAS 租约。你只管评论与打标签，状态换签是机器的事。
+  CAS 租约。你只管评论与打标签，状态换签是机器的事。（机器面现状：conductor 事件面
+  限 .github 仓，产品仓 IR/卡状态由 owner 手动换签——ADR-0095 机器面边界。）
 - **测试先行 vs gate 要绿**：红测试不进 main。spec PR 的 suite 断言制度/结构不变量，
   合入时必须绿；修 bug 的失败复现测试走 bug 流（B2 reproduced 锚定 base 红，
   fix PR 合入时转绿）。
