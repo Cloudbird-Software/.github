@@ -59,7 +59,6 @@ def _guard_status(name, inp, policy):
         if not isinstance(inp, dict) or "current" not in inp or "previous" not in inp:
             return "pending", "数据源未接入"
         cur, prev = inp["current"], inp["previous"]
-        val = {"current": cur, "previous": prev}
         if cur > 0 and prev > 0:
             return "red", f"逃逸持续：上一窗 {prev} + 本窗 {cur}（[auto-revert]+post-merge P0）"
         return "green", f"双窗逃逸：上一窗 {prev} · 本窗 {cur}"
