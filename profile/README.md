@@ -27,7 +27,7 @@
 | [template-service](https://github.com/Cloudbird-Software/template-service) | L2 | 新项目模板（入口协议块下发真源） |
 | [arbiter](https://github.com/Cloudbird-Software/arbiter) | L2 | 仲裁内核：确定性裁决 / CAS 租约（无 LLM） |
 | [cnb-bridge](https://github.com/Cloudbird-Software/cnb-bridge) | L2 | CNB 免费算力桥接（可删除层，ADR-0085） |
-| 产品仓（AI_Web_School / mutual / QW_Arena1 / Shorts_Director / Script_Writer / Use-up-Plan） | L2 | 业务实现——全量与状态见 REPOS.yaml |
+| 产品仓（AI_Web_School / mutual / QW_Arena1 / Viral_Radar / Media-Monitor / Shorts_Director / Script_Writer / Use-up-Plan） | L2 | 业务实现——全量与状态（含已退役仓）见 REPOS.yaml |
 
 ## 意图→交付链路
 

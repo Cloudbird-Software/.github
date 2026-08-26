@@ -4,7 +4,7 @@ version: 1
 # 消费方: CI-Workflows scripts/contract/contract_check.py（contract-check job）。
 # 读法:
 #   defaults.breaking_requires_adr —— breaking 契约变更须 PR 引用真实存在的
-#       ADR-NNNN（agent-registry/decisions/，防幽灵 ADR）才放行，否则红。
+#       ADR-NNNN（archive/adr/，ADR-0085 家园单仓化；防幽灵 ADR）才放行，否则红。
 #   defaults.openapi_fail_on —— oasdiff --fail-on 档位（ERR=社区默认；
 #       WARN=从严：删可选响应属性也拦——customer_upgrade_failure 姿态）。
 #   repos.<name>.contracts[]     —— kind ∈ openapi|jsonschema（proto 未实装，
@@ -46,16 +46,10 @@ repos:
       - {kind: jsonschema, path: "schema/common/**"}
     migrations: null
 
-  agent-registry:
-    # L1 声明层契约。接线延后：validate.yml 为单 job 架构（gate job 内联全部检查，
-    # 无 needs 聚合层），接入需先做 aggregator 拆分重构——独立小卡（.github#89 留言，
-    # ADR-0038 决策 9）。声明先行：contract-check 一旦在该仓运行即生效。
-    contracts:
-      - {kind: jsonschema, path: "registry/schemas/**"}
-    migrations: null
+  # agent-registry：随 ADR-0085 退役移除（归档只读仓不再有契约变更；
+  # 历史声明见 git 历史与 archive/retired/ 快照）
 
   # 盘点备注（不声明、不接线）：
-  #   （ADR-0085：agent-platform 退役，本条历史注释保留备查）agent-platform —— 仅 vendor/ 拷贝，
-  #     源头真身在 agent-registry（vendor 漂移属另一关注面，不在本卡范围）
+  #   agent-registry / agent-platform / agent-tools —— 已随 ADR-0085 退役归档
   #   mutual —— spec/01-schemas.md 为散文 schema，不可机判；落地 JSON Schema 后再声明
-  #   Script_Writer / agent-tools / Use-up-Plan / .github / CI-Workflows —— 无契约面
+  #   Script_Writer / Use-up-Plan / .github / CI-Workflows —— 无契约面

@@ -182,13 +182,14 @@ domains:
 
 flows:
   governance_change:
-    # 治理仓（.github governance|standards、agent-registry、CI-Workflows workflows/）内容变更的唯一合法路径
+    # 治理仓（.github governance|standards、CI-Workflows workflows/）内容变更的唯一合法路径
+    # （agent-registry 随 ADR-0085 退役移出本清单）
     # 授权凭证 = ADR + PR 记录；破玻璃保留但被监控
     classes:
       - id: C1
-        scope: ["governance/（整目录——含 GOVERNANCE/REPOS.yaml、rulesets、expected-state、apply/drift 脚本、policy）", standards/, specs/, scripts/, ".github/（CI 门禁自身——改门禁=改治理）", CODEOWNERS, profile/, "tests/（agent-registry 验证器元测试——验证器之验证）", "template-service 脚手架面（.github/、AGENTS.md、Makefile、docs/、zizmor.yml——供应链入口：模板防线被污染=全部新仓继承后门，红队修复 P0；src/ 业务面属 C3。ADR-0021 收敛范围：整仓 C1 会与 SC-3 依赖 automerge 冲突——依赖 PR 无 ADR 不可自动合并）"]
+        scope: ["governance/（整目录——含 GOVERNANCE/REPOS.yaml、rulesets、expected-state、apply/drift 脚本、policy）", standards/, specs/, scripts/, ".github/（CI 门禁自身——改门禁=改治理）", CODEOWNERS, profile/, "tests/（治理检测器元测试——验证器之验证；原 agent-registry 验证器已随 ADR-0085 退役）", "template-service 脚手架面（.github/、AGENTS.md、Makefile、docs/、zizmor.yml——供应链入口：模板防线被污染=全部新仓继承后门，红队修复 P0；src/ 业务面属 C3。ADR-0021 收敛范围：整仓 C1 会与 SC-3 依赖 automerge 冲突——依赖 PR 无 ADR 不可自动合并）"]
         requires: [PR, "ADR（新建或引用编号）", "drift-check 本地预检", owner-merge]
-        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并。scope 与机器执法路径全集一致（.github gate：governance/standards/scripts/.github/CODEOWNERS/profile；agent-registry validate：standards/decisions/scripts/.github/CODEOWNERS/tests——评审项：声明与执行不得互斥）；template-service 的脚手架面是新仓派生源头，视同治理意图变更（gate adr-required 机器检查 + owner-only review；ADR-0021 范围收敛后与 CI-Workflows ci.yml 的 C1 路径判定一致）"
+        rationale: "治理意图变更必须可追溯到一个决策记录；无 ADR 不合并。scope 与机器执法路径全集一致（.github gate：governance/standards/scripts/.github/CODEOWNERS/profile；CI-Workflows ci.yml adr-required：本仓整体 C1——评审项：声明与执行不得互斥；agent-registry validate 已随 ADR-0085 退役废止）；template-service 的脚手架面是新仓派生源头，视同治理意图变更（gate adr-required 机器检查 + owner-only review；ADR-0021 范围收敛后与 CI-Workflows ci.yml 的 C1 路径判定一致）"
       - id: C2
         scope: ["业务仓 AGENTS.md/CODEOWNERS"]   # agent-registry/registry/ 随 ADR-0085 退役；C2 validate 门随声明层废止
         requires: [PR]
@@ -214,12 +215,10 @@ flows:
       - {step: 5, action: "差分 job 进 gate", policy: T-09}
       - {step: 6, action: "mutation 周跑盯 score", policy: T-10}
       - {step: 7, action: "v2 发布走环境审批+升级/回滚测试", policies: [RL-1, R-01..R-05]}
-  agent_team_lifecycle:
-    rules:
-      - {step: 1, action: "从 agent-registry 声明实例化 team（引用 id@version）", gate: AR-1}
-      - {step: 2, action: "运行期事件按 event.schema 追加到数据层；拦截记录 tool_called.denied_by", policies: [AR-5, AR-7]}
-      - {step: 3, action: "ephemeral 完成→执行 team 侧 handoff：artifacts 走 PR、retrospective、轨迹归档（销毁前置只含 team 侧项）", policy: AR-6}
-      - {step: 4, action: "persistent 团队（team:stewardship）消费归档资产异步执行 stewardship 侧 handoff（memory-distill/adr-write）并审核入库；完成态审计走事件流——run_finished.handoff_done 仅表达 team 侧销毁前置完成，stewardship 侧由 handoff_step(side=stewardship_side) 事件逐项留痕（评审项：单一布尔无法承载双侧完成态）", policy: AR-6}
+  # agent_team_lifecycle：随 ADR-0085 声明层退役整体废止（四步全部引用已退役的
+  # team 实例化/event.schema/handoff 语义，AR-5/6/7 已不存在；历史正文见
+  # archive/retired/）。角色生命周期现由 ADR-0095 角色路由承载
+  # （docs/agent/ROLE-*.md + ghcb 入口协议）。
 
 portability:
   neutral: [intent, strength, verify, risk_posture, flows]  # 平台无关，直接搬运
