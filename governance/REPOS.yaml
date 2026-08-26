@@ -37,7 +37,7 @@ repos:
   - name: agent-registry
     layer: L1
     visibility: public
-    status: retired   # ADR-0085：多 agent 编排声明层退役，GitHub 归档只读；快照=archive/retired/；ADR 家园已迁 archive/adr/
+    status: retired   # ADR-0085：多 agent 编排声明层退役，GitHub 归档只读；快照=archive/retired/；ADR 家园已迁 archive/adr/。ADR-0096：私有仓计费止血删除重建（public 重推 54 commit 全 SHA 保真、85/85 blob 零差异），§8 豁免 (c) 类已登记 expected-state；退役归档态已复原
     role: （退役）注册层——声明快照见 archive/retired/agent-registry/；git 历史即正本存档
 
   - name: archive
