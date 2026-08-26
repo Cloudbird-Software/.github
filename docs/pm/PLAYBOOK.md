@@ -50,7 +50,7 @@ worker 视角的认领/开工协议（AGENTS.md entry-protocol v2 块）对 PM �
   标签）；治理 IR 开 .github 仓。字段全必填（IFACE-01，IR-0001）；编号 IR-NNNN
   全局唯一（标题前缀，开立前 `bash ghcb board` 查重）。
 - **签署**：owner 评论 `/start`（T2）或打 `state:ir-signed` 标签（T1）——只有 owner 能签，你不代签。
-  （机器面现状：conductor 事件面限 .github 仓，产品仓 IR 签署由 owner 手动换签——ADR-0095 机器面边界。）
+  （机器面 ADR-0097：conductor 事件面已覆盖 .github + 8 产品仓 + template-service，产品仓签署/开卡/收卡同机自动换签。）
 - **spec 谁写**：两条制度等价路径（ADR-0085 决策 5，PR338 先例追认）：
   - 你自己写——完全合法，且是深度理解 IR 的最好方式；
   - spec-author 快速通道：CI-Workflows `spec-author.yml` 流水线生成骨架你再修。

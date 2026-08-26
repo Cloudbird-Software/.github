@@ -60,8 +60,9 @@
   `/g060-reject` 驳回（TTL 72h）。首次创建 suite 同样走此路径——无豁免通道是刻意的。
 - **conductor / arbiter 怎么触发**：不用也无法手动调用。conductor 监听 issue 事件
   （`state:*` 标签、评论 `/start` `/claim` `/retry`），arbiter 由 conductor 转介执行
-  CAS 租约。你只管评论与打标签，状态换签是机器的事。（机器面现状：conductor 事件面
-  限 .github 仓，产品仓 IR/卡状态由 owner 手动换签——ADR-0095 机器面边界。）
+  CAS 租约。你只管评论与打标签，状态换签是机器的事。（机器面 ADR-0097：conductor
+  事件面覆盖 .github + 8 产品仓 + template-service——IR 所在仓即事件仓，全状态机
+  语义各仓一致。）
 - **测试先行 vs gate 要绿**：红测试不进 main。spec PR 的 suite 断言制度/结构不变量，
   合入时必须绿；修 bug 的失败复现测试走 bug 流（B2 reproduced 锚定 base 红，
   fix PR 合入时转绿）。
