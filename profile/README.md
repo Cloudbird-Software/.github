@@ -31,5 +31,5 @@
 
 ## 意图→交付链路
 
-- **Feature 流（签署前置）**：[intent 表单](https://github.com/Cloudbird-Software/.github/issues/new?template=intent.yml)提交 IR → owner 签署 → spec（PM 自著或 spec-author 快速通道）→ 红队审计 → 开卡 → 实现（CNB 默认）→ 验收。规格与波次计划见 [`specs/`](https://github.com/Cloudbird-Software/.github/tree/main/specs)。
-- **Bug 流（复现前置，签署点后移——ADR-0064）**：[bug 表单](https://github.com/Cloudbird-Software/.github/issues/new?template=bug.yml)提交即机器复现，三值判定（reproduced / cannot-reproduce / inconclusive），reproduced 后修复合入自动回写状态。
+- **Feature 流（签署前置）**：feature IR 开在**对应产品仓**的 issue（[intent 表单](https://github.com/Cloudbird-Software/.github/issues/new?template=intent.yml)经 org 级继承，各仓可用；ADR-0095）→ owner 签署 → spec（PM 自著或 spec-author 快速通道；spec PR 必带测试设计逐类讨论+holdout，红队审计，开 spec 的 agent 不得直接实现）→ 开卡 → 实现（弱模型优先：子 agent / CNB 池默认，3 次熔断 PM 接手）→ 验收。治理意图 IR 开 [.github 仓](https://github.com/Cloudbird-Software/.github/issues/new?template=intent.yml)。规格与波次计划见 [`specs/`](https://github.com/Cloudbird-Software/.github/tree/main/specs)；按角色选路的指引见 [docs/agent/](https://github.com/Cloudbird-Software/.github/tree/main/docs/agent)（ADR-0095）。
+- **Bug 流（复现前置，签署点后移——ADR-0064）**：[bug 表单](https://github.com/Cloudbird-Software/.github/issues/new?template=bug.yml)（org 级继承，各仓可用）提交即机器复现，三值判定（reproduced / cannot-reproduce / inconclusive），reproduced 后修复合入自动回写状态；处理 issues 的角色指引见 [ROLE-ACCEPT.md](https://github.com/Cloudbird-Software/.github/blob/main/docs/agent/ROLE-ACCEPT.md)。

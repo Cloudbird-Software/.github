@@ -15,7 +15,8 @@
 #   ghcb dispatch <n> [repo] [--tier light|std] [--account <alias>]
 #                                         # 派 CNB：触发 .github 仓 cnb-dispatch 工作流（EX-1 经纪人，
 #                                         # key 永不入 PM 上下文）；<n>=卡 issue 号
-#   ghcb accept <IR#>                     # 生成 IR 验收报告骨架（specs/IR-XXXX/acceptance.md）到 stdout
+#   ghcb accept <IR#> [repo]              # 生成 IR 验收报告骨架（specs/IR-XXXX/acceptance.md）到 stdout
+#                                         # （ADR-0095：feature IR 开在产品仓，repo=IR 所在仓，缺省 .github）
 #   ghcb report [周号]                    # 生成运行报告骨架（archive/runs/YYYY-WNN.md 追加段）到 stdout
 #
 # next/claim/release 用调用方自己的 gh 凭据（gh auth login）；认领合法性单一真源=conductor guard
@@ -123,19 +124,22 @@ case "$CMD" in
     ;;
   accept)
     # IR 验收报告骨架（T9 谓词消费 specs/<IR>/acceptance.md）——PM 填证据后 PR 入仓
-    N="${2:?用法: ghcb accept <IR issue#>}"
-    IRID=$(gh issue view "$N" -R "$ORG/.github" --json title --jq .title 2>/dev/null | grep -oE 'IR-[0-9]+' | head -1)
+    # ADR-0095：feature IR 开在对应产品仓——[repo] 指定 IR 所在仓；缺省 .github（治理 IR 兼容）
+    N="${2:?用法: ghcb accept <IR issue#> [repo]}"
+    REPO_ARG="${3:-$ORG/.github}"
+    IR_REPO="$(norm_repo "$REPO_ARG")"
+    IRID=$(gh issue view "$N" -R "$IR_REPO" --json title --jq .title 2>/dev/null | grep -oE 'IR-[0-9]+' | head -1)
     [[ -n "$IRID" ]] || IRID="IR-$(printf '%04d' "$N")"
     cat <<SKEL
 # ${IRID} 验收报告（T9 / ADR-0085）
 
-- IR: Cloudbird-Software/.github#${N}
+- IR: ${IR_REPO}#${N}
 - 验收人: <PM 标识>　验收日期: $(date -u +%F)
 - 判据: IR 正文的"期望的可观察变化"逐条 + 运行时证据链接（SHA 锚定）
 
 ## 子卡清单（曾存在性自证；全部须 state:done）
 - #<卡号> <标题> → PR <链接> <merge SHA>
-<!-- gh issue list -R Cloudbird-Software/.github --label type:card 可核对 -->
+<!-- gh issue list -R ${IR_REPO} --label type:card 可核对 -->
 
 ## 逐条证据
 | # | 期望变化 | 证据（链接+SHA） | 结论 |
