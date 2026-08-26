@@ -117,7 +117,26 @@
     "must_not_have": [
       "workflows",
       "administration"
-    ]
+    ],
+    "repositories": [
+      ".github",
+      "AI_Web_School",
+      "CI-Workflows",
+      "Media-Monitor",
+      "QW_Arena1",
+      "Script_Writer",
+      "Shorts_Director",
+      "Use-up-Plan",
+      "Viral_Radar",
+      "agent-platform",
+      "agent-tools",
+      "arbiter",
+      "archive",
+      "cnb-bridge",
+      "mutual",
+      "template-service"
+    ],
+    "repositories_comment": "ADR-0097 对齐实际挂载面（installation#154584760，repository_selection=selected，API 实查 16 仓）：conductor 事件面扩展至 8 产品仓 + template-service 的身份前提。holdout 严禁出现（DECISION-02/ADR-0056 §18 live 断言；ADR-0080 起由 verifier-app 挂载）；agent-platform/agent-tools 为退役仓只读挂载（ADR-0085——archived 仓写路径已封死）；agent-registry 删除重建后未重新挂载（ADR-0096，退役归档态）。新仓挂载后须同步本清单（此前 QW_Arena1/Viral_Radar/Media-Monitor 挂载即陈旧无声明的教训），后续以本清单为对账基线。"
   },
   "verifier_app": {
     "comment": "ISSUE-263 / ADR-0080：验证者 APP，仅测试/验证路径写权；holdout 挂载唯一合法身份（drift-check §18）；与 cloudbrid-agent 身份分离（AG-1，ADR-0076）",

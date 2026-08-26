@@ -1,7 +1,10 @@
 name: conductor
-# 状态机路由器（IR-0001 W0-C3 / ADR-0049）。W0 事件面=本仓（issues.labeled +
-# issue_comment）；跨仓扩展随产品仓接入。全部状态标签写操作以 cloudbrid-agent
-# App 令牌执行（INV-02：GITHUB_TOKEN 身份不持有状态写权）。
+# 状态机路由器（IR-0001 W0-C3 / ADR-0049）。事件面=组织活跃仓（ADR-0097 仓位无关
+# 部署：issues/issue_comment 事件只在 workflow 文件所在仓触发、org required
+# workflows 不支持 issue 事件——故本文件以同一字节部署 .github + 8 产品仓 +
+# template-service；治理真源不复制，经 sparse-checkout 从 .github 仓就地取用）。
+# 全部状态标签写操作以 cloudbrid-agent App 令牌执行（INV-02：GITHUB_TOKEN 身份
+# 不持有状态写权；令牌按事件仓铸造单仓作用域）。
 # W4-C1（ADR-0079 / ISSUE-263 AC-12）：T5/T6 路由增强——suite 就绪谓词 +
 # 三元组 survived 记录校验 + needs-human 不可直跳 wave-planned 断言。
 # W1-C3（ADR-0055 决策 6）：写入类 front-desk 命令（/claim /release）前置转介
@@ -28,11 +31,11 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read   # checkout 本仓（transitions.yaml + gh-app-token.sh）+ arbiter（adjudicate.sh，ADR-0055）
+  contents: read   # checkout 事件仓（T5/T9 specs 谓词）+ .github 治理真源（sparse）+ arbiter（adjudicate.sh，ADR-0055）
 
 jobs:
   route:
-    if: github.repository == 'Cloudbird-Software/.github'
+    if: github.repository_owner == 'Cloudbird-Software'   # ADR-0097：仓位无关（.github + 产品仓同字节部署）
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -44,28 +47,41 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # 治理真源 sparse-checkout（ADR-0097）：transitions.yaml 与 gh-app-token.sh
+      # 的唯一真源在 .github 仓——产品仓部署不携带副本，每次运行取 main 最新
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Cloudbird-Software/.github
+          path: gov
+          sparse-checkout: |
+            governance/transitions.yaml
+            scripts/gh-app-token.sh
+          persist-credentials: false
       # arbiter 受信 checkout（ADR-0055）：conductor 只在 main 上下文运行事件路由，
-      # arbiter main 与本仓 transitions.yaml 同级信任——裁决内核不落本仓副本
+      # arbiter main 与治理真源 transitions.yaml 同级信任——裁决内核不落本仓副本
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Cloudbird-Software/arbiter
           path: arbiter
           persist-credentials: false
-      - name: 铸 App 令牌（AG-2：本仓 + arbiter 各一枚单仓作用域）
+      - name: 铸 App 令牌（AG-2：事件仓 + arbiter 各一枚单仓作用域）
         id: tokens
         env:
           CB_APP_ID: ${{ secrets.CB_APP_ID }}
           AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
+          EVENT_REPO: ${{ github.event.repository.name }}
         run: |
           set -euo pipefail
-          TOKEN=$(REPO=.github CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
-                  bash scripts/gh-app-token.sh)
+          # ADR-0097：按事件仓铸造（REPO=裸仓名——gh-app-token.sh 单仓作用域契约，
+          # .github 自身部署时 EVENT_REPO=.github，行为不变）
+          TOKEN=$(REPO="$EVENT_REPO" CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
+                  bash gov/scripts/gh-app-token.sh)
           # 用 step output 传递（避免 GITHUB_ENV 的 zizmor github-env 告警）
           echo "app_token=$TOKEN" >>"$GITHUB_OUTPUT"
           # 第二枚（ADR-0055）：REPO=arbiter 单仓作用域（租约宿主仓，installation
           # #154584760）——adjudicate.sh 优先取 env 令牌、免二次铸币
           ATOKEN=$(REPO=arbiter CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
-                  bash scripts/gh-app-token.sh)
+                  bash gov/scripts/gh-app-token.sh)
           echo "arbiter_token=$ATOKEN" >>"$GITHUB_OUTPUT"
       # 事件路由与守卫：transitions.yaml 是唯一转移定义；guard 受限求值
       # （变量白名单注入、无内建）；非授权=静默丢弃（回退标签、不评论、审计进
@@ -233,7 +249,7 @@ jobs:
           # ---- 转移表匹配（幂等：from_state 不符=no-op）----
           # /release 不在表内（transitions.yaml 未列该事件）——纯租约面命令：
           # 直达 arbiter 裁决，不产生任何标签转移（ADR-0055 决策 6）
-          table = yaml.safe_load(open("governance/transitions.yaml", encoding="utf-8"))
+          table = yaml.safe_load(open("gov/governance/transitions.yaml", encoding="utf-8"))
           cands = [t for t in table["transitions"] if t["event"] == ev]
           t = next((x for x in cands if x["from_state"] == current), None)
           if t is None and ev != "comment:/release":
@@ -534,7 +550,7 @@ jobs:
     uses: Cloudbird-Software/CI-Workflows/.github/workflows/spec-author.yml@4676c98047f816f7c888591eb882bf941e5c9fe0 # v1.4.3（irRef/taskId 事件真值覆写修复）
     with:
       issue_number: ${{ fromJson(needs.route.outputs.issue) }}
-      target_repo: 'Cloudbird-Software/.github'
+      target_repo: ${{ github.repository }}   # ADR-0097：IR 所在仓=spec PR 目标仓
       ir_ref: ${{ needs.route.outputs.ir_ref }}
       ciw_ref: '4676c98047f816f7c888591eb882bf941e5c9fe0'   # 与上方 uses 钉点同值（ADR-0043 钉源）
     # 显式传递（zizmor secrets-inherit：调用方 secrets 必须显式点名）
@@ -545,6 +561,7 @@ jobs:
 
   on-failure:
     # BEH-01：启动失败在原 issue 评论原因（人类只看 issue 就能知道卡在哪）
+    # ADR-0097：评论回事件仓 issue（令牌按事件仓铸造）；gh 经 GH_TOKEN 取 App 令牌
     needs: [route, spec]
     if: always() && (needs.route.result == 'failure' || needs.spec.result == 'failure')
     runs-on: ubuntu-latest
@@ -554,19 +571,25 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: Cloudbird-Software/.github
+          path: gov
+          sparse-checkout: |
+            scripts/gh-app-token.sh
           persist-credentials: false
       - name: 评论失败原因
         env:
           CB_APP_ID: ${{ secrets.CB_APP_ID }}
           AGENT_APP_SECRET: ${{ secrets.AGENT_APP_SECRET }}
+          EVENT_REPO: ${{ github.event.repository.name }}
           ISSUE: ${{ needs.route.outputs.issue }}
           ROUTE_RC: ${{ needs.route.result }}
           SPEC_RC: ${{ needs.spec.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          TOKEN=$(REPO=.github CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
-                  bash scripts/gh-app-token.sh)
-          gh api "repos/Cloudbird-Software/.github/issues/$ISSUE/comments" \
+          TOKEN=$(REPO="$EVENT_REPO" CB_APP_ID="$CB_APP_ID" AGENT_APP_SECRET="$AGENT_APP_SECRET" \
+                  bash gov/scripts/gh-app-token.sh)
+          export GH_TOKEN="$TOKEN"   # INV-02：App 身份评论（GITHUB_TOKEN 无 issues:write）
+          gh api "repos/${{ github.repository }}/issues/$ISSUE/comments" \
             -f body="**conductor：spec 阶段启动失败**（BEH-01，须人类介入）
           route=${ROUTE_RC} spec=${SPEC_RC}
           run：${RUN_URL}

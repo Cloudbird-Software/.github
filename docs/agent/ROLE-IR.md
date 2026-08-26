@@ -32,8 +32,9 @@
 ## 签署（不是你的动作）
 
 - owner 评论 `/start` 或打 `state:ir-signed` ——**只有 owner 能签，你不代签**。
-- 机器面现状（ADR-0095 诚实申报）：conductor 状态机事件面当前仅覆盖 .github 仓，
-  产品仓 IR 的签署标签由 owner 手动打；跨仓事件面扩展是已登记的后续工作。
+- 机器面（ADR-0097）：conductor 事件面已覆盖全部活跃仓（.github + 8 产品仓 +
+  template-service，同字节部署）——owner 在 IR 所在仓评论/打标签即自动换签，
+  产品仓无需手动干预。
 
 ## 开完之后
 
