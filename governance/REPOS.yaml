@@ -182,4 +182,18 @@ repos:
 
 # 上游依赖（ADR-0085：openjiuwen 双上游随编排框架退役停止消费；未来引入新上游时
 # 恢复本节声明——部署渲染 pin tag 的治理方式不变）
+  - name: AI_Toy
+    layer: L2
+    visibility: public
+    status: active
+    role: 产品仓——AI 陪伴玩具多模态 monorepo（唤醒词/声纹/IMU/情绪引擎/人格编译器/记忆图谱/
+      TTS/离线运行时/路由缓存 共 T1–T20 资产与 16 组门禁；Python uv 工作区 + TypeScript pnpm +
+      Rust cargo 三语言 monorepo；治理面随 bootstrap 直推一次落地：门禁 configs+docs、AGENTS.md
+      入口协议块、CODEOWNERS、workflows gates/meta/combo-smoke、数据集/holdout 密封清单、dependabot；
+      登记依据 flows.new_repo step 4；初始空仓建仓 bootstrap 直推（(b) 类：建仓时序上 PR 流程尚未就绪）
+      登记于 direct_push_exemptions（本 PR 同步），先例 ADR-0092/ADR-0090/ADR-0021
+    key_paths: [configs/gates/, docs/gates/, packages/, tools/, datasets/, tests/, reports/, AGENTS.md, .github/workflows/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
+
+
 external_upstreams: []

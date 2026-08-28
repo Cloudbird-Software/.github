@@ -173,32 +173,49 @@
     ]
   },
   "direct_push_exemptions": {
-    "comment": "§8 直推检测豁免——三类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃；arbiter 建仓 bootstrap 同理（W1-C2 .github#165/ADR-0054）。archive（W1-C1 .github#164/ADR-0053）：bootstrap README commit 同属 (b) 类——注意 ADR-0046 后 org-required-workflows ruleset 无 bypass，空仓首推被 required workflow 拦截，豁免操作=对 org ruleset 的 archive 仓库做秒级临时 exclude 后经 contents API 建 commit 并即刻还原（全程约 5 秒，已留痕于 #164）；ruleset 最终态与落盘定义一致（drift-check §1 不受影响）。QW_Arena1（.github#345/ADR-0084）：(b) 类空仓变体——模板派生未生效（空仓无 base 分支、PR 不可行，org-required-workflows 无 bypass 构成死锁），template-service 基线 72 文件由 owner 凭据经临时 bootstrap 分支落盘、建 main 后切换默认分支完成导入（全程未触碰组织 rulesets，main 根树与 template-service 逐文件 sha 一致）。；cnb-bridge（ADR-0085/IR-0005）：(b) 类空仓 bootstrap——README 首commit 经 contents API（Git Data API 对空仓 409），ruleset 未动（与 QW_Arena1 的 exclude 法不同路径，同为建仓时序豁免）。2026-08-25（ADR-0090）：org-required-workflows 已补 OrganizationAdmin bypass——空仓首推死锁不再存在，后续建仓 bootstrap 直推首属即合法（仍须 (b) 类逐 SHA 登记）；上文临时 exclude/contents API 变通均为历史事实记录。2026-08-25（ADR-0092）：Viral_Radar 建仓 bootstrap（(b) 类——ADR-0091 决策 1 定性：template-service 经官方 generate endpoint 实例化落 main，非 agent 直推）；archive 两笔运行报告直推破玻璃追认（(a) 类——运行报告属 C1 治理面必须走 PR，此后先例 archive#27）。2026-08-26（ADR-0096）：新增 (c) 类——基础设施事件历史重推：agent-registry 私有仓触发 GitHub 安全产品计费，owner 止血删除后以 public 重建并镜像重推，PR 关联随仓删除物理消失致全部 54 笔 commit 呈现直推表象（无新 commit、零内容变更，快照 85/85 blob 零差异）；事件定性=owner 止血操作，54 SHA 逐笔登记（含 ADR-0030 已登记 2 笔），线上态已复原（auto-merge/12 治理标签/重新归档）；删除重建不可复制为常规手段",
+    "comment": "§8 直推检测豁免——三类，均须 ADR 背书，逐完整 SHA 登记（新直推不可能搭便车）：(a) 破玻璃直推回填：GM-2 破玻璃的机器可读回填形式（ADR-0016 附录），事件定性见 ADR-0017（.github 两条：净变更仅为 Trae IDE 分享 zip 与误入 gitlink，彼时 PR 流程已运转）；(b) 建仓 bootstrap 初始 commit（ADR-0021）：仓库创建时序上分支/PR 尚不存在、不可能走 PR——Shorts_Director/agent-tools/Script_Writer 的 Initial commit 类（含 GitHub UI 建仓附带的 README 编辑 commit），登记为豁免而非追认破玻璃；arbiter 建仓 bootstrap 同理（W1-C2 .github#165/ADR-0054）。archive（W1-C1 .github#164/ADR-0053）：bootstrap README commit 同属 (b) 类——注意 ADR-0046 后 org-required-workflows ruleset 无 bypass，空仓首推被 required workflow 拦截，豁免操作=对 org ruleset 的 archive 仓库做秒级临时 exclude 后经 contents API 建 commit 并即刻还原（全程约 5 秒，已留痕于 #164）；ruleset 最终态与落盘定义一致（drift-check §1 不受影响）。QW_Arena1（.github#345/ADR-0084）：(b) 类空仓变体——模板派生未生效（空仓无 base 分支、PR 不可行，org-required-workflows 无 bypass 构成死锁），template-service 基线 72 文件由 owner 凭据经临时 bootstrap 分支落盘、建 main 后切换默认分支完成导入（全程未触碰组织 rulesets，main 根树与 template-service 逐文件 sha 一致）。；cnb-bridge（ADR-0085/IR-0005）：(b) 类空仓 bootstrap——README 首commit 经 contents API（Git Data API 对空仓 409），ruleset 未动（与 QW_Arena1 的 exclude 法不同路径，同为建仓时序豁免）。2026-08-25（ADR-0090）：org-required-workflows 已补 OrganizationAdmin bypass——空仓首推死锁不再存在，后续建仓 bootstrap 直推首属即合法（仍须 (b) 类逐 SHA 登记）；上文临时 exclude/contents API 变通均为历史事实记录。2026-08-25（ADR-0092）：Viral_Radar 建仓 bootstrap（(b) 类——ADR-0091 决策 1 定性：template-service 经官方 generate endpoint 实例化落 main，非 agent 直推）；archive 两笔运行报告直推破玻璃追认（(a) 类——运行报告属 C1 治理面必须走 PR，此后先例 archive#27）。2026-08-26（ADR-0096）：新增 (c) 类——基础设施事件历史重推：agent-registry 私有仓触发 GitHub 安全产品计费，owner 止血删除后以 public 重建并镜像重推，PR 关联随仓删除物理消失致全部 54 笔 commit 呈现直推表象（无新 commit、零内容变更，快照 85/85 blob 零差异）；事件定性=owner 止血操作，54 SHA 逐笔登记（含 ADR-0030 已登记 2 笔），线上态已复原（auto-merge/12 治理标签/重新归档）；删除重建不可复制为常规手段；2026-08-28（AI_Toy bootstrap，(b) 类——ADR-0090 后 org-required-workflows 允许 OrganizationAdmin bypass，Initial commit + upload setup 直推均为建仓时序豁免，零治理基线改写净变更）",
     ".github": [
       "9b056b3a925038484a8f6655ea45f81f071d5df6",
       "416f5f57fd459f6ece3587f3aa20b772148ad335",
       "89f57e6c2fd4dd8d1e5d329e54a63d21ee0fb68b"
+    ],
+    "AI_Toy": [
+      "439617d6d3640aa513d6a21c739f9d7aec9a246d",
+      "71456ebd8e841fe2c5e18bcdfd7d5cf63e1e17b7"
+    ],
+    "CI-Workflows": [
+      "766d2c89a27e05c6afefd1963c6020be361edc23",
+      "5f2684f1e13d33c5f8e260440794324286603bdf",
+      "f59ba5f5eb238349e225393703ba084b0060287b",
+      "8f47bcbb05208e5d376d460c3b6e35913883ba09"
+    ],
+    "Media-Monitor": [
+      "30dfa3858d6299dbe3bdfdd47bcd79a89d7f4953"
+    ],
+    "QW_Arena1": [
+      "d5ea693874917cbc3fbc45401c9c9a937dc71b9f",
+      "bdb8493ab5f2e80ad56d9c5a4327d253db57c191",
+      "eb5da0dc9f42a88129648a04b0783bdb6bb8c40b",
+      "ed67646d796f9e9d2ec48bdf8073a20d40ce0399",
+      "63397801a130db173341ee1ff680c02100b8e0ea"
+    ],
+    "Script_Writer": [
+      "3446a39a0e2ec7527cab4e6da87b6e6ee0199fa7"
     ],
     "Shorts_Director": [
       "f63baf264291670aa33f4a599779dd5c84678433",
       "d81fea9db47e065fd2bd5211dd1a8e3c26589f41",
       "014f38986ee5338fe0d7e3ea260c9a4f289af401"
     ],
-    "agent-tools": [
-      "1050459443ce0373cffff7788c668d6f5dec0048"
-    ],
-    "Script_Writer": [
-      "3446a39a0e2ec7527cab4e6da87b6e6ee0199fa7"
-    ],
     "Use-up-Plan": [
       "ba75401f84eb915a119568c246168d8cdb8a1200",
       "82132afc169a54b98869df136d1d6235124c4a96"
     ],
+    "Viral_Radar": [
+      "db02d59268a5006747e04e4cdbba9c52d5852b32"
+    ],
     "agent-platform": [
       "fecdb13d607b584063cadd717d2a7706327fbfa0"
-    ],
-    "mutual": [
-      "f5d9b5b58d4dc30a2b0e259449862fc4a3c91f6b"
     ],
     "agent-registry": [
       "00492875e1a2db391f9dca49286370f2330a3a28",
@@ -256,8 +273,8 @@
       "f743c10d0f63dff49c1a732eaf7897d83276f372",
       "f89e864e89bf2e90d70609f0a147770459dfa90c"
     ],
-    "holdout": [
-      "63360c581524510ef37150dd7540cb333d283014"
+    "agent-tools": [
+      "1050459443ce0373cffff7788c668d6f5dec0048"
     ],
     "arbiter": [
       "7b1a65234b1697bde11cea2ebdacd8ee0efc44c4"
@@ -268,27 +285,14 @@
       "c1d31e10e7798e82f1d0de022f58ae15382af1fe",
       "be94906f09b8e810449be11be63aff8ecf1bdf0f"
     ],
-    "QW_Arena1": [
-      "d5ea693874917cbc3fbc45401c9c9a937dc71b9f",
-      "bdb8493ab5f2e80ad56d9c5a4327d253db57c191",
-      "eb5da0dc9f42a88129648a04b0783bdb6bb8c40b",
-      "ed67646d796f9e9d2ec48bdf8073a20d40ce0399",
-      "63397801a130db173341ee1ff680c02100b8e0ea"
-    ],
     "cnb-bridge": [
       "6a43a24ba859a64ca9770c18fb1254050917984b"
     ],
-    "Viral_Radar": [
-      "db02d59268a5006747e04e4cdbba9c52d5852b32"
+    "holdout": [
+      "63360c581524510ef37150dd7540cb333d283014"
     ],
-    "CI-Workflows": [
-      "766d2c89a27e05c6afefd1963c6020be361edc23",
-      "5f2684f1e13d33c5f8e260440794324286603bdf",
-      "f59ba5f5eb238349e225393703ba084b0060287b",
-      "8f47bcbb05208e5d376d460c3b6e35913883ba09"
-    ],
-    "Media-Monitor": [
-      "30dfa3858d6299dbe3bdfdd47bcd79a89d7f4953"
+    "mutual": [
+      "f5d9b5b58d4dc30a2b0e259449862fc4a3c91f6b"
     ]
   },
   "org_required_workflows": {
