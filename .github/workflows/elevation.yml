@@ -172,7 +172,7 @@ jobs:
               '{ts:$ts, kind:"approval", action:"elevation.revoke", verdict:"revoked",
                 subject:{card:$g.card, tenant:"cloudbird-internal"},
                 actor:{identity:"elevation-bot", role:"bot"},
-                payload:{elevation_id:$g.elevation_id, capability:$g.capability, cause:"ttl-expired"}}' >event.json
+                payload:({elevation_id:$g.elevation_id, capability:$g.capability, cause:"ttl-expired"}|tojson)}' >event.json
             python3 governance/evidence_shadow.py append --file "$LED" --event-file event.json
             i=$((i + 1))
           done
