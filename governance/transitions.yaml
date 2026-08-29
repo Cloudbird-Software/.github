@@ -78,7 +78,13 @@ transitions:
     event: label:state:wave-planned
     to_state: wave-planned
     action: noop
-    guard: "sender_role == 'agent' and 'adversary:survived' in label_set"
+    # guard 补洞（ADR-0085，IR-0006 W1 实走发现 2026-08-29）：原 sender_role=='agent'
+    # 意图=机器驱动，但 agent 自动触发面自 W4-C1 上线即未接线（workflow_run 未注册
+    # 触发、repository_dispatch 无法定位 issue、标签路径无 dispatch 载荷）——T6 对
+    # 全部注册事件不可达，PLAYBOOK §3"打 adversary:survived 标签→T6"的 PM 主路径
+    # 被 owner 身份拒绝。对齐 T1/T5/T7-T9 的 owner∪agent；证据闸门不变：三元组
+    # （卡 ID+specVersion+审计 run ID）仍由 conductor 机械校验，fail-closed。
+    guard: "sender_role in ['owner', 'agent'] and 'adversary:survived' in label_set"
     triple_check:  # conductor 在转移前校验三元组 survived 记录
       card_id: issue   # 卡 ID 键 = 当前 issue number
       spec_version: spec  # specVersion 键 = spec 文件版本（SHA 或 semver）
