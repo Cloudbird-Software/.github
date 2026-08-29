@@ -41,8 +41,11 @@ open(sys.argv[2], "w", encoding="utf-8", newline="\n").write(
 PYEOF
     return 0
   fi
-  if grep -qi 'not found' "$TMP/api.err" 2>/dev/null; then
-    return 1   # 源缺席（尚无影子记录）——过渡期合法，非红
+  # 404 两种报文都算源缺席：路径不存在="Not Found"；ref（分支）不存在=
+  # "No ref found for ..."（不含 "not found" 字样——2026-08-29 波次通道实测抓出：
+  # butler-ledger 分支未建被误判"非 404 拉取失败"→ INFRA exit 2，源缺席本应合法跳过）
+  if grep -qiE 'not found|no ref found' "$TMP/api.err" 2>/dev/null; then
+    return 1   # 源缺席（尚无影子记录/账本分支未建）——过渡期合法，非红
   fi
   echo "FATAL: $repo@$branch $path 拉取失败（非 404）：" >&2; cat "$TMP/api.err" >&2; exit 2
 }
@@ -57,7 +60,7 @@ for ent in json.load(open(sys.argv[1], encoding="utf-8")):
             base64.b64decode(ent["content"]).decode("utf-8"))
 PYEOF
 else
-  if ! grep -qi 'not found' "$TMP/api.err" 2>/dev/null; then
+  if ! grep -qiE 'not found|no ref found' "$TMP/api.err" 2>/dev/null; then
     echo "FATAL: metering-ledger 目录拉取失败：" >&2; cat "$TMP/api.err" >&2; exit 2
   fi
 fi

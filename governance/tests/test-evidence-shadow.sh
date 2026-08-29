@@ -149,6 +149,9 @@ case "$url" in
     if [[ -f "$F/drill-tampered.json" ]]; then cat "$F/drill-tampered.json"; else cat "$F/drill.json"; fi ;;
   "repos/Cloudbird-Software/.github/contents/governance/butler/shadow-evidence.jsonl?ref=butler-ledger")
     if [[ "${GH_STUB_BUTLER_MISSING:-}" == "1" ]]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    if [[ "${GH_STUB_BUTLER_MISSING:-}" == "2" ]]; then
+      echo 'gh: No ref found for "butler-ledger" in repo Cloudbird-Software/.github (HTTP 404)' >&2; exit 1
+    fi
     cat "$F/butler.json" ;;
   *) echo "gh-stub: 意外 URL $url" >&2; exit 1 ;;
 esac
@@ -173,6 +176,12 @@ MOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLE
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/m.err"); MRC=$?
 MN=$(nlines "$MOUT")
 [[ $MRC -eq 0 && "$MN" -eq 4 ]] && pass "butler 源缺席（404）→ 跳过非红（4 条）" || fail "源缺席误红（rc=$MRC 行=$MN）"
+# 源缺席（404 第二报文形态——账本分支未建 "No ref found"）：同跳过非红
+# （2026-08-29 波次通道实测回归：该形态曾被误判"非 404"→ INFRA exit 2）
+ROUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=2 \
+  bash "$DIR/governance/evidence-query.sh" 2>"$TMP/r.err"); RRC=$?
+RN=$(nlines "$ROUT")
+[[ $RRC -eq 0 && "$RN" -eq 4 ]] && pass "源缺席（No ref found 分支未建）→ 跳过非红（4 条）" || fail "分支未建误红（rc=$RRC 行=$RN）"
 # 负向：任一源链断 → exit 3 且 stdout 零输出（不可信数据不出结果）
 python3 - "$TMP/fixtures" <<'PYEOF'
 import base64, json, sys
