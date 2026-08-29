@@ -8,3 +8,8 @@ __pycache__/
 .ciw/
 env-defs/
 .scratch/
+
+# 本地运行 butler/feishu 审计产生的影子账本（持久化真源在 *-ledger 分支，
+# 工作树内的副本是 ephemeral 运行产物——不入库）
+governance/butler/shadow-evidence.jsonl
+governance/feishu/shadow-evidence.jsonl

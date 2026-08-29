@@ -1,0 +1,82 @@
+name: feishu-drill
+# 飞书投影演练面（宪法 §12 第四投影 / IR-0006 W3-F1 / 卡 #416 / ADR-0103 决策 7）
+# 手动 dispatch 驱动（无 cron——15min 日常节奏归 butler-ledger.yml 守卫调用，
+# 本面只做演练与复盘：sync 常规收敛 / verify 只读对账（不收敛=红，INV-05 演练）/
+# rebuild 整表删除单轮重建（BEH-06 演练语义）。影子事件 relink 持久化到
+# feishu-ledger 分支=evidence-query 第 6 源（append-only 台账，双侧验链防覆盖
+# 掩盖篡改，同 butler-ledger 哲学）；BUTLER_CARD 绑 #416——演练可追溯锚点。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "演练模式：sync=常规同步 | verify=只读对账（漂移=红） | rebuild=删表重建"
+        required: true
+        default: "sync"
+        type: choice
+        options: [sync, verify, rebuild]
+
+permissions: {}
+
+concurrency:
+  group: feishu-drill # 串行化：feishu-ledger append-only 不容忍并发追加
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # 读 governance/ 脚本
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 投影演练（mode→feishu-sync 参数映射；verify 漂移=红）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }} # label 真源读（缺=exit 2 fail-closed）
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_BITABLE_APP_TOKEN: ${{ secrets.FEISHU_BITABLE_APP_TOKEN }}
+          BUTLER_TRIGGER: drill
+          BUTLER_CARD: Cloudbird-Software/.github#416
+          BUTLER_TENANT: cloudbird-internal
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          case "$MODE" in
+            sync)    ARGS=() ;;                       # 常规收敛（默认路径=日常 15min 同语义）
+            verify)  ARGS=(--verify) ;;               # 只读对账：未收敛 exit 3=红（fail-closed）
+            rebuild) ARGS=(--drop) ;;                 # 删表+单轮重建（BEH-06 演练）
+          esac
+          python3 governance/feishu-sync.py "${ARGS[@]}"
+      - name: 影子账本落盘（feishu-ledger 分支，IR-0006 W3-F1 / BEH-03）
+        # feishu 源影子持久化：本地 shadow-evidence.jsonl relink 续接 feishu-ledger
+        # 基链（双侧验链，防覆盖掩盖篡改）后写回。always()：verify 红（exit 3）时
+        # 审计事件同样必须落账（append-only 纪律优先于本轮结论）。
+        if: ${{ always() }}
+        env:
+          DRILL_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHADOW="governance/feishu/shadow-evidence.jsonl"
+          if [[ ! -s "$SHADOW" ]]; then
+            echo "OK 本轮无影子记录（audit_emit 未触发或 skipped）——跳过（幂等）"
+            exit 0
+          fi
+          git config --global user.name feishu-drill-bot && git config --global user.email feishu-bot@users.noreply.github.com
+          if ! git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger -b feishu-ledger 2>/dev/null; then
+            git clone --depth 1 "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger
+            git -C ledger checkout -b feishu-ledger
+          fi
+          BASE="ledger/$SHADOW"
+          [[ -f "$BASE" ]] || : > "$BASE"
+          python3 governance/evidence_shadow.py relink --base "$BASE" --local "$SHADOW" --out merged.jsonl
+          python3 governance/evidence_shadow.py verify --file merged.jsonl
+          mkdir -p "ledger/governance/feishu"
+          cp merged.jsonl "$BASE"
+          git -C ledger add "$SHADOW"
+          git -C ledger diff --cached --quiet && { echo "OK 影子无新增——不提交（幂等）"; exit 0; }
+          git -C ledger commit -m "feishu: 影子账本追加（IR-0006 W3-F1 演练，链验通过）"
+          for i in 1 2 3; do git -C ledger push "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/feishu-ledger && break
+            git -C ledger pull --rebase "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" feishu-ledger || true; sleep 5; done

@@ -1,8 +1,9 @@
 name: butler-ledger
 # 管家账本刷新——唤醒矩阵行 2（宪法 §11 行 2 / §12 投影；ADR-0057，W1-C5 .github#168）
-# 每 15min 调用 W1-C3 的投影脚本：governance/board-sync.py（label→Project 板）与
-# governance/dashboard-update.py（dashboard 账本 issue 刷新）。**两脚本由 C3 卡并行
-# 开发、本卡时点尚未落盘**——用 [ -f ] 守卫：存在才跑；不存在输出
+# 每 15min 调用投影脚本：governance/board-sync.py（label→Project 板）、
+# governance/dashboard-update.py（dashboard 账本 issue 刷新）与
+# governance/feishu-sync.py（W3-F1 飞书多维表格出站投影，fail-open AC-7b）。
+# 前两者由 C3 卡并行开发、本卡时点尚未落盘——用 [ -f ] 守卫：存在才跑；不存在输出
 # skipped 审计行且保持绿（守卫原因：账本刷新骨架先行——cron 节奏与审计形态先定型，
 # 投影脚本随后合入即自动生效，两卡解耦不互相阻塞）。
 # 骨架期本卡自带轻量记账：每次运行无条件追加一条 dashboard 备注行（v1 仅审计日志，
@@ -31,6 +32,10 @@ jobs:
       - name: 投影脚本守卫调用 + 轻量记账
         env:
           GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }} # C3 投影脚本的跨仓/GraphQL 读
+          # W3-F1 飞书投影凭据（INV-04：org secrets 注入，缺省=not-provisioned skipped 绿）
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_BITABLE_APP_TOKEN: ${{ secrets.FEISHU_BITABLE_APP_TOKEN }}
           BUTLER_TRIGGER: ${{ github.event_name }}
         run: |
           set -uo pipefail
@@ -63,6 +68,18 @@ jobs:
           else
             echo "OK    governance/dashboard-update.py 不存在（W1-C3 未合并）——skipped"
             audit_emit ledger-refresh "$TRIGGER" ok '{"skipped":"dashboard-scripts-not-landed(W1-C3)","dashboard_update":"absent"}'
+          fi
+          # --- W3-F1 投影脚本三：feishu-sync.py（fail-open，AC-7b） ---
+          # 出站投影（§12 第四投影）——与 board-sync/dashboard 的 fail-closed 不同：
+          # 飞书面故障只降级不判红（exit≠0 → ::warning:: + 继续其余账本刷新——
+          # 投影面故障不得阻塞其余投影与判定链）。审计由脚本自身经 butler-audit.sh
+          # 发射（AUDIT 行 + 影子随 runner 销毁=丢弃层，同 butler 哲学），本层不重复记账
+          if [[ -f governance/feishu-sync.py ]]; then
+            if ! python3 governance/feishu-sync.py; then
+              echo "::warning::feishu-sync.py 失败（fail-open，AC-7b——降级回 GitHub dashboard，不阻塞其余投影）"
+            fi
+          else
+            echo "OK    governance/feishu-sync.py 不存在（W3-F1 未合并）——skipped"
           fi
           # --- 本卡自有轻量记账（无条件）：dashboard 备注行 v1=审计日志形态 ---
           audit_emit ledger-refresh "$TRIGGER" ok '{"ledger":"append","note_row":{"ts":"'"$(date -u +%FT%TZ)"'","run_id":"'"${GITHUB_RUN_ID:-local}"'","kind":"dashboard-remark-v1","sli_keys_reserved":["auto_merge_rate","check_latency","revert_count"]}}'

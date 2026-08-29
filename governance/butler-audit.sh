@@ -128,7 +128,9 @@ _shadow_emit() {
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   shadow="${BUTLER_SHADOW_FILE:-$here/butler/shadow-evidence.jsonl}"
   evf="$(mktemp)"
-  "$_BUTLER_PY" - "$evf" "$butler" "$outcome" <<'PYEOF' || ev_rc=$?
+  # BUTLER_SHADOW_PAYLOAD（可选，feishu-sync）：动作明细进影子 payload（≤4KB，
+  # evidence_shadow append 执法 INV-06 超限拒写）；缺省=无 payload（原行为不变）
+  "$_BUTLER_PY" - "$evf" "$butler" "$outcome" "${BUTLER_SHADOW_PAYLOAD:-}" <<'PYEOF' || ev_rc=$?
 import datetime, json, sys
 ev = {
     "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -137,6 +139,8 @@ ev = {
                 "tenant": __import__("os").environ.get("BUTLER_TENANT", "cloudbird-internal")},
     "actor": {"identity": sys.argv[2], "role": "bot", "model": None},
 }
+if len(sys.argv) > 4 and sys.argv[4]:
+    ev["payload"] = sys.argv[4]
 open(sys.argv[1], "w", encoding="utf-8").write(json.dumps(ev, ensure_ascii=False))
 PYEOF
   if [[ $ev_rc -ne 0 ]]; then
