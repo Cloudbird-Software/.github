@@ -77,7 +77,9 @@ jobs:
           python3 governance/evidence_shadow.py relink --base "$BASE" --local "$SHADOW" --out merged.jsonl
           python3 governance/evidence_shadow.py verify --file merged.jsonl
           cp merged.jsonl "$BASE"
-          git -C ledger add "$SHADOW"
+          # -f 必须：该路径在 .gitignore（工作树内是 ephemeral 影子）；账本分支
+          # 是持久化真源，首建时未被跟踪，无 -f 的 add 会被 ignore 拒绝（run 33252965116）
+          git -C ledger add -f "$SHADOW"
           git -C ledger diff --cached --quiet && { echo "OK 影子无新增——不提交（幂等）"; exit 0; }
           git -C ledger commit -m "feishu: 影子账本追加（IR-0006 W3-F1 演练，链验通过）"
           for i in 1 2 3; do git -C ledger push "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/feishu-ledger && break
