@@ -62,6 +62,11 @@ assert p["to_update"] == [] and p["drift_alarms"] == [], p
 c3 = dict(cards[0], number=418, state="weird")
 p = fs.plan_sync([c3], {}, {"in-progress"})
 assert "State" not in p["to_create"][0]["fields"] and p["unknown_states"] == [(".github#418", "weird")], p
+# 6) 飞书数字字段以字符串读回（run 33253639204 实测怪癖）：数值归一不误报
+recs3 = {".github#416": {"record_id": "rec1", "fields": {
+    **fs.want_fields(cards[0]), "卡号": "416", "停留天数": "2"}}}
+p = fs.plan_sync([cards[0]], recs3, opts)
+assert p["to_update"] == [] and p["drift_alarms"] == [], p
 print("OK")
 PYEOF
 

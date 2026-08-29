@@ -98,9 +98,19 @@ def want_fields(card):
 
 
 def _eq(have, want):
-    """空值与未设等价（飞书空文本不落值=键缺失/null）；数字 416==416.0 等价。"""
+    """空值与未设等价（飞书空文本不落值=键缺失/null）；数字 416==416.0 等价。
+
+    飞书实测怪癖（run 33253639204）：list records 把数字字段值以字符串返回
+    （"425"/"0"），写入侧是数字——数字面须跨类型数值归一，否则全表误报差异。
+    """
     if have is None:
         return want in ("", None)
+    if isinstance(have, str) and isinstance(want, (int, float)) \
+            and not isinstance(want, bool):
+        try:
+            return float(have) == float(want)
+        except ValueError:
+            return False
     return have == want
 
 
