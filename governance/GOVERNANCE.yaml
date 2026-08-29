@@ -180,6 +180,18 @@ domains:
            removal_drill: "cnb-bridge/REMOVAL.md 单页清单；删除后 gate/org-gate/conductor 语义不变（ADR-0085 决策 6 断言）",
            seams: "GOVERNANCE 本条目 + org secrets CNB_TOKEN_<ALIAS> + .github cnb-dispatch/cnb-audit 两工作流（隔离审计=cnb-audit 周扫，操作性引用越界即红）"}}
 
+  evidence_ledger:
+    # IR-0006 / ADR-0103：证据账本统一（判定/轨迹/丢弃三层）+ 保留策略。
+    # 声明先行——enforcement 载体（evidence/ 目录、checkpoint 复算脚本）随
+    # W1-B1/B2 落地后升 enforced 并入 drift-check。
+    measures:
+      - id: EL-1
+        intent: "判定层账本落 archive 仓 evidence/：append-only + hash 链（ADR-0062 平移）+ 月度 checkpoint（链头 hash+当月汇总提交 git）+ 独立脚本复算整链，链断=红（fail-closed）；payload 内联上限 4KB 超限拒写；每条判定记录必含 tenant 字段"
+        strength: advisory
+      - id: EL-2
+        intent: "保留策略：判定层 git 永续；轨迹层（云内网 blob）按记录内保留策略字段执行，git 仅存摘要+sha256 指针；丢弃层（GitHub 事件面）transient 不承诺持久；三源原 JSONL（metering/butler/drill）只读冻结（平移不搬移，可回退）"
+        strength: advisory
+
 flows:
   governance_change:
     # 治理仓（.github governance|standards、CI-Workflows workflows/）内容变更的唯一合法路径
