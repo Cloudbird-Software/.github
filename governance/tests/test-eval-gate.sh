@@ -51,7 +51,7 @@ run --event-out "$TMP/ev.json"; RC=$?
 
 # 事件 schema 契约（write_evidence 消费面：join key+tenant+payload 摘要+无链字段）
 jq -e '.kind=="gate" and .action=="eval-noninferiority" and .verdict=="green"
-  and .subject.card=="Cloudbird-Software/.github#421" and .subject.tenant=="cloudbird-internal"
+  and (.ts|test("^20[0-9]{2}-[0-9]{2}-[0-9]{2}T")) and .subject.card=="Cloudbird-Software/.github#421" and .subject.tenant=="cloudbird-internal"
   and (.actor.role=="bot") and (.payload|length>0) and (.payload|fromjson|.metrics.precision|keys|length==2)
   and (has("seq")|not) and (has("hash")|not)' "$TMP/ev.json" >/dev/null \
   && ok "事件契约字段齐（join key+tenant+payload 指标摘要，链字段归 write_evidence）" || bad "事件契约缺"
