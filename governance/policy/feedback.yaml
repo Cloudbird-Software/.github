@@ -1,0 +1,75 @@
+schema: feedback-edge/v1
+# feedback.yaml —— R3→R1 反馈边信号规则（IR-0006 W6-M2 / 卡 #424 / AC-8g+8h）
+#
+# 宪法 §11（三面分离：R1 意图面 / R3 运行面）+ ADR-0095（角色路由：一切
+# spec 从 type:intent 起步）。反馈边=R3 运行信号反哺 R1 backlog 的**生成侧**：
+# 信号越阈值 → 候选 spec（type:intent + state:ir-draft）自动生成入 backlog；
+# 但签署门禁不豁免（AC-8h）——owner 签署→spec→红队全流程照走，反馈边永不
+# 置 state:ir-signed（INV-01：判定语义锚点机械；BEH-01：生成≠判定）。
+#
+# 信号源=管家账本 dashboard issue（宪法 §12 投影二，ADR-0073 machine-readable
+# JSON）——指标口径与阈值真源（policy/metrics.yaml）一致，本表只声明**何时
+# 值得开候选 spec**（反馈阈值≠护栏阈值：护栏 red 上屏，反馈越阈值开卡——
+# 两套阈值独立声明，防互绕）。
+#
+# 信号三分类（卡面：错误/用量/SLO）：
+#   error=质量逃逸面 · usage=用量成本面 · slo=服务停摆面
+# 规则字段（feedback-edge.py 机械校验，非法=exit 2 fail-closed）：
+#   key            唯一键（去重 label feedback:<key>）
+#   class          error|usage|slo
+#   description    语义描述（进候选 spec body）
+#   metric_path    dashboard JSON 点路径（缺/None/pending 字串=诚实 SKIP）
+#   op             gt|lt|ge|le|eq|ne（gt/lt/ge/le 须数值）
+#   threshold      内联阈值；或 threshold_path（点路径取阈值——如停摆线随
+#                  metrics.yaml 声明走，不在本表复写）
+#   spec_title     候选 spec 标题（描述意图，不含承诺方案）
+backlog_repo: Cloudbird-Software/.github
+dashboard_issue:
+  repo: Cloudbird-Software/.github
+  label: dashboard          # 管家账本 dashboard issue（机器可读 JSON 真源）
+signals:
+  # ---- SLO（停摆面）----
+  - key: needs-human-p90-stop
+    class: slo
+    description: needs-human 卡 p90 停留超停摆线（宪法 §7：单独显示不洗白；持续超线=反馈开卡找根因）
+    metric_path: metrics.attention.needs_human_p90_hours
+    op: gt
+    threshold_path: metrics.attention.needs_human_stop_hours   # 停摆线随 metrics.yaml 声明（24h）
+    spec_title: "IR 候选（反馈边 needs-human-p90-stop）：needs-human 停滞根因治理——p90 停留超停摆线"
+  # ---- 错误（质量逃逸面）----
+  - key: escape-sustained
+    class: error
+    description: 逃逸率双窗>0 持续（[auto-revert]+post-merge P0——北极星护栏 red）
+    metric_path: north_star.guardrails.escape_rate_sustained.status
+    op: eq
+    threshold: red
+    spec_title: "IR 候选（反馈边 escape-sustained）：逃逸持续双窗——质量逃逸根因与拦截面治理"
+  - key: revert-rate
+    class: error
+    description: 回滚率超阈值（北极星护栏 red——合并质量退化信号）
+    metric_path: north_star.guardrails.revert_rate.status
+    op: eq
+    threshold: red
+    spec_title: "IR 候选（反馈边 revert-rate）：回滚率超阈——合并质量退化根因治理"
+  - key: drill-red-rate
+    class: error
+    description: 演习红率低于目标（关卡漏检=检测面质量劣化，ADR-0069）
+    metric_path: north_star.guardrails.drill_red_rate.status
+    op: eq
+    threshold: red
+    spec_title: "IR 候选（反馈边 drill-red-rate）：演习红率不足——关卡漏检面排查"
+  - key: false-allow
+    class: error
+    description: 仲裁误放行窗口>0（ADR-0054 §7——判定正确性劣化信号）
+    metric_path: north_star.guardrails.false_allow.status
+    op: eq
+    threshold: red
+    spec_title: "IR 候选（反馈边 false-allow）：仲裁误放行——判定通道正确性治理"
+  # ---- 用量（成本面）----
+  - key: per-ir-cost
+    class: usage
+    description: 单 IR 虚拟成本超反馈阈值（声明价口径失控速率——宪法 §8 成本面）
+    metric_path: metrics.cost.per_ir_usd
+    op: gt
+    threshold: 60.0      # 反馈阈值（护栏无此项——用量是趋势面非停摆面；与 metrics.yaml 独立声明）
+    spec_title: "IR 候选（反馈边 per-ir-cost）：单 IR 成本超阈——用量归账与归因治理"

@@ -1,0 +1,74 @@
+name: feedback-edge
+# R3→R1 反馈边（宪法 §11 回边 / IR-0006 W6-M2 / 卡 #424 / AC-8g+8h）
+#
+# 运行信号（错误/用量/SLO——管家账本 dashboard 机器可读 JSON）越反馈阈值 →
+# 自动生成候选 spec（type:intent+state:ir-draft）入 backlog。生成侧定位：
+# 签署门禁不豁免——owner 签署→spec→红队照走，本工作流结构性不可置
+# state:ir-signed（INV-01/BEH-01）。去重=open issue 带 feedback:<key> 即跳过
+# （RB-B2）；信号 pending=诚实跳过不造数（ADR-0073 决策 7）。
+# 节奏=每日（信号面日频足够；dashboard 每 15min 刷新，阈值告警有 dashboard
+# 互锁实时面——反馈边是 backlog 生成面非报警面）。审计经 butler-audit.sh
+# （AUDIT 行+影子），影子 relink 持久化 feedback-ledger 分支。
+on:
+  schedule:
+    - cron: "47 7 * * *" # 每日 07:47 UTC（错峰：避开 :33 env-drift/:17 butler-reconcile/:23 cost-check）
+  workflow_dispatch: {}
+
+permissions: {}
+
+# 串行化（同 env-drift 设计）：查去重→开卡非原子，并发会重复开候选
+concurrency:
+  group: feedback-edge
+  cancel-in-progress: false
+
+jobs:
+  edge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read  # 读 governance/ 生成器与 policy
+      issues: write   # 候选 spec 开卡+label 建（GITHUB_TOKEN 本仓写，最小权限）
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 反馈边求值（信号越阈→候选 spec；exit 2=infra fail-closed）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUTLER_TRIGGER: ${{ github.event_name }}
+          BUTLER_CARD: Cloudbird-Software/.github#424
+          BUTLER_TENANT: cloudbird-internal
+        run: |
+          set -o pipefail  # ADR-0032 同款：tee 不得吞 exit 码
+          python3 governance/feedback-edge.py | tee feedback-report.txt
+      - name: 影子账本落盘（feedback-ledger 分支，INV-12 审计持久化）
+        # 本地 shadow relink 续接 feedback-ledger 基链（双侧验链）后写回。
+        # always()：候选生成成功与 infra 故障（exit 2）时审计事件同样必须落账
+        # （append-only 纪律优先于本轮结论）。
+        if: ${{ always() }}
+        env:
+          FEEDBACK_LEDGER_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHADOW="governance/feedback/shadow-evidence.jsonl"
+          if [[ ! -s "$SHADOW" ]]; then
+            echo "OK 本轮无影子记录（audit_emit 未触发）——跳过（幂等）"
+            exit 0
+          fi
+          git config --global user.name feedback-edge-bot && git config --global user.email feedback-bot@users.noreply.github.com
+          if ! git clone --depth 1 "https://x-access-token:${FEEDBACK_LEDGER_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger -b feedback-ledger 2>/dev/null; then
+            git clone --depth 1 "https://x-access-token:${FEEDBACK_LEDGER_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger
+            git -C ledger checkout -b feedback-ledger
+          fi
+          BASE="ledger/$SHADOW"
+          mkdir -p "$(dirname "$BASE")"
+          [[ -f "$BASE" ]] || : > "$BASE"
+          python3 governance/evidence_shadow.py relink --base "$BASE" --local "$SHADOW" --out merged.jsonl
+          python3 governance/evidence_shadow.py verify --file merged.jsonl
+          cp merged.jsonl "$BASE"
+          # -f 必须（同 feishu/env 教训）：路径在 .gitignore（工作树 ephemeral 影子）
+          git -C ledger add -f "$SHADOW"
+          git -C ledger diff --cached --quiet && { echo "OK 影子无新增——不提交（幂等）"; exit 0; }
+          git -C ledger commit -m "feedback: 影子账本追加（IR-0006 W6-M2 反馈边，链验通过）"
+          for i in 1 2 3; do git -C ledger push "https://x-access-token:${FEEDBACK_LEDGER_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/feedback-ledger && break
+            git -C ledger pull --rebase "https://x-access-token:${FEEDBACK_LEDGER_TOKEN}@github.com/Cloudbird-Software/.github.git" feedback-ledger || true; sleep 5; done
