@@ -129,6 +129,19 @@ for k in ("cost_ratio_max", "latency_ratio_max"):
     assert float(p["regressions"][k]) >= 1
 PY
 
+# ---- W5-E2：波次注册表（waves.yaml——optimization 波次 exit gate 绑定）----
+python3 - "$DIR/governance/policy/waves.yaml" <<'PY' && ok "W5-OPT-1 波次注册合法（kind=optimization+exit_gate fail-closed 绑定）" || bad "waves.yaml 非法"
+import re, sys, yaml
+w = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+assert w["schema"] == "governance-waves/v1"
+v = next(x for x in w["waves"] if x["id"] == "W5-OPT-1")
+assert v["kind"] == "optimization"
+assert re.fullmatch(r"HO-[0-9]{4}@[0-9a-f]{8}", v["baseline_quad"])
+assert re.fullmatch(r"[0-9a-f]{40}", v["optimized"]["baseline_commit"])
+assert v["exit_gate"]["verdict_required"] == "green"   # fail-closed：红不得收口
+assert v["exit_gate"]["policy"] == "governance/policy/eval-gates.yaml"
+PY
+
 echo "----------------------------------------"
 echo "test-eval-gate: $([[ $FAIL -eq 0 ]] && echo PASS || echo "FAIL（$FAIL）")"
 exit $([[ $FAIL -eq 0 ]] && echo 0 || echo 1)
