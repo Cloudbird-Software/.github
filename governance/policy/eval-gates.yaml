@@ -1,0 +1,40 @@
+# eval-gates.yaml —— 非劣性 eval gate 家族（IR-0006 W5-E1 / AC-10b / BEH-08 / INV-01）
+#
+# 语义（fail-closed：required 家族任一不过=红，无默认绿）：
+#   non_inferiority —— candidate 逐指标不得比 baseline 差超 δ
+#                      （direction=higher：candidate ≥ baseline−δ；
+#                        direction=lower：candidate ≤ baseline+δ）
+#   cost            —— 成本回归上界：candidate.cost_usd ≤ baseline.cost_usd × cost_ratio_max
+#   latency         —— 延迟回归上界：candidate.latency_ms ≤ baseline.latency_ms × latency_ratio_max
+#   contamination   —— 污染检查：baseline 数据集 digest（holdout quad.dataset.sha256）
+#                      不得出现在优化输入面（inputs 清单文件）——评测数据进
+#                      优化材料=对考卷过拟合，红（宪法 §4B/§4E）
+#
+# 判定锚点机械（INV-01）：全部阈值数值+方向在此声明，eval-gate.py 只做
+# 谓词求值，零 LLM、零自报采信（沙箱自报数字不采信——指标须带 provenance
+# 来源 run/fixture 声明，eval-gate 逐字段复算比例）。
+#
+# 指标族（metrics）：eval-gate.py 对 baseline/candidate 报告里的每个此处
+# 声明的指标执法；报告缺声明指标=红（fail-closed，防"少报指标躲门槛"）。
+# δ 是绝对差（与指标同单位）；direction 声明优劣方向。
+family:
+  id: non-inferiority
+  version: 1
+  required: [non_inferiority, cost, latency, contamination]
+  baseline_ref: HO-0008@557ee371   # holdout eval-quad 基线（引用仅 id@sha8）
+metrics:
+  precision:                       # post-fix precision（0..1，ADR-0063 口径）
+    direction: higher
+    delta: 0.05
+  evaluated:                       # 分母规模（样本量塌缩=评测失效）
+    direction: higher
+    delta: 0
+  drop_rate:                       # 过滤率（宪法 §4E：过滤率本身是指标）
+    direction: lower
+    delta: 0.10
+regressions:
+  cost_ratio_max: 1.25             # 优化不得把评测成本抬高超 25%
+  latency_ratio_max: 1.30          # p50 延迟不得抬高超 30%
+contamination:
+  dataset_digest_ref: quad.dataset.sha256   # 从 holdout quad 引用的 digest 键
+  inputs_scan: substring            # inputs 清单内出现该 digest（或其前 16hex）=命中
