@@ -1,0 +1,8 @@
+# env-drift.yaml —— 环境对账检测面旋钮（IR-0006 W4-R1 / AC-8b / R3 旋钮）
+#
+# scope=对账检测面（environments/<name>.yaml 中的名字）。R3 先行旋钮：
+# dev/staging 入检测面；prod 不在检测面（云内网生产环境后置——对账引擎
+# 会对 scope 外环境输出 SKIP 行，scope 断言进对账 run 日志=账本）。
+scope:
+  - dev-self
+  - staging-self

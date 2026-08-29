@@ -1,0 +1,137 @@
+name: env-drift
+# 云内网环境对账（宪法 GM-1 模式复用 / IR-0006 W4-R1 / 卡 #418 / BEH-04 / ADR-0103 决策 8）
+# drift 引擎泛化：GitHub org 对账（governance-drift）→ 环境对账。env-defs 仓
+# environments/*.yaml=期望态 × reports/*.yaml=实况快照（IFACE-05），逐环境深
+# diff（owner-fill 骨架值跳过）。scope 旋钮=policy/env-drift.yaml（R3：
+# dev/staging，prod 不在检测面——scope 断言进对账 run 日志=账本，AC-8b）。
+# 漂移→开 issue（含偏差面；指纹去重）→消除自动关（GM-1 同款）。审计经
+# butler-audit.sh：AUDIT 行+影子（relink 持久化 env-ledger 分支=evidence-query
+# 第 7 源）。骨架期节奏=每日（环境变更低频；真实上报器上线后可加密）。
+on:
+  schedule:
+    - cron: "33 7 * * *" # 每日 07:33 UTC（错峰：避开 :17 butler-reconcile/:18 auto-fix/:23 cost-check/整点 governance-drift）
+  workflow_dispatch: {}
+
+permissions: {}
+
+# 串行化（同 governance-drift 设计）：开 issue 的"查指纹→写评论"非原子，
+# 并发运行会重复开 issue；环境对账克隆+diff 只读不写 env-defs
+concurrency:
+  group: env-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # 读 governance/ 引擎与 policy；env-defs clone 走 GOVERNANCE_TOKEN
+      issues: write  # 漂移 issue 开/评论/关（GITHUB_TOKEN 本仓写，最小权限分离）
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 环境对账（exit 1=漂移 2=infra；scope 断言+DRIFT 行进日志）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }} # clone env-defs 私有仓（缺=exit 2 fail-closed）
+          BUTLER_TRIGGER: ${{ github.event_name }}
+          BUTLER_CARD: Cloudbird-Software/.github#418
+          BUTLER_TENANT: cloudbird-internal
+        run: |
+          set -o pipefail  # GM-1 同款（ADR-0032）：tee 不得吞 exit 码
+          python3 governance/env-drift.py | tee env-drift-report.txt
+      - name: 发现漂移则开 issue（幂等；分通道——ADR-0021 同款）
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! grep -q '^DRIFT' env-drift-report.txt 2>/dev/null; then
+            TITLE="env-drift 运行失败（基础设施故障——非漂移）"
+            FP="infra:$(grep -E '^(FATAL|##\[error\])' env-drift-report.txt 2>/dev/null | sed -E 's/run [0-9]+/run <ID>/g' | sort -u | sha256sum | cut -d' ' -f1)"
+            BODY="env-drift 检测器自身故障（运行 #${{ github.run_id }}）——报告无 DRIFT 行，判定通道与漂移分离（ADR-0021）。
+
+          $(cat env-drift-report.txt 2>/dev/null || echo "（报告文件缺失）")
+
+          处置：多为 GOVERNANCE_TOKEN 失效/env-defs clone 故障（勿改期望态——环境本身未检出漂移）。
+
+          @randypanding
+
+          <!-- drift-fingerprint: $FP -->"
+          else
+            TITLE="环境漂移检测：env-defs 期望态与实况快照不一致"
+            # 指纹=稳定漂移集合（DRIFT 行排序去重哈希——RB-B2 去重同款；reported_at
+            # 等时间戳不进 DRIFT 行，天然稳定）
+            FP=$(grep '^DRIFT' env-drift-report.txt | sort -u | sha256sum | cut -d' ' -f1)
+            BODY="自动化检测发现以下环境漂移（运行 #${{ github.run_id }}，BEH-04/GM-1）：
+
+          $(cat env-drift-report.txt)
+
+          修复：实况面修齐（env-defs 仓 reports/<env>.yaml 上报面）或期望态变更（environments/ PR）。
+
+          @randypanding
+
+          <!-- drift-fingerprint: $FP -->"
+          fi
+          LABEL="env-drift-report"
+          gh label create "$LABEL" --repo "$REPO" --description "env-drift 工作流自动报告（勿手工使用）" --color d73a4a >/dev/null 2>&1 || true
+          EXISTING=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq 'length')
+          if [[ "$EXISTING" != "0" ]]; then
+            NUM=$(gh issue list --repo "$REPO" --state open --label "$LABEL" --json number --jq '.[0].number')
+            COMMENTS=$(gh issue view "$NUM" --repo "$REPO" --json comments --jq '[.comments[].body] | join("\n---\n")')
+            if grep -qF "drift-fingerprint: $FP" <<<"$COMMENTS"; then
+              echo "漂移指纹 $FP 已在 #$NUM 报告过且内容未变化，跳过重复评论（RB-B2 去重）"
+            else
+              gh issue comment "$NUM" --repo "$REPO" --body "$BODY"
+            fi
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$BODY" --label "$LABEL"
+          fi
+      - name: 漂移消除则关闭 issue（GM-1 同款：全绿=漂移已消除）
+        if: success() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          NUMS=$(gh issue list --repo "$REPO" --state open --label "env-drift-report" --json number --jq '.[].number')
+          if [[ -z "$NUMS" ]]; then
+            echo "无本检测器的 open 漂移 issue"; exit 0
+          fi
+          for NUM in $NUMS; do
+            gh issue comment "$NUM" --repo "$REPO" --body "环境漂移已消除（运行 #${{ github.run_id }} 全绿）。自动关闭；如复现将重新开启新报告。"
+            gh issue close "$NUM" --repo "$REPO" --reason completed
+            echo "closed #$NUM"
+          done
+      - name: 影子账本落盘（env-ledger 分支，IR-0006 W4-R1 / BEH-03）
+        # env 源影子持久化：本地 shadow-evidence.jsonl relink 续接 env-ledger
+        # 基链（双侧验链，防覆盖掩盖篡改）后写回。always()：漂移检出（exit 1）与
+        # infra 故障（exit 2）时审计事件同样必须落账（append-only 纪律优先于本轮结论）。
+        if: ${{ always() }}
+        env:
+          ENV_DRILL_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHADOW="governance/env/shadow-evidence.jsonl"
+          if [[ ! -s "$SHADOW" ]]; then
+            echo "OK 本轮无影子记录（audit_emit 未触发）——跳过（幂等）"
+            exit 0
+          fi
+          git config --global user.name env-drift-bot && git config --global user.email env-bot@users.noreply.github.com
+          if ! git clone --depth 1 "https://x-access-token:${ENV_DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger -b env-ledger 2>/dev/null; then
+            git clone --depth 1 "https://x-access-token:${ENV_DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger
+            git -C ledger checkout -b env-ledger
+          fi
+          BASE="ledger/$SHADOW"
+          # 先建目录再创世（feishu-drill run 33252766738 实测教训：父目录不在 main）
+          mkdir -p "$(dirname "$BASE")"
+          [[ -f "$BASE" ]] || : > "$BASE"
+          python3 governance/evidence_shadow.py relink --base "$BASE" --local "$SHADOW" --out merged.jsonl
+          python3 governance/evidence_shadow.py verify --file merged.jsonl
+          cp merged.jsonl "$BASE"
+          # -f 必须（feishu-drill run 33252965116 实测教训）：路径在 .gitignore
+          # （工作树 ephemeral 影子），账本分支是持久化真源
+          git -C ledger add -f "$SHADOW"
+          git -C ledger diff --cached --quiet && { echo "OK 影子无新增——不提交（幂等）"; exit 0; }
+          git -C ledger commit -m "env: 影子账本追加（IR-0006 W4-R1 对账，链验通过）"
+          for i in 1 2 3; do git -C ledger push "https://x-access-token:${ENV_DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/env-ledger && break
+            git -C ledger pull --rebase "https://x-access-token:${ENV_DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" env-ledger || true; sleep 5; done

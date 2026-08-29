@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# evidence-query.sh —— 六源统一证据查询（IR-0006 W1-B2/W3-F1 / BEH-03 / ADR-0103，AC-4a）
+# evidence-query.sh —— 七源统一证据查询（IR-0006 W1-B2/W3-F1/W4-R1 / BEH-03 / ADR-0103，AC-4a）
 #
 # 一条命令跨源拉取 schema v1 影子账本、逐源验链（fail-closed：链断=红）、
 # 按时间归并输出统一 JSONL（stdout）+ 分源统计（stderr）：
@@ -15,6 +15,9 @@
 #   （W3-F1 飞书多维表格投影同步/对账/重建演练事件——payload 带每轮 api_calls
 #    计数=AC-7a 调用账本可查询锚点；日常 15min 轮影子随 runner 销毁=丢弃层，
 #    本源只含 drill 持久化轮）
+#   源 7  env        Cloudbird-Software/.github      @ env-ledger      governance/env/shadow-evidence.jsonl
+#   （W4-R1 云内网环境对账事件——每轮 scope 断言+漂移计数=AC-8b 对账日志
+#    可查询锚点）
 #
 # 用法:
 #   bash governance/evidence-query.sh [--card owner/repo#n] [--json]   # --json=汇总行也走 stdout
@@ -79,22 +82,24 @@ BUTLER_OK=0; fetch_file "Cloudbird-Software/.github" "butler-ledger" "governance
 ELEV_OK=0; fetch_file "Cloudbird-Software/.github" "elevation-ledger" "governance/elevation/shadow-evidence.jsonl" "$TMP/elev.jsonl" && ELEV_OK=1 || [[ $? -eq 1 ]] || exit 2
 TICKET_OK=0; fetch_file "Cloudbird-Software/cnb-bridge" "tickets-ledger" "tickets.jsonl" "$TMP/tickets.jsonl" && TICKET_OK=1 || [[ $? -eq 1 ]] || exit 2
 FEISHU_OK=0; fetch_file "Cloudbird-Software/.github" "feishu-ledger" "governance/feishu/shadow-evidence.jsonl" "$TMP/feishu.jsonl" && FEISHU_OK=1 || [[ $? -eq 1 ]] || exit 2
+ENVD_OK=0; fetch_file "Cloudbird-Software/.github" "env-ledger" "governance/env/shadow-evidence.jsonl" "$TMP/envd.jsonl" && ENVD_OK=1 || [[ $? -eq 1 ]] || exit 2
 
 # ---- 逐源验链 + 归并输出（链断=exit 3：不可信数据不出结果） ----
-export CARD_FILTER JSON_ONLY DRILL_OK BUTLER_OK ELEV_OK TICKET_OK FEISHU_OK
-python3 - "$DIR/evidence_shadow.py" "$SRC_METER" "$TMP/drill.jsonl" "$TMP/butler.jsonl" "$TMP/elev.jsonl" "$TMP/tickets.jsonl" "$TMP/feishu.jsonl" "$TMP" <<'PYEOF'
+export CARD_FILTER JSON_ONLY DRILL_OK BUTLER_OK ELEV_OK TICKET_OK FEISHU_OK ENVD_OK
+python3 - "$DIR/evidence_shadow.py" "$SRC_METER" "$TMP/drill.jsonl" "$TMP/butler.jsonl" "$TMP/elev.jsonl" "$TMP/tickets.jsonl" "$TMP/feishu.jsonl" "$TMP/envd.jsonl" "$TMP" <<'PYEOF'
 import glob, json, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
 import evidence_shadow  # noqa: E402  验链与 CI-Workflows 侧同源语义
 
-metering_dir, drill_f, butler_f, elev_f, tickets_f, feishu_f, tmp = sys.argv[2:9]
+metering_dir, drill_f, butler_f, elev_f, tickets_f, feishu_f, envd_f, tmp = sys.argv[2:10]
 sources = {"metering": sorted(glob.glob(os.path.join(metering_dir, "shadow-evidence-*.jsonl"))),
            "drill": [drill_f] if os.environ.get("DRILL_OK") == "1" else [],
            "butler": [butler_f] if os.environ.get("BUTLER_OK") == "1" else [],
            "elevation": [elev_f] if os.environ.get("ELEV_OK") == "1" else [],
            "tickets": [tickets_f] if os.environ.get("TICKET_OK") == "1" else [],
-           "feishu": [feishu_f] if os.environ.get("FEISHU_OK") == "1" else []}
+           "feishu": [feishu_f] if os.environ.get("FEISHU_OK") == "1" else [],
+           "env": [envd_f] if os.environ.get("ENVD_OK") == "1" else []}
 errs, recs = [], []
 for src, files in sources.items():
     for f in files:
@@ -117,7 +122,7 @@ for r in out:
 
 summary = {
     "total": len(out),
-    "by_source": {s: sum(1 for r in out if r["source"] == s) for s in ("metering", "drill", "butler", "elevation", "tickets", "feishu")},
+    "by_source": {s: sum(1 for r in out if r["source"] == s) for s in ("metering", "drill", "butler", "elevation", "tickets", "feishu", "env")},
     "by_tenant": {},
     "by_card_top": {},
 }
