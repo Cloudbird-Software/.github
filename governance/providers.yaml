@@ -35,3 +35,18 @@ entries:
     entry: scripts/gh-app-token.sh（单仓作用域 1h 令牌）
     secrets: [CB_APP_ID, AGENT_APP_SECRET]
     note: cloudbrid-agent（开发）+ verifier-app（仅测试/验证路径写权，ADR-0076）
+  # ---- IR-0006 W1-C1（ADR-0103）：云内网入图 ----------------------------------
+  # 三面分离：本二条目=执行面资产申报（判定锚点恒在 GitHub CI，不随池增减改变）
+  - name: self-cloud-pool
+    kind: compute           # 自有云内网算力池（公网服务器+云电脑池）
+    entry: 服务器调度器（W2-C1 落地；过渡期=PM 会话经公网服务器驱动云电脑池）
+    placement: server-anchored（池化以服务器为锚，ADR-0103 决策 4）
+    secrets: []             # 凭据一律走内网域 Vault（本条目零 org secret——分域边界）
+    catalog: governance/assets-register.yaml（资产归属/额度/license 边界）
+    removal: 可删除层（同 CNB 模式：删除后 gate/org-gate/conductor 判定语义不变，EX-1 延伸断言）
+    note: 执行面基础设施≠harness（自建判据 ≥3 次妥协不变）；worker egress allowlist+W2-C1 起执法
+  - name: vault
+    kind: secret            # 内网 Vault（执行面凭据面）
+    entry: 内网 Vault 实例（物理在内网域；org 不持有其副本）
+    scope: 执行面内网域 only（非 org secret 面——两分域互不重叠）
+    note: agent/PM 上下文零凭据不变（INV 纪律）；PM 令牌收敛后=服务器代签的中介（W2-C2）
