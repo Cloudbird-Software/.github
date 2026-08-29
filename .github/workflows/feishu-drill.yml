@@ -70,10 +70,12 @@ jobs:
             git -C ledger checkout -b feishu-ledger
           fi
           BASE="ledger/$SHADOW"
+          # 先建目录再创世：governance/feishu/ 不在 main（工作树内是 gitignore 的
+          # ephemeral 影子），首建 feishu-ledger 时 [[ -f ]]||: > 会因父目录缺失而炸
+          mkdir -p "$(dirname "$BASE")"
           [[ -f "$BASE" ]] || : > "$BASE"
           python3 governance/evidence_shadow.py relink --base "$BASE" --local "$SHADOW" --out merged.jsonl
           python3 governance/evidence_shadow.py verify --file merged.jsonl
-          mkdir -p "ledger/governance/feishu"
           cp merged.jsonl "$BASE"
           git -C ledger add "$SHADOW"
           git -C ledger diff --cached --quiet && { echo "OK 影子无新增——不提交（幂等）"; exit 0; }
