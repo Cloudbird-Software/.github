@@ -13,3 +13,4 @@ env-defs/
 # 工作树内的副本是 ephemeral 运行产物——不入库）
 governance/butler/shadow-evidence.jsonl
 governance/feishu/shadow-evidence.jsonl
+governance/env/shadow-evidence.jsonl

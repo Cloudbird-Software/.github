@@ -180,13 +180,25 @@ python3 "$DIR/governance/evidence_shadow.py" append --file "$FEISHU" --event-fil
   && python3 "$DIR/governance/evidence_shadow.py" verify --file "$FEISHU" >/dev/null \
   && pass "feishu 影子验链绿（投影同步事件+api_calls payload）" || fail "feishu 影子链断"
 
-# ---- evidence-query 六源统一查询（AC-4a：归并 + 验链 + fail-closed） ----
+# ---- env 环境对账事件（W4-R1 / AC-8b：evidence-query 第 7 源，对账日志入账本） ----
+ENVD="$TMP/envd.jsonl"
+cat >"$TMP/ed1.json" <<'EOF'
+{"ts": "2026-08-29T07:33:10Z", "kind": "gate", "action": "butler-env-drift", "verdict": "ok",
+ "subject": {"card": "Cloudbird-Software/.github#418", "tenant": "cloudbird-internal"},
+ "actor": {"identity": "env-drift", "role": "bot"},
+ "payload": "{\"scope\": [\"dev-self\", \"staging-self\"], \"checked\": 2, \"drifts\": 0}"}
+EOF
+python3 "$DIR/governance/evidence_shadow.py" append --file "$ENVD" --event-file "$TMP/ed1.json" >/dev/null \
+  && python3 "$DIR/governance/evidence_shadow.py" verify --file "$ENVD" >/dev/null \
+  && pass "env 影子验链绿（对账日志事件+scope/drifts payload）" || fail "env 影子链断"
+
+# ---- evidence-query 七源统一查询（AC-4a：归并 + 验链 + fail-closed） ----
 GHSTUB="$TMP/gh-stub"
 mkdir -p "$TMP/fixtures"
-# fixture：metering=周分片列表（$SHADOW）；drill/butler/elevation/feishu=各自影子（独立成链）；tickets=短票据链
-python3 - "$SHADOW" "$DSHADOW" "$BUTLER_SHADOW" "$ESHADOW" "$TICKETS" "$FEISHU" "$TMP/fixtures" <<'PYEOF'
+# fixture：metering=周分片列表（$SHADOW）；drill/butler/elevation/feishu/env=各自影子（独立成链）；tickets=短票据链
+python3 - "$SHADOW" "$DSHADOW" "$BUTLER_SHADOW" "$ESHADOW" "$TICKETS" "$FEISHU" "$ENVD" "$TMP/fixtures" <<'PYEOF'
 import base64, json, sys
-shadow, dshadow, bshadow, eshadow, tickets, feishu, fixdir = sys.argv[1:8]
+shadow, dshadow, bshadow, eshadow, tickets, feishu, envd, fixdir = sys.argv[1:9]
 b64 = lambda p: base64.b64encode(open(p, "rb").read()).decode()
 json.dump([{"type": "file", "name": "shadow-evidence-2026-W35.jsonl", "content": b64(shadow)}],
           open(f"{fixdir}/metering-list.json", "w"))
@@ -195,6 +207,7 @@ json.dump({"type": "file", "content": b64(bshadow)}, open(f"{fixdir}/butler.json
 json.dump({"type": "file", "content": b64(eshadow)}, open(f"{fixdir}/elev.json", "w"))
 json.dump({"type": "file", "content": b64(tickets)}, open(f"{fixdir}/tickets.json", "w"))
 json.dump({"type": "file", "content": b64(feishu)}, open(f"{fixdir}/feishu.json", "w"))
+json.dump({"type": "file", "content": b64(envd)}, open(f"{fixdir}/envd.json", "w"))
 PYEOF
 cat >"$GHSTUB" <<'STUBEOF'
 #!/usr/bin/env bash
@@ -231,6 +244,11 @@ case "$url" in
       echo "gh: No commit found for the ref feishu-ledger (HTTP 404)" >&2; exit 1
     fi
     cat "$F/feishu.json" ;;
+  "repos/Cloudbird-Software/.github/contents/governance/env/shadow-evidence.jsonl?ref=env-ledger")
+    if [[ "${GH_STUB_ENVD_MISSING:-}" == "1" ]]; then
+      echo "gh: No commit found for the ref env-ledger (HTTP 404)" >&2; exit 1
+    fi
+    cat "$F/envd.json" ;;
   *) echo "gh-stub: 意外 URL $url" >&2; exit 1 ;;
 esac
 STUBEOF
@@ -239,11 +257,11 @@ nlines() { grep -c . <<<"$1" || true; }  # 非空行计数（wc 对空 herestrin
 QOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/q.err"); QRC=$?
 N=$(nlines "$QOUT")
-[[ $QRC -eq 0 && "$N" -eq 9 ]] && pass "统一查询归并六源（9 条，rc=0）" || fail "统一查询（rc=$QRC 行=$N）"
+[[ $QRC -eq 0 && "$N" -eq 10 ]] && pass "统一查询归并七源（10 条，rc=0）" || fail "统一查询（rc=$QRC 行=$N）"
 grep -q '"source":"metering"' <<<"$QOUT" && grep -q '"source":"drill"' <<<"$QOUT" && grep -q '"source":"butler"' <<<"$QOUT" \
   && grep -q '"source":"elevation"' <<<"$QOUT" && grep -q '"source":"tickets"' <<<"$QOUT" \
-  && grep -q '"source":"feishu"' <<<"$QOUT" \
-  && pass "六源标记齐全（source 字段）" || fail "source 标记缺失"
+  && grep -q '"source":"feishu"' <<<"$QOUT" && grep -q '"source":"env"' <<<"$QOUT" \
+  && pass "七源标记齐全（source 字段）" || fail "source 标记缺失"
 grep -q '^SUMMARY ' "$TMP/q.err" && grep -Eq '"metering": ?2' "$TMP/q.err" \
   && pass "分源统计（stderr SUMMARY）" || fail "SUMMARY 统计缺失"
 # --card 过滤：metering 影子绑 #407，drill/butler 哨兵 #0，elevation 绑 #415
@@ -271,38 +289,50 @@ FQN=$(nlines "$FQOUT")
 [[ $FQRC -eq 0 && "$FQN" -eq 1 ]] && grep -q '"source":"feishu"' <<<"$FQOUT" \
   && grep -q '"butler-feishu-sync"' <<<"$FQOUT" && grep -q 'api_calls' <<<"$FQOUT" \
   && pass "AC-7a feishu 同步事件 subject 可查询（#416 → 1 条，payload 带 api_calls）" || fail "feishu 查询（rc=$FQRC 行=$FQN）"
+# AC-8b：env 对账日志按 subject 可查询（#418 → 1 条，payload 带 scope/drifts）
+EDOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub \
+  bash "$DIR/governance/evidence-query.sh" --card Cloudbird-Software/.github#418 2>/dev/null); EDRC=$?
+EDN=$(nlines "$EDOUT")
+[[ $EDRC -eq 0 && "$EDN" -eq 1 ]] && grep -q '"source":"env"' <<<"$EDOUT" \
+  && grep -q '"butler-env-drift"' <<<"$EDOUT" && grep -q 'scope' <<<"$EDOUT" \
+  && pass "AC-8b env 对账日志 subject 可查询（#418 → 1 条，payload 带 scope）" || fail "env 查询（rc=$EDRC 行=$EDN）"
 # 源缺席（404）：过渡期合法，非红（须在篡改 fixture 生成前跑——桩对篡改片优先回放）
 MOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=1 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/m.err"); MRC=$?
 MN=$(nlines "$MOUT")
-[[ $MRC -eq 0 && "$MN" -eq 8 ]] && pass "butler 源缺席（404）→ 跳过非红（8 条）" || fail "源缺席误红（rc=$MRC 行=$MN）"
+[[ $MRC -eq 0 && "$MN" -eq 9 ]] && pass "butler 源缺席（404）→ 跳过非红（9 条）" || fail "源缺席误红（rc=$MRC 行=$MN）"
 # 源缺席（404 第二报文形态——账本分支未建 "No ref found"）：同跳过非红
 # （2026-08-29 波次通道实测回归：该形态曾被误判"非 404"→ INFRA exit 2）
 ROUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=2 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/r.err"); RRC=$?
 RN=$(nlines "$ROUT")
-[[ $RRC -eq 0 && "$RN" -eq 8 ]] && pass "源缺席（No ref found 分支未建）→ 跳过非红（8 条）" || fail "分支未建误红（rc=$RRC 行=$RN）"
+[[ $RRC -eq 0 && "$RN" -eq 9 ]] && pass "源缺席（No ref found 分支未建）→ 跳过非红（9 条）" || fail "分支未建误红（rc=$RRC 行=$RN）"
 # 源缺席（404 第三报文形态——分支缺失 "No commit found for the ref"，本地实测
 # 真实报文）：按 HTTP 404 状态码判定后同跳过非红
 COUT2=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=3 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/c2.err"); C2RC=$?
 C2N=$(nlines "$COUT2")
-[[ $C2RC -eq 0 && "$C2N" -eq 8 ]] && pass "源缺席（No commit found for the ref）→ 跳过非红（8 条）" || fail "分支缺失误红（rc=$C2RC 行=$C2N）"
+[[ $C2RC -eq 0 && "$C2N" -eq 9 ]] && pass "源缺席（No commit found for the ref）→ 跳过非红（9 条）" || fail "分支缺失误红（rc=$C2RC 行=$C2N）"
 # 源缺席（elevation 第 4 源分支未建——"No commit found"）：同跳过非红
 EOUT2=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_ELEV_MISSING=1 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/e2.err"); E2RC=$?
 E2N=$(nlines "$EOUT2")
-[[ $E2RC -eq 0 && "$E2N" -eq 8 ]] && pass "elevation 源缺席（分支未建）→ 跳过非红（8 条）" || fail "elevation 缺席误红（rc=$E2RC 行=$E2N）"
+[[ $E2RC -eq 0 && "$E2N" -eq 9 ]] && pass "elevation 源缺席（分支未建）→ 跳过非红（9 条）" || fail "elevation 缺席误红（rc=$E2RC 行=$E2N）"
 # tickets 第 5 源缺席（分支未建）：同跳过非红（REMOVAL 语义：源消失≠链断）
 TKOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_TICKETS_MISSING=1 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/tk.err"); TKRC=$?
 TKQN=$(nlines "$TKOUT")
-[[ $TKRC -eq 0 && "$TKQN" -eq 7 ]] && pass "tickets 源缺席（分支未建）→ 跳过非红（7 条）" || fail "tickets 缺席误红（rc=$TKRC 行=$TKQN）"
+[[ $TKRC -eq 0 && "$TKQN" -eq 8 ]] && pass "tickets 源缺席（分支未建）→ 跳过非红（8 条）" || fail "tickets 缺席误红（rc=$TKRC 行=$TKQN）"
 # feishu 第 6 源缺席（分支未建——投影未开通的过渡期常态）：同跳过非红
 FOUT2=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_FEISHU_MISSING=1 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/f2.err"); F2RC=$?
 F2N=$(nlines "$FOUT2")
-[[ $F2RC -eq 0 && "$F2N" -eq 8 ]] && pass "feishu 源缺席（分支未建=投影未开通过渡期）→ 跳过非红（8 条）" || fail "feishu 缺席误红（rc=$F2RC 行=$F2N）"
+[[ $F2RC -eq 0 && "$F2N" -eq 9 ]] && pass "feishu 源缺席（分支未建=投影未开通过渡期）→ 跳过非红（9 条）" || fail "feishu 缺席误红（rc=$F2RC 行=$F2N）"
+# env 第 7 源缺席（分支未建=W4-R1 对账未跑的过渡期常态）：同跳过非红
+EVOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_ENVD_MISSING=1 \
+  bash "$DIR/governance/evidence-query.sh" 2>"$TMP/ev.err"); EVRC=$?
+EVN=$(nlines "$EVOUT")
+[[ $EVRC -eq 0 && "$EVN" -eq 9 ]] && pass "env 源缺席（分支未建=对账未跑过渡期）→ 跳过非红（9 条）" || fail "env 缺席误红（rc=$EVRC 行=$EVN）"
 # 负向：任一源链断 → exit 3 且 stdout 零输出（不可信数据不出结果）
 python3 - "$TMP/fixtures" <<'PYEOF'
 import base64, json, sys
