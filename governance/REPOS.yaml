@@ -179,6 +179,17 @@ repos:
     key_paths: [accounts.yaml, cnb_pool.py, work-inbox.yaml, REMOVAL.md]
     entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
+  - name: env-defs
+    layer: L0
+    visibility: public
+    status: active
+    role: 环境期望态定义仓（三面分离声明面载体，IR-0006 W1-C2 / ADR-0103 决策 5）——
+      environments/*.yaml 声明云内网 dev/staging 期望态（topology/allowlist/Vault
+      引用/tenant）；reports/ 为漂移快照落点（W4-R1 泛化 drift 对账引擎消费）；
+      secret 只记引用名值永不进 git（INV-04）
+    key_paths: [environments/, reports/]
+    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
+
 
 # 上游依赖（ADR-0085：openjiuwen 双上游随编排框架退役停止消费；未来引入新上游时
 # 恢复本节声明——部署渲染 pin tag 的治理方式不变）
