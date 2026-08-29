@@ -1,7 +1,9 @@
 # 统一证据账本·标准（v1）
 
 > IR-0006 W1-B1 / ADR-0103。判定层记录 schema：[record.schema.yaml](record.schema.yaml)
-> （`$id: cloudbird/evidence-standard/record@1`）。
+> （`$id: cloudbird/evidence-standard/record@1`）；轨迹层指针协议：
+> [pointer.schema.yaml](pointer.schema.yaml)（`$id: cloudbird/evidence-standard/pointer@1`，
+> W1-B3）。
 
 ## 三层纪律（宪法 §14a / INV-06）
 
@@ -10,6 +12,20 @@
 | 判定层 | archive 仓 `evidence/` | gate 裁决/成本/审批/决策四类事件（BEH-01） | append-only + 链式 hash（INV-03）；payload 内联 ≤4096 字节，超限拒写 |
 | 轨迹层 | 云内网 blob | 大体积原始数据 | git 侧只存 `payload_ref`（sha256+store+retention，W1-B3） |
 | 丢弃层 | GitHub 事件面 | transient 事件 | 不承诺持久 |
+
+## 轨迹层指针协议（W1-B3 / AC-3d/3e）
+
+`payload_ref` 按指针协议 v1（[pointer.schema.yaml](pointer.schema.yaml)）产出：
+
+- **内容寻址**：blob 键由 sha256 派生（`objects/<sha[:2]>/<sha>`）；`store` 到
+  bucket 级（`self-cloud-blob://<bucket>`）。同内容必同地址，幂等去重。
+- **不可变**：同地址异内容=红（fail-closed）。
+- **保留策略**：受控词表 `30d/90d/180d/1y/3y/forever`；retention 只增不减
+  （同 blob 多指针取最长）；`stored_at` 为起算点，重 put 不重置。
+- **回取校验**：按指针回取必须重算 sha256 比对；不符/缺失=红且零输出
+  （宁红勿假，AC-3e）。
+- **内网最小实现**：`governance/blob-store.sh`（put/get/verify/sweep；
+  coreutils 即可运行，部署于内网服务器——判定锚点仍在 GitHub CI，INV-01/02）。
 
 ## OTel gen_ai.* 映射（字段命名对齐语义约定）
 
