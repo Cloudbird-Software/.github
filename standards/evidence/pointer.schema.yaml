@@ -1,0 +1,46 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "cloudbird/evidence-standard/pointer@1"
+title: Evidence trajectory-layer pointer (v1, IR-0006 W1-B3 / ADR-0103)
+description: |
+  轨迹层指针协议 v1——判定层记录 record@1 的 payload_ref 载荷契约
+  （宪法 §14a / INV-06：git 侧零 payload 本体，只存 sha256+store+保留策略）。
+
+  约定：
+  - 内容寻址：blob 键由 sha256 派生（objects/<sha[:2]>/<sha>）；store 标识到
+    bucket 级（self-cloud-blob://<bucket>），不携带对象键——同内容必同地址，
+    幂等去重（W1-C1 providers.yaml self-cloud-pool 执行面资产）。
+  - 不可变性：同地址重写不同内容=红（fail-closed，blob-store.sh put 执法）。
+  - 保留策略（EL-2 执行面）：受控词表；retention 只增不减——同 blob 多指针
+    引用时取最长保留（覆盖不改写已存 meta，sweep 按最长执行）。
+  - 回取校验（AC-3e）：按指针取回必须重算 sha256 比对；不符/缺失=红，
+    不输出可疑数据（宁红勿假）。
+  - 内网最小实现：governance/blob-store.sh（put/get/verify/sweep，coreutils
+    即可运行，部署于内网服务器；判定锚点仍在 GitHub CI——沙箱自报数字
+    不采信，INV-01/02）。
+
+  与 record@1 的关系：record.schema.yaml 的 payload_ref 子结构是本 schema 的
+  宽化超集（仅约束 sha256/store）；本 schema 是收紧的合法形态（+retention
+  必填+受控词表）。发射器产出的指针应按本 schema 自检后嵌入。
+type: object
+required: [sha256, store, retention]
+properties:
+  sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: "blob 内容 sha256（hex 小写）——内容寻址键与回取校验锚点"
+  store:
+    type: string
+    pattern: "^self-cloud-blob://[a-z0-9][a-z0-9-]{0,62}$"
+    description: "存储 bucket 级标识（内网内容寻址存储；键由 sha256 派生）"
+  retention:
+    enum: ["30d", "90d", "180d", "1y", "3y", "forever"]
+    description: "保留策略（EL-2 执行面；sweep 只删过期，retention 只增不减）"
+  bytes:
+    type: integer
+    minimum: 1
+    description: "blob 字节数（预检/容量对账用，可选）"
+  stored_at:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    description: "入库时间 ISO 8601 UTC（retention 起算点，可选）"
+additionalProperties: false
