@@ -151,12 +151,8 @@ class H(BaseHTTPRequestHandler):
                 recs.append({"record_id": f"rec{len(recs) + 1}", "fields": r["fields"]})
             wr(recs_file(tid), recs)
             self._send({"code": 0, "data": {}}); return
-        self._send({"code": 0, "data": {}})
-    def do_PUT(self):
-        p, body = self.path, self._body()
-        if os.path.isfile(ERR):
-            self._send({"code": 99999, "msg": "stub-injected-error"}); return
-        self._cap("PUT", body)
+        # batch_update / batch_delete 须 POST（真实 API 只认 POST 形态——PUT 被
+        # 400 拒，run 33254039067 实测；桩与真实语义对齐抓方法回归）
         if p.endswith("/batch_update"):
             tid = p.split("/tables/")[1].split("/")[0]
             recs = rd(recs_file(tid), [])
@@ -165,20 +161,29 @@ class H(BaseHTTPRequestHandler):
                     if e["record_id"] == r["record_id"]:
                         e["fields"].update(r["fields"])
             wr(recs_file(tid), recs)
+            self._send({"code": 0, "data": {}}); return
+        if p.endswith("/batch_delete"):
+            tid = p.split("/tables/")[1].split("/")[0]
+            recs = [e for e in rd(recs_file(tid), []) if e["record_id"] not in body["records"]]
+            wr(recs_file(tid), recs)
+            self._send({"code": 0, "data": {}}); return
+        self._send({"code": 0, "data": {}})
+    def do_PUT(self):
+        # 真实飞书面无 PUT 写路径（batch_update 已移 do_POST）——保留捕获用
+        p, body = self.path, self._body()
+        if os.path.isfile(ERR):
+            self._send({"code": 99999, "msg": "stub-injected-error"}); return
+        self._cap("PUT", body)
         self._send({"code": 0, "data": {}})
     def do_DELETE(self):
         p, body = self.path, self._body()
         if os.path.isfile(ERR):
             self._send({"code": 99999, "msg": "stub-injected-error"}); return
         self._cap("DELETE", body)
-        if "/records/batch_delete" in p:
-            tid = p.split("/tables/")[1].split("/")[0]
-            recs = [e for e in rd(recs_file(tid), []) if e["record_id"] not in body["records"]]
-            wr(recs_file(tid), recs)
-        else:  # 删表
-            tid = p.split("/tables/")[1].split("/")[0]
-            tables = [t for t in rd("tables.json", []) if t["table_id"] != tid]
-            wr("tables.json", tables)
+        # batch_delete 已移 do_POST（真实 API 只认 POST）；此处仅删表（--drop）
+        tid = p.split("/tables/")[1].split("/")[0]
+        tables = [t for t in rd("tables.json", []) if t["table_id"] != tid]
+        wr("tables.json", tables)
         self._send({"code": 0, "data": {}})
 port_file = os.path.join(TMP, "port")
 srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
