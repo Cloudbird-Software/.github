@@ -149,19 +149,39 @@ python3 "$DIR/governance/evidence_shadow.py" append --file "$ESHADOW" --event-fi
 python3 "$DIR/governance/evidence_shadow.py" verify --file "$ESHADOW" >/dev/null \
   && pass "elevation 影子验链绿" || fail "elevation 影子链断"
 
-# ---- evidence-query 四源统一查询（AC-4a：归并 + 验链 + fail-closed） ----
+# ---- tickets 短票据事件（W2-C1 / AC-5b：evidence-query 第 5 源，subject 可查询） ----
+TICKETS="$TMP/tickets.jsonl"
+cat >"$TMP/tk1.json" <<'EOF'
+{"ts": "2026-08-29T00:00:00Z", "kind": "approval", "action": "ticket.grant", "verdict": "pass",
+ "subject": {"card": "Cloudbird-Software/.github#412", "tenant": "cloudbird-internal"},
+ "actor": {"identity": "selfcloud-scheduler", "role": "bot"},
+ "payload": "{\"job_id\": \"job-t1\", \"ttl_minutes\": 30}"}
+EOF
+cat >"$TMP/tk2.json" <<'EOF'
+{"ts": "2026-08-29T00:30:00Z", "kind": "approval", "action": "ticket.revoke", "verdict": "pass",
+ "subject": {"card": "Cloudbird-Software/.github#412", "tenant": "cloudbird-internal"},
+ "actor": {"identity": "selfcloud-scheduler", "role": "bot"},
+ "payload": "{\"job_id\": \"job-t1\", \"reason\": \"ttl-expired\"}"}
+EOF
+python3 "$DIR/governance/evidence_shadow.py" append --file "$TICKETS" --event-file "$TMP/tk1.json" >/dev/null \
+  && python3 "$DIR/governance/evidence_shadow.py" append --file "$TICKETS" --event-file "$TMP/tk2.json" >/dev/null \
+  && python3 "$DIR/governance/evidence_shadow.py" verify --file "$TICKETS" >/dev/null \
+  && pass "tickets 影子验链绿（grant/revoke 双事件）" || fail "tickets 影子链断"
+
+# ---- evidence-query 五源统一查询（AC-4a：归并 + 验链 + fail-closed） ----
 GHSTUB="$TMP/gh-stub"
 mkdir -p "$TMP/fixtures"
-# fixture：metering=周分片列表（$SHADOW）；drill/butler/elevation=各自影子（独立成链）
-python3 - "$SHADOW" "$DSHADOW" "$BUTLER_SHADOW" "$ESHADOW" "$TMP/fixtures" <<'PYEOF'
+# fixture：metering=周分片列表（$SHADOW）；drill/butler/elevation=各自影子（独立成链）；tickets=短票据链
+python3 - "$SHADOW" "$DSHADOW" "$BUTLER_SHADOW" "$ESHADOW" "$TICKETS" "$TMP/fixtures" <<'PYEOF'
 import base64, json, sys
-shadow, dshadow, bshadow, eshadow, fixdir = sys.argv[1:6]
+shadow, dshadow, bshadow, eshadow, tickets, fixdir = sys.argv[1:7]
 b64 = lambda p: base64.b64encode(open(p, "rb").read()).decode()
 json.dump([{"type": "file", "name": "shadow-evidence-2026-W35.jsonl", "content": b64(shadow)}],
           open(f"{fixdir}/metering-list.json", "w"))
 json.dump({"type": "file", "content": b64(dshadow)}, open(f"{fixdir}/drill.json", "w"))
 json.dump({"type": "file", "content": b64(bshadow)}, open(f"{fixdir}/butler.json", "w"))
 json.dump({"type": "file", "content": b64(eshadow)}, open(f"{fixdir}/elev.json", "w"))
+json.dump({"type": "file", "content": b64(tickets)}, open(f"{fixdir}/tickets.json", "w"))
 PYEOF
 cat >"$GHSTUB" <<'STUBEOF'
 #!/usr/bin/env bash
@@ -185,9 +205,14 @@ case "$url" in
     cat "$F/butler.json" ;;
   "repos/Cloudbird-Software/.github/contents/governance/elevation/shadow-evidence.jsonl?ref=elevation-ledger")
     if [[ "${GH_STUB_ELEV_MISSING:-}" == "1" ]]; then
-      echo 'gh: No commit found for the ref elevation-ledger (HTTP 404)' >&2; exit 1
+      echo "gh: No commit found for the ref elevation-ledger (HTTP 404)" >&2; exit 1
     fi
     cat "$F/elev.json" ;;
+  "repos/Cloudbird-Software/cnb-bridge/contents/tickets.jsonl?ref=tickets-ledger")
+    if [[ "${GH_STUB_TICKETS_MISSING:-}" == "1" ]]; then
+      echo "gh: No commit found for the ref tickets-ledger (HTTP 404)" >&2; exit 1
+    fi
+    cat "$F/tickets.json" ;;
   *) echo "gh-stub: 意外 URL $url" >&2; exit 1 ;;
 esac
 STUBEOF
@@ -196,10 +221,10 @@ nlines() { grep -c . <<<"$1" || true; }  # 非空行计数（wc 对空 herestrin
 QOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/q.err"); QRC=$?
 N=$(nlines "$QOUT")
-[[ $QRC -eq 0 && "$N" -eq 6 ]] && pass "统一查询归并四源（6 条，rc=0）" || fail "统一查询（rc=$QRC 行=$N）"
+[[ $QRC -eq 0 && "$N" -eq 8 ]] && pass "统一查询归并五源（8 条，rc=0）" || fail "统一查询（rc=$QRC 行=$N）"
 grep -q '"source":"metering"' <<<"$QOUT" && grep -q '"source":"drill"' <<<"$QOUT" && grep -q '"source":"butler"' <<<"$QOUT" \
-  && grep -q '"source":"elevation"' <<<"$QOUT" \
-  && pass "四源标记齐全（source 字段）" || fail "source 标记缺失"
+  && grep -q '"source":"elevation"' <<<"$QOUT" && grep -q '"source":"tickets"' <<<"$QOUT" \
+  && pass "五源标记齐全（source 字段）" || fail "source 标记缺失"
 grep -q '^SUMMARY ' "$TMP/q.err" && grep -Eq '"metering": ?2' "$TMP/q.err" \
   && pass "分源统计（stderr SUMMARY）" || fail "SUMMARY 统计缺失"
 # --card 过滤：metering 影子绑 #407，drill/butler 哨兵 #0，elevation 绑 #415
@@ -213,28 +238,40 @@ EOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub \
 EN=$(nlines "$EOUT")
 [[ $ERC -eq 0 && "$EN" -eq 1 ]] && grep -q '"source":"elevation"' <<<"$EOUT" \
   && pass "AC-9c elevation 记录 subject 可查询（#415 → 1 条）" || fail "elevation 查询（rc=$ERC 行=$EN）"
+# AC-5b：短票据 grant/revoke 事件按 subject 可查询（#412 → 2 条，source=tickets）
+TQOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub \
+  bash "$DIR/governance/evidence-query.sh" --card Cloudbird-Software/.github#412 2>/dev/null); TQRC=$?
+TQN=$(nlines "$TQOUT")
+[[ $TQRC -eq 0 && "$TQN" -eq 2 ]] && grep -q '"source":"tickets"' <<<"$TQOUT" \
+  && grep -q '"ticket.grant"' <<<"$TQOUT" && grep -q '"ticket.revoke"' <<<"$TQOUT" \
+  && pass "AC-5b tickets 短票据事件 subject 可查询（#412 → 2 条）" || fail "tickets 查询（rc=$TQRC 行=$TQN）"
 # 源缺席（404）：过渡期合法，非红（须在篡改 fixture 生成前跑——桩对篡改片优先回放）
 MOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=1 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/m.err"); MRC=$?
 MN=$(nlines "$MOUT")
-[[ $MRC -eq 0 && "$MN" -eq 5 ]] && pass "butler 源缺席（404）→ 跳过非红（5 条）" || fail "源缺席误红（rc=$MRC 行=$MN）"
+[[ $MRC -eq 0 && "$MN" -eq 7 ]] && pass "butler 源缺席（404）→ 跳过非红（7 条）" || fail "源缺席误红（rc=$MRC 行=$MN）"
 # 源缺席（404 第二报文形态——账本分支未建 "No ref found"）：同跳过非红
 # （2026-08-29 波次通道实测回归：该形态曾被误判"非 404"→ INFRA exit 2）
 ROUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=2 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/r.err"); RRC=$?
 RN=$(nlines "$ROUT")
-[[ $RRC -eq 0 && "$RN" -eq 5 ]] && pass "源缺席（No ref found 分支未建）→ 跳过非红（5 条）" || fail "分支未建误红（rc=$RRC 行=$RN）"
+[[ $RRC -eq 0 && "$RN" -eq 7 ]] && pass "源缺席（No ref found 分支未建）→ 跳过非红（7 条）" || fail "分支未建误红（rc=$RRC 行=$RN）"
 # 源缺席（404 第三报文形态——分支缺失 "No commit found for the ref"，本地实测
 # 真实报文）：按 HTTP 404 状态码判定后同跳过非红
 COUT2=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=3 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/c2.err"); C2RC=$?
 C2N=$(nlines "$COUT2")
-[[ $C2RC -eq 0 && "$C2N" -eq 5 ]] && pass "源缺席（No commit found for the ref）→ 跳过非红（5 条）" || fail "分支缺失误红（rc=$C2RC 行=$C2N）"
+[[ $C2RC -eq 0 && "$C2N" -eq 7 ]] && pass "源缺席（No commit found for the ref）→ 跳过非红（7 条）" || fail "分支缺失误红（rc=$C2RC 行=$C2N）"
 # 源缺席（elevation 第 4 源分支未建——"No commit found"）：同跳过非红
 EOUT2=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_ELEV_MISSING=1 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/e2.err"); E2RC=$?
 E2N=$(nlines "$EOUT2")
-[[ $E2RC -eq 0 && "$E2N" -eq 5 ]] && pass "elevation 源缺席（分支未建）→ 跳过非红（5 条）" || fail "elevation 缺席误红（rc=$E2RC 行=$E2N）"
+[[ $E2RC -eq 0 && "$E2N" -eq 7 ]] && pass "elevation 源缺席（分支未建）→ 跳过非红（7 条）" || fail "elevation 缺席误红（rc=$E2RC 行=$E2N）"
+# tickets 第 5 源缺席（分支未建）：同跳过非红（REMOVAL 语义：源消失≠链断）
+TKOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_TICKETS_MISSING=1 \
+  bash "$DIR/governance/evidence-query.sh" 2>"$TMP/tk.err"); TKRC=$?
+TKQN=$(nlines "$TKOUT")
+[[ $TKRC -eq 0 && "$TKQN" -eq 6 ]] && pass "tickets 源缺席（分支未建）→ 跳过非红（6 条）" || fail "tickets 缺席误红（rc=$TKRC 行=$TKQN）"
 # 负向：任一源链断 → exit 3 且 stdout 零输出（不可信数据不出结果）
 python3 - "$TMP/fixtures" <<'PYEOF'
 import base64, json, sys
