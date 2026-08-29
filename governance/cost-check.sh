@@ -9,13 +9,19 @@
 # LLM token 通道（W2-C3 .github#216，ADR-0062）：data_source=ciw-metering 时按角色档归账
 #   （CI-Workflows metering-ledger 分支 → metering.py aggregate，先验链后归账）；
 #   链断/拉取失败 = INFRA fail-closed（exit 2），不静默归零不盲熔断。
+# 波次预算通道（W2-C3 .github#414，BEH-07 / ADR-0103）：open type:card 卡 body 的
+#   budget 块（四元组+on_exceed）vs 统一账本按 subject 聚合（evidence-query 三源
+#   先验链后归账）；hard-stop 卡超限 → 与 Actions/LLM 同一硬停档三件套（熔断变量+
+#   撤 auto-merge+P0，ADR-0040 复位流程不变）；链断/块非法 = INFRA fail-closed。
 # 熔断消费点：agent 派发/automerge 前置检查（AGENTS.md 行为契约）+ auto-fix-limit.sh
 # 每轮机器执法撤 auto-merge。复位仅人工（owner PATCH/DELETE 变量 + P0 issue 留评论）；
 # 本脚本观察到"变量已复位且用量 <100%"后自动关闭 P0 issue（复位留痕=issue 评论历史）。
 #
 # 用法: GH_TOKEN=<org admin token> bash cost-check.sh
 # 注入（T2，不依赖真实超支）: COST_USAGE_MINUTES_OVERRIDE / COST_QUOTA_MINUTES_OVERRIDE /
-#   COST_LLM_TOKENS_USED_OVERRIDE / COST_LLM_TOKENS_QUOTA_OVERRIDE / COST_DRY_RUN=1（只报告不写）
+#   COST_LLM_TOKENS_USED_OVERRIDE / COST_LLM_TOKENS_QUOTA_OVERRIDE /
+#   COST_WAVE_CARDS_FILE（本地卡清单 JSON）/ COST_WAVE_LEDGER_DIR（本地统一账本目录）/
+#   COST_DRY_RUN=1（只报告不写）
 # 退出码: 0=未达阈值 | 1=触发告警/熔断（运行变红=可见信号）| 2=基础设施故障（fail-closed）
 set -uo pipefail
 
@@ -193,6 +199,57 @@ llm_channel_account() {
 }
 # @w2c3-llm-channel-end
 
+# ---------- 波次预算对账（W2-C3 .github#414，BEH-07 / ADR-0103：统一账本 subject 聚合） ----------
+# @w2c3-wave-channel-begin（governance/tests/test-cost-wave-channel.sh 按标记对提取本函数体
+# 离线单测——标记对缺失=测试红，防"测试测影子"，同 llm-channel 模式）
+wave_channel_check() {
+  # → stdout 单行 "WAVE-EXCEEDED<TAB>超限行json" | "WAVE-OK<TAB>说明" | "INFRA<TAB>说明"。
+  # 卡面=$GOV_REPO open type:card（body 含 budget 块才有约束，缺省=无预算语义）；
+  # 聚合源=统一账本（evidence-query.sh 三源拉取+验链→shadow-evidence-unified.jsonl，
+  # 文件名命中 wave_check 的 shadow-evidence-*.jsonl glob——先验链后归账，同 LLM 通道）。
+  # 本函数经命令替换调用（子 shell），不直接调 infra/ok（计数会丢）——标签由调用方
+  # 在父 shell 落账。env 注入（T2）：COST_WAVE_CARDS_FILE=本地卡清单 JSON、
+  # COST_WAVE_LEDGER_DIR=本地账本目录（shadow-evidence-*.jsonl）。
+  local cards="${COST_WAVE_CARDS_FILE:-}" led="${COST_WAVE_LEDGER_DIR:-}" out rc=0
+  if [[ -z "$cards" ]]; then
+    cards=$(mktemp) || { printf 'INFRA\t波次卡清单临时文件创建失败\n'; return 0; }
+    if ! "$GH" issue list --repo "$GOV_REPO" --state open --label type:card --limit 300 \
+         --json number,body >"$cards" 2>/dev/null; then
+      printf 'INFRA\t波次卡清单拉取失败（%s open type:card）——预算面不可知，fail-closed\n' "$GOV_REPO"
+      return 0
+    fi
+  fi
+  if [[ -z "$led" ]]; then
+    led=$(mktemp -d) || { printf 'INFRA\t统一账本临时目录创建失败\n'; return 0; }
+    if ! bash "$DIR/evidence-query.sh" >"$led/shadow-evidence-unified.jsonl" 2>"$led/eq.err"; then
+      printf 'INFRA\t统一账本查询失败（链断/拉取失败——不可信数据不判定，不盲熔断）：%.200s\n' \
+        "$(tail -c 200 "$led/eq.err" 2>/dev/null)"
+      return 0
+    fi
+  fi
+  out=$(python3 "$DIR/wave_schema.py" wave-check --cards "$cards" --ledger-dir "$led" 2>/dev/null) || rc=$?
+  if [[ $rc -eq 2 ]]; then
+    printf 'INFRA\twave-check 执行失败（参数/环境 rc=2）\n'; return 0
+  fi
+  python3 -c 'import json,sys
+rows = json.loads(sys.stdin.read() or "[]")
+bad = [r for r in rows if r.get("error")]
+if bad:
+    print("INFRA\t波次卡块非法（预算面盲区，fail-closed）：" + "; ".join(r["card"] + " " + r["error"] for r in bad))
+    sys.exit(0)
+hard = [r for r in rows if r.get("exceeded_dims") and r.get("on_exceed") == "hard-stop"]
+warn = [r for r in rows if r.get("exceeded_dims") and r.get("on_exceed") == "warn"]
+if hard:
+    print("WAVE-EXCEEDED\t" + json.dumps(hard, ensure_ascii=False))
+    sys.exit(0)
+nb = sum(1 for r in rows if not r.get("error"))
+extra = ""
+if warn:
+    extra = "；warn 超限（只报告不判定）：" + ", ".join(r["card"] + ":" + "+".join(r["exceeded_dims"]) for r in warn)
+print("WAVE-OK\t预算卡 %d 张对账无 hard-stop 超限%s" % (nb, extra))' <<<"$out"
+}
+# @w2c3-wave-channel-end
+
 PCT_TOK=""
 USED_TOK=""
 LLM_ROLES=""
@@ -225,6 +282,24 @@ elif [[ "$LT_SOURCE" == "ciw-metering" ]]; then
 else
   infra "LLM token 数据源未知：$LT_SOURCE（policy cost.llm_tokens.data_source 无此形态）"
 fi
+
+# ---------- 波次预算通道（W2-C3 .github#414，BEH-07：统一账本按 subject 聚合对账） ----------
+STOP_WAVE="False"
+WAVE_EXCEEDED=""
+WAVE_SUMMARY=""
+WLINE=$(wave_channel_check) || true
+IFS=$'\t' read -r WTAG WVAL <<<"$WLINE"
+case "$WTAG" in
+  WAVE-EXCEEDED)
+    # BEH-07：hard-stop 卡超限 → 进硬停档三件套（下方与 Actions/LLM 同档执法）
+    STOP_WAVE="True"; WAVE_EXCEEDED="$WVAL"
+    WAVE_SUMMARY="波次预算超限（hard-stop，BEH-07）: $WVAL"
+    ok "$WAVE_SUMMARY"
+    ;;
+  WAVE-OK) WAVE_SUMMARY="波次预算（波次视图）: $WVAL"; ok "$WAVE_SUMMARY" ;;
+  INFRA) infra "$WVAL" ;;
+  *) infra "波次通道输出不可解析（期望 WAVE-EXCEEDED/WAVE-OK/INFRA 标签）：$WLINE" ;;
+esac
 
 # ---------- 熔断当前状态 ----------
 BREAKER_SET=0
@@ -287,23 +362,29 @@ set_breaker() {  # PATCH 已有 / POST 新建（404 时）
   fi
 }
 
-# ---------- 硬停档（任一指标 ≥100%） ----------
-if [[ "$STOP_MIN" == "True" || "$STOP_TOK" == "True" ]]; then
+# ---------- 硬停档（任一指标 ≥100%，或波次预算 hard-stop 卡超限——BEH-07） ----------
+if [[ "$STOP_MIN" == "True" || "$STOP_TOK" == "True" || "$STOP_WAVE" == "True" ]]; then
   TRIPPED=1
-  act "硬停档触发（Actions=${PCT_MIN}% LLM=${PCT_TOK:--}%）——置 $CB_VARIABLE + 撤 auto-merge + P0"
+  act "硬停档触发（Actions=${PCT_MIN}% LLM=${PCT_TOK:--}% 波次超限=${STOP_WAVE}）——置 $CB_VARIABLE + 撤 auto-merge + P0"
   set_breaker
   strip_all_automerge
   label_ensure "$GOV_REPO" cost-circuit-breaker b60205
   P0_EXISTING=$(gov_open_issues cost-circuit-breaker | grep -m1 "成本熔断" | cut -f1)
+  if [[ "$STOP_WAVE" == "True" ]]; then
+    P0_TITLE="P0 成本熔断：波次预算超限达硬停档（$CB_VARIABLE 已置位，BEH-07）"
+  else
+    P0_TITLE="P0 成本熔断：Actions 分钟 ${PCT_MIN}% 达硬停档（$CB_VARIABLE 已置位）"
+  fi
   P0_BODY="P0：额度/成本熔断已置位（ADR-0040，运行 $(date -u +%FT%TZ)）。
 
 - Actions 分钟（$YEAR-$MONTH）: $USED_MIN / $AM_QUOTA = ${PCT_MIN}%（阈值 $AM_STOP%）${PCT_TOK:+
-- ${LLM_SUMMARY:-LLM token: $USED_TOK}（阈值 $LT_STOP%，ADR-0062 归账通道）}
+- ${LLM_SUMMARY:-LLM token: $USED_TOK}（阈值 $LT_STOP%，ADR-0062 归账通道）}${WAVE_EXCEEDED:+
+- 波次预算超限（BEH-07，ADR-0103 统一账本 subject 聚合）: $WAVE_EXCEEDED}
 - 已执行：org 变量 \`$CB_VARIABLE\`=true；全部 open PR 的 auto-merge 已撤销。
 - 效果：agent 派发与 automerge 前置检查将拒绝启动（AGENTS.md）；auto-fix-limit 每轮机器执法撤销新 enable。
 
 处置（仅 $CB_RESET_BY，人工）：
-1. 排查用量根因（失控循环查 auto-fix-limit 的 issue 历史）；
+1. 排查用量根因（失控循环查 auto-fix-limit 的 issue 历史；波次超限查上列卡的 dispatch/计量记录——收口超限卡或调 budget 块后再复位）；
 2. 复位：\`gh api -X PATCH orgs/$ORG/actions/variables/$CB_VARIABLE -f name=$CB_VARIABLE -f value=false\`（或 DELETE 该变量）；
 3. 在本 issue 留复位评论（留痕）；cost-check 确认变量复位且用量 <${AM_STOP}% 后自动关闭本 issue。"
   if [[ -n "$P0_EXISTING" ]]; then
@@ -312,7 +393,7 @@ if [[ "$STOP_MIN" == "True" || "$STOP_TOK" == "True" ]]; then
     fi
   else
     mutate "$GH" issue create --repo "$GOV_REPO" \
-      --title "P0 成本熔断：Actions 分钟 ${PCT_MIN}% 达硬停档（$CB_VARIABLE 已置位）" \
+      --title "$P0_TITLE" \
       --body "$P0_BODY" --label cost-circuit-breaker >/dev/null 2>&1 \
       || infra "P0 issue 开立失败"
   fi

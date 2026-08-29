@@ -11,6 +11,9 @@ name: conductor
 # arbiter 裁决（宪法 §11 唤醒矩阵事件行"仲裁请求处理（/claim 等，转 arbiter）"）；
 # 仲裁是叠加授权层，transitions.yaml 转移表语义不变。三态：0=allow 继续原动作、
 # 1=deny 审计 no-op（对齐 silent-drop）、2=infra run 红灯 fail-closed 不放行。
+# W2-C3（.github#414 / BEH-07 / IFACE-03）：T7 增设 wave schema 谓词——卡 body
+# 波次块（budget/capabilities/evidence）非法拒绝就绪（fail-closed）；合法 wave-meta
+# 解析后以幂等标记（wave-meta:v1）评论落卡（conductor 解析存储）。
 on:
   issues:
     types: [labeled]
@@ -55,6 +58,7 @@ jobs:
           path: gov
           sparse-checkout: |
             governance/transitions.yaml
+            governance/wave_schema.py
             scripts/gh-app-token.sh
           persist-credentials: false
       # arbiter 受信 checkout（ADR-0055）：conductor 只在 main 上下文运行事件路由，
@@ -437,6 +441,44 @@ jobs:
                   api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3Awave-planned", "DELETE")
                   raise SystemExit(0)
 
+          # ---- W2-C3（.github#414 / BEH-07 / IFACE-03）：T7 wave schema 谓词 ----
+          # 卡 body 波次块（budget/capabilities/evidence）存在但非法 → 拒绝就绪
+          # （fail-closed：wave_schema.py validate exit 3；无块=缺省无约束语义，放行）。
+          # 合法且含块 → 解析 wave-meta（结构化 JSON），转移成功后以幂等标记评论
+          # 存储在本卡（下游 cost-check 波次视图按卡 body 同源对账，评论=解析结果的
+          # 机器可读镜像）。
+          wave_meta_json = None
+          if t["id"] == "T7":
+              import tempfile
+              with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                               encoding="utf-8") as btf:
+                  btf.write(iss.get("body") or "")
+                  body_path = btf.name
+              try:
+                  rc_v = subprocess.call(["python3", "gov/governance/wave_schema.py",
+                                          "validate", "--body-file", body_path])
+                  if rc_v == 3:
+                      audit("verdict=DENIED-wave-schema-invalid T7 拒绝——波次块非法"
+                            "（W2-C3 IFACE-03；fail-closed，标签已回退）")
+                      api(E["APP_TOKEN"], f"/repos/{REPO}/issues/{ISSUE}/labels/state%3Aready", "DELETE")
+                      raise SystemExit(0)
+                  if rc_v != 0:
+                      audit(f"verdict=ABORT wave_schema validate rc={rc_v}（fail-closed——infra）")
+                      raise SystemExit(1)
+                  p = subprocess.run(["python3", "gov/governance/wave_schema.py", "parse",
+                                      "--body-file", body_path, "--card", f"{REPO}#{ISSUE}"],
+                                     capture_output=True, text=True)
+              finally:
+                  os.unlink(body_path)
+              if p.returncode != 0:
+                  audit(f"verdict=ABORT wave_schema parse rc={p.returncode}（fail-closed——infra）")
+                  raise SystemExit(1)
+              try:
+                  wave_meta_json = json.loads(p.stdout or "{}")
+              except json.JSONDecodeError:
+                  audit("verdict=ABORT wave-meta 解析输出非 JSON（fail-closed）")
+                  raise SystemExit(1)
+
           # ---- ADR-0085：T8 卡完成谓词（存在绑定本卡且已合并的 PR）----
           def check_merged_pr(issue_number):
               """卡完成谓词：存在 body 含 Card: <repo>#<n> 绑定行且已合并的 PR。
@@ -542,6 +584,28 @@ jobs:
                         f"claim->in-progress assignee={actor}")
               else:
                   swap_state(t["from_state"], t["to_state"])
+                  # W2-C3（.github#414）：T7 解析存储——合法 wave-meta 以幂等标记评论
+                  # 落卡（重投/重复标签不重复评论；写失败=fail-closed 红灯，状态已切
+                  # 但存储缺失在 run 日志+on-failure 评论双面可见）
+                  if t["id"] == "T7" and wave_meta_json:
+                      marker = "wave-meta:v1"
+                      st_cm, cms = api(E["APP_TOKEN"],
+                                       f"/repos/{REPO}/issues/{ISSUE}/comments?per_page=100")
+                      if st_cm != 200:
+                          audit(f"verdict=ABORT wave-meta 评论读取失败 HTTP {st_cm}（fail-closed）")
+                          raise SystemExit(1)
+                      if not any(marker in (c.get("body") or "") for c in cms or []):
+                          st_pc, _ = api(E["APP_TOKEN"],
+                                         f"/repos/{REPO}/issues/{ISSUE}/comments", "POST",
+                                         {"body": f"<!-- {marker} -->\n"
+                                                  "**wave-meta（T7 解析存储，IR-0006 W2-C3 / IFACE-03）**\n"
+                                                  "```json\n"
+                                                  + json.dumps(wave_meta_json, ensure_ascii=False, sort_keys=True)
+                                                  + "\n```"})
+                          if st_pc not in (200, 201):
+                              audit(f"verdict=ABORT wave-meta 评论写失败 HTTP {st_pc}（fail-closed）")
+                              raise SystemExit(1)
+                          audit("wave-meta 评论已存储（T7 解析存储，W2-C3）")
                   out.write("invoke=none\n")
                   audit(f"event={ev} transition={t['id']} sender_role={role} verdict=ALLOWED "
                         f"{t['from_state']}->{t['to_state']} action=noop")
