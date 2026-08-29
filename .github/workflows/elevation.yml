@@ -1,0 +1,184 @@
+name: elevation
+# JIT 提权 v0（IR-0006 W2-C4 / BEH-05 / 卡 #415 / HO 场景 3）——/elevate 评论
+# 走策略表裁决（governance/policy/elevation.yaml，默认拒绝）+ 批准/拒绝/收回
+# 记录进统一账本（elevation-ledger 分支，kind=approval，subject.card 可查询，
+# AC-9c）；每小时 sweep 到期 grant 补 revoke + open-check 断言（AC-9d：提权是
+# 瞬时能力——无长期驻留提权的机器锚点，驻留=run 红）。
+#
+# 铁律对齐：
+# - 默认拒绝：reason/spec_ref 缺失（HO 场景 3）、能力未声明、角色不匹配、
+#   TTL 越界 → deny（裁决逻辑唯一真源=governance/elevation.py，纯函数可测）。
+# - 判定锚点机械（INV-01/02）：role 取 GitHub author_association（OWNER→owner）
+#   与 actor 身份（cloudbrid-agent[bot]→agent），workflow 不自判。
+# - append-only（ADR-0062）：账本经 evidence_shadow.py 链式追加，验链后推送；
+#   幂等=delivery_id（评论 id）已入账即 no-op（重复投递不双写）。
+# - v0 边界：裁决+记账+TTL 收回闭环；不铸造真实平台凭证（提权档
+#   org-variable-write 等的实际代签执行面归后续卡——本卡 AC 只锚
+#   裁决记录与收回断言）。
+on:
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "17 * * * *" # 每小时 sweep 到期 grant（错峰：避开 :00 整点治理高峰）
+  workflow_dispatch: {}
+
+permissions: {} # 写操作走 job 级授权 + GOVERNANCE_TOKEN（台账）/ GITHUB_TOKEN（评论）
+
+# 台账 append-only 不容忍并发追加：elevation 全局串行（评论裁决与 sweep 抢同一
+# 台账文件），排队不取消（INV-09 同款语义）
+concurrency:
+  group: elevation-ledger
+  cancel-in-progress: false
+
+jobs:
+  adjudicate:
+    if: ${{ github.event_name == 'issue_comment' && github.repository == 'Cloudbird-Software/.github' && startsWith(github.event.comment.body, '/elevate') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout 治理真源（elevation.py + 策略表）
+      issues: write # 裁决结果回复评论（seed-drill P0 同款先例）
+    env:
+      LEDGER_REPO: Cloudbird-Software/.github
+      LEDGER_BRANCH: elevation-ledger
+      LEDGER_FILE: governance/elevation/shadow-evidence.jsonl
+      GOV_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      COMMENT_BODY: ${{ github.event.comment.body }}
+      COMMENT_ID: ${{ github.event.comment.id }}
+      ISSUE_N: ${{ github.event.issue.number }}
+      REQUESTER: ${{ github.event.comment.user.login }}
+      AUTHOR_ASSOC: ${{ github.event.comment.author_association }}
+      ACTOR: ${{ github.actor }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 解析 + 策略裁决 + 台账追加 + 回复
+        run: |
+          set -euo pipefail
+          TMP=$(mktemp -d)
+          CARD="Cloudbird-Software/.github#${ISSUE_N}"
+          printf '%s\n' "$COMMENT_BODY" >"$TMP/comment.txt"
+
+          # role 判定锚点机械（INV-01）：OWNER→owner；cloudbrid-agent App→agent；其余→none
+          if [[ "$AUTHOR_ASSOC" == "OWNER" ]]; then ROLE=owner
+          elif [[ "$ACTOR" == "cloudbrid-agent[bot]" ]]; then ROLE=agent
+          else ROLE=none; fi
+          echo "role=$ROLE (assoc=$AUTHOR_ASSOC actor=$ACTOR)"
+
+          # ---- 台账基线（clone elevation-ledger；不存在=创世） ----
+          git config --global user.name elevation-bot
+          git config --global user.email elevation-bot@users.noreply.github.com
+          if ! git clone --depth 1 "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" "$TMP/ledger" -b "$LEDGER_BRANCH" 2>/dev/null; then
+            git clone --depth 1 "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" "$TMP/ledger"
+            git -C "$TMP/ledger" checkout -b "$LEDGER_BRANCH"
+          fi
+          LED="$TMP/ledger/$LEDGER_FILE"
+          mkdir -p "$(dirname "$LED")"; touch "$LED"
+
+          # ---- 幂等：delivery_id 已入账（payload 内转义形态）→ no-op ----
+          if grep -Fq "\\\"delivery_id\\\":\\\"${COMMENT_ID}" "$LED"; then
+            echo "OK    评论 ${COMMENT_ID} 已裁决入账（幂等 no-op）"
+            exit 0
+          fi
+
+          # ---- parse（exit 2=命令形状非法，fail-closed 记 deny） ----
+          if ! python3 governance/elevation.py parse --comment-file "$TMP/comment.txt" \
+                 --card "$CARD" --requester "$REQUESTER" --delivery-id "$COMMENT_ID" \
+                 >"$TMP/request.json" 2>"$TMP/parse.err"; then
+            PREASON=$(tr -d '\n' <"$TMP/parse.err" | cut -c1-300)
+            jq -n --arg requester "$REQUESTER" --arg card "$CARD" --arg id "$COMMENT_ID" \
+               --arg reason "parse-failed: $PREASON" \
+               '{verdict:"deny", requester:$requester, card:$card, delivery_id:$id, reason:$reason}' \
+               >"$TMP/verdict.json"
+          else
+            # ---- adjudicate（策略表唯一授权真源；role 机械锚点） ----
+            python3 governance/elevation.py adjudicate --request-file "$TMP/request.json" \
+              --role "$ROLE" --policy governance/policy/elevation.yaml >"$TMP/verdict.json"
+          fi
+          cat "$TMP/verdict.json"
+
+          # ---- 台账追加（schema v1 链式 hash；kind=approval，AC-9c subject 可查询） ----
+          V=$(cat "$TMP/verdict.json")
+          jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg card "$CARD" \
+              --arg requester "$REQUESTER" --arg role "$ROLE" --argjson v "$V" \
+              '{ts:$ts, kind:"approval", action:("elevation."+$v.verdict), verdict:$v.verdict,
+                subject:{card:$card, tenant:"cloudbird-internal"},
+                actor:{identity:$requester, role:$role},
+                payload:($v|tojson)}' >"$TMP/event.json"
+          python3 governance/evidence_shadow.py append --file "$LED" --event-file "$TMP/event.json"
+          python3 governance/evidence_shadow.py verify --file "$LED"
+          VERD=$(jq -r .verdict "$TMP/verdict.json")
+          git -C "$TMP/ledger" add "$LEDGER_FILE"
+          git -C "$TMP/ledger" commit -m "elevation: ${CARD} 裁决 ${VERD}（run ${RUN_ID}；IR-0006 W2-C4）"
+          for i in 1 2 3; do git -C "$TMP/ledger" push "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" HEAD:refs/heads/"$LEDGER_BRANCH" && break
+            git -C "$TMP/ledger" pull --rebase "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" "$LEDGER_BRANCH" || true; sleep 5; done
+          # 推送校验：重试全败不得静默绿（远端头≠本地头=append-only 被无声违反 → 红）
+          RHEAD=$(git ls-remote "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" "refs/heads/${LEDGER_BRANCH}" | cut -f1)
+          LHEAD=$(git -C "$TMP/ledger" rev-parse HEAD)
+          [[ "$RHEAD" == "$LHEAD" ]] || { echo "::error::台账推送失败（远端 $RHEAD ≠ 本地 $LHEAD）" >&2; exit 1; }
+
+          # ---- 回复裁决结果（grant=能力+TTL+到期时点；deny=拒绝理由） ----
+          jq -r 'if .verdict == "grant" then
+            "**elevation: GRANT**（capability=`\(.capability)`，TTL=\(.effective_ttl_minutes)min，expires_at=\(.expires_at)）\n\n- elevation_id: `\(.elevation_id)`\n- 记录已入账（elevation-ledger / kind=approval）\n- TTL 到期由每小时 sweep 自动收回（AC-9d）"
+          else
+            "**elevation: DENY**（fail-closed）\n\n- 理由: \(.reason)"
+          end' "$TMP/verdict.json" >"$TMP/reply.md"
+          gh issue comment "$ISSUE_N" --repo "$LEDGER_REPO" --body-file "$TMP/reply.md"
+
+  sweep:
+    if: ${{ github.event_name != 'issue_comment' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      LEDGER_REPO: Cloudbird-Software/.github
+      LEDGER_BRANCH: elevation-ledger
+      LEDGER_FILE: governance/elevation/shadow-evidence.jsonl
+      GOV_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: sweep 到期 grant 补 revoke + open-check 断言（AC-9d）
+        run: |
+          set -euo pipefail
+          git config --global user.name elevation-bot
+          git config --global user.email elevation-bot@users.noreply.github.com
+          if ! git clone --depth 1 "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" ledger -b "$LEDGER_BRANCH" 2>/dev/null; then
+            echo "OK    elevation-ledger 分支不存在（尚无裁决记录）——open-check 空账本通过"
+            exit 0
+          fi
+          LED="ledger/$LEDGER_FILE"
+          [[ -f "$LED" ]] || { echo "OK    账本文件不存在（创世前）——no-op"; exit 0; }
+          # 到期未收回 grant → 补 revoke 事件（AC-9d：提权是瞬时能力）
+          python3 governance/elevation.py sweep --ledger-dir "$(dirname "$LED")" >expired.json
+          N=$(jq 'length' expired.json)
+          echo "到期未收回 grant: $N 条"
+          i=0
+          while [[ $i -lt $N ]]; do
+            G=$(jq -c ".[$i]" expired.json)
+            jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson g "$G" \
+              '{ts:$ts, kind:"approval", action:"elevation.revoke", verdict:"revoked",
+                subject:{card:$g.card, tenant:"cloudbird-internal"},
+                actor:{identity:"elevation-bot", role:"bot"},
+                payload:{elevation_id:$g.elevation_id, capability:$g.capability, cause:"ttl-expired"}}' >event.json
+            python3 governance/evidence_shadow.py append --file "$LED" --event-file event.json
+            i=$((i + 1))
+          done
+          # 断言：sweep 后零过期未收回 grant（无长期驻留提权；驻留=exit 3 → run 红）
+          python3 governance/elevation.py open-check --ledger-dir "$(dirname "$LED")"
+          if [[ $N -gt 0 ]]; then
+            git -C ledger add "$LEDGER_FILE"
+            git -C ledger commit -m "elevation: sweep 收回 $N 条到期 grant（run ${RUN_ID}；AC-9d）"
+            for i in 1 2 3; do git -C ledger push "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" HEAD:refs/heads/"$LEDGER_BRANCH" && break
+              git -C ledger pull --rebase "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" "$LEDGER_BRANCH" || true; sleep 5; done
+            # 推送校验（同 adjudicate job：重试全败不得静默绿）
+            RHEAD=$(git ls-remote "https://x-access-token:${GOV_TOKEN}@github.com/${LEDGER_REPO}.git" "refs/heads/${LEDGER_BRANCH}" | cut -f1)
+            LHEAD=$(git -C ledger rev-parse HEAD)
+            [[ "$RHEAD" == "$LHEAD" ]] || { echo "::error::sweep 台账推送失败（远端 $RHEAD ≠ 本地 $LHEAD）" >&2; exit 1; }
+          fi

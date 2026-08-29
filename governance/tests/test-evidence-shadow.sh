@@ -123,18 +123,45 @@ mkdir -p "$TMP/shadow-is-dir"
 BUTLER_SHADOW_FILE="$TMP/shadow-is-dir" bash "$DIR/governance/butler-audit.sh" test-butler cron ok '{"k":1}' >/dev/null 2>&1
 [[ $? -ne 0 ]] && pass "影子写入失败 → butler-audit 非零退出（fail-closed）" || fail "影子写失败未 fail-closed"
 
-# ---- evidence-query 三源统一查询（AC-4a：归并 + 验链 + fail-closed） ----
+# ---- elevation 裁决入账（W2-C4 / AC-9c：evidence-query 第 4 源，subject 可查询） ----
+ELEVDIR="$TMP/elevation"; mkdir -p "$ELEVDIR"
+ESHADOW="$ELEVDIR/shadow-evidence.jsonl"
+cat >"$TMP/ereq.json" <<'EOF'
+{"kind": "elevate", "card": "Cloudbird-Software/.github#415", "requester": "agent-x",
+ "delivery_id": "cmt-1", "capability": "label-write", "reason": "状态机补偿写",
+ "spec_ref": "specs/IR-0006/spec.md#AC-9"}
+EOF
+python3 "$DIR/governance/elevation.py" adjudicate --request-file "$TMP/ereq.json" --role agent \
+  --policy "$DIR/governance/policy/elevation.yaml" --now 2026-08-29T00:00:00Z >"$TMP/everd.json" \
+  && pass "elevation adjudicate 出裁决（策略表路径）" || fail "elevation adjudicate"
+python3 - "$TMP/everd.json" >"$TMP/eev.json" <<'PYEOF'
+import json, sys
+v = json.load(open(sys.argv[1], encoding="utf-8"))
+ev = {"ts": "2026-08-29T00:00:02Z", "kind": "approval", "action": "elevation." + v["verdict"],
+      "verdict": v["verdict"],
+      "subject": {"card": v["card"], "tenant": "cloudbird-internal"},
+      "actor": {"identity": v["requester"], "role": "agent"},
+      "payload": json.dumps(v, ensure_ascii=False, sort_keys=True)}
+print(json.dumps(ev, ensure_ascii=False, sort_keys=True))
+PYEOF
+python3 "$DIR/governance/evidence_shadow.py" append --file "$ESHADOW" --event-file "$TMP/eev.json" >/dev/null \
+  && pass "elevation 裁决入影子账本（链式 append）" || fail "elevation 影子 append"
+python3 "$DIR/governance/evidence_shadow.py" verify --file "$ESHADOW" >/dev/null \
+  && pass "elevation 影子验链绿" || fail "elevation 影子链断"
+
+# ---- evidence-query 四源统一查询（AC-4a：归并 + 验链 + fail-closed） ----
 GHSTUB="$TMP/gh-stub"
 mkdir -p "$TMP/fixtures"
-# fixture：metering=周分片列表（$SHADOW）；drill/butler=各自影子（独立成链）
-python3 - "$SHADOW" "$DSHADOW" "$BUTLER_SHADOW" "$TMP/fixtures" <<'PYEOF'
+# fixture：metering=周分片列表（$SHADOW）；drill/butler/elevation=各自影子（独立成链）
+python3 - "$SHADOW" "$DSHADOW" "$BUTLER_SHADOW" "$ESHADOW" "$TMP/fixtures" <<'PYEOF'
 import base64, json, sys
-shadow, dshadow, bshadow, fixdir = sys.argv[1:5]
+shadow, dshadow, bshadow, eshadow, fixdir = sys.argv[1:6]
 b64 = lambda p: base64.b64encode(open(p, "rb").read()).decode()
 json.dump([{"type": "file", "name": "shadow-evidence-2026-W35.jsonl", "content": b64(shadow)}],
           open(f"{fixdir}/metering-list.json", "w"))
 json.dump({"type": "file", "content": b64(dshadow)}, open(f"{fixdir}/drill.json", "w"))
 json.dump({"type": "file", "content": b64(bshadow)}, open(f"{fixdir}/butler.json", "w"))
+json.dump({"type": "file", "content": b64(eshadow)}, open(f"{fixdir}/elev.json", "w"))
 PYEOF
 cat >"$GHSTUB" <<'STUBEOF'
 #!/usr/bin/env bash
@@ -156,6 +183,11 @@ case "$url" in
       echo 'gh: No commit found for the ref butler-ledger (HTTP 404)' >&2; exit 1
     fi
     cat "$F/butler.json" ;;
+  "repos/Cloudbird-Software/.github/contents/governance/elevation/shadow-evidence.jsonl?ref=elevation-ledger")
+    if [[ "${GH_STUB_ELEV_MISSING:-}" == "1" ]]; then
+      echo 'gh: No commit found for the ref elevation-ledger (HTTP 404)' >&2; exit 1
+    fi
+    cat "$F/elev.json" ;;
   *) echo "gh-stub: 意外 URL $url" >&2; exit 1 ;;
 esac
 STUBEOF
@@ -164,33 +196,45 @@ nlines() { grep -c . <<<"$1" || true; }  # 非空行计数（wc 对空 herestrin
 QOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/q.err"); QRC=$?
 N=$(nlines "$QOUT")
-[[ $QRC -eq 0 && "$N" -eq 5 ]] && pass "统一查询归并三源（5 条，rc=0）" || fail "统一查询（rc=$QRC 行=$N）"
+[[ $QRC -eq 0 && "$N" -eq 6 ]] && pass "统一查询归并四源（6 条，rc=0）" || fail "统一查询（rc=$QRC 行=$N）"
 grep -q '"source":"metering"' <<<"$QOUT" && grep -q '"source":"drill"' <<<"$QOUT" && grep -q '"source":"butler"' <<<"$QOUT" \
-  && pass "三源标记齐全（source 字段）" || fail "source 标记缺失"
+  && grep -q '"source":"elevation"' <<<"$QOUT" \
+  && pass "四源标记齐全（source 字段）" || fail "source 标记缺失"
 grep -q '^SUMMARY ' "$TMP/q.err" && grep -Eq '"metering": ?2' "$TMP/q.err" \
   && pass "分源统计（stderr SUMMARY）" || fail "SUMMARY 统计缺失"
-# --card 过滤：metering 影子绑 #407，drill/butler 哨兵 #0 → 仅 2 条
+# --card 过滤：metering 影子绑 #407，drill/butler 哨兵 #0，elevation 绑 #415
 COUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub \
   bash "$DIR/governance/evidence-query.sh" --card Cloudbird-Software/.github#407 2>/dev/null); CRC=$?
 CN=$(nlines "$COUT")
 [[ $CRC -eq 0 && "$CN" -eq 2 ]] && pass "--card 过滤（#407 → 2 条）" || fail "--card 过滤（rc=$CRC 行=$CN）"
+# AC-9c：elevation 记录按 subject 可查询（#415 → 1 条，source=elevation）
+EOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub \
+  bash "$DIR/governance/evidence-query.sh" --card Cloudbird-Software/.github#415 2>/dev/null); ERC=$?
+EN=$(nlines "$EOUT")
+[[ $ERC -eq 0 && "$EN" -eq 1 ]] && grep -q '"source":"elevation"' <<<"$EOUT" \
+  && pass "AC-9c elevation 记录 subject 可查询（#415 → 1 条）" || fail "elevation 查询（rc=$ERC 行=$EN）"
 # 源缺席（404）：过渡期合法，非红（须在篡改 fixture 生成前跑——桩对篡改片优先回放）
 MOUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=1 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/m.err"); MRC=$?
 MN=$(nlines "$MOUT")
-[[ $MRC -eq 0 && "$MN" -eq 4 ]] && pass "butler 源缺席（404）→ 跳过非红（4 条）" || fail "源缺席误红（rc=$MRC 行=$MN）"
+[[ $MRC -eq 0 && "$MN" -eq 5 ]] && pass "butler 源缺席（404）→ 跳过非红（5 条）" || fail "源缺席误红（rc=$MRC 行=$MN）"
 # 源缺席（404 第二报文形态——账本分支未建 "No ref found"）：同跳过非红
 # （2026-08-29 波次通道实测回归：该形态曾被误判"非 404"→ INFRA exit 2）
 ROUT=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=2 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/r.err"); RRC=$?
 RN=$(nlines "$ROUT")
-[[ $RRC -eq 0 && "$RN" -eq 4 ]] && pass "源缺席（No ref found 分支未建）→ 跳过非红（4 条）" || fail "分支未建误红（rc=$RRC 行=$RN）"
+[[ $RRC -eq 0 && "$RN" -eq 5 ]] && pass "源缺席（No ref found 分支未建）→ 跳过非红（5 条）" || fail "分支未建误红（rc=$RRC 行=$RN）"
 # 源缺席（404 第三报文形态——分支缺失 "No commit found for the ref"，本地实测
 # 真实报文）：按 HTTP 404 状态码判定后同跳过非红
 COUT2=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_BUTLER_MISSING=3 \
   bash "$DIR/governance/evidence-query.sh" 2>"$TMP/c2.err"); C2RC=$?
 C2N=$(nlines "$COUT2")
-[[ $C2RC -eq 0 && "$C2N" -eq 4 ]] && pass "源缺席（No commit found for the ref）→ 跳过非红（4 条）" || fail "分支缺失误红（rc=$C2RC 行=$C2N）"
+[[ $C2RC -eq 0 && "$C2N" -eq 5 ]] && pass "源缺席（No commit found for the ref）→ 跳过非红（5 条）" || fail "分支缺失误红（rc=$C2RC 行=$C2N）"
+# 源缺席（elevation 第 4 源分支未建——"No commit found"）：同跳过非红
+EOUT2=$(GH="$GHSTUB" GH_STUB_FIXTURES="$TMP/fixtures" GH_TOKEN=stub GH_STUB_ELEV_MISSING=1 \
+  bash "$DIR/governance/evidence-query.sh" 2>"$TMP/e2.err"); E2RC=$?
+E2N=$(nlines "$EOUT2")
+[[ $E2RC -eq 0 && "$E2N" -eq 5 ]] && pass "elevation 源缺席（分支未建）→ 跳过非红（5 条）" || fail "elevation 缺席误红（rc=$E2RC 行=$E2N）"
 # 负向：任一源链断 → exit 3 且 stdout 零输出（不可信数据不出结果）
 python3 - "$TMP/fixtures" <<'PYEOF'
 import base64, json, sys
