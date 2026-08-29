@@ -41,10 +41,10 @@ open(sys.argv[2], "w", encoding="utf-8", newline="\n").write(
 PYEOF
     return 0
   fi
-  # 404 两种报文都算源缺席：路径不存在="Not Found"；ref（分支）不存在=
-  # "No ref found for ..."（不含 "not found" 字样——2026-08-29 波次通道实测抓出：
-  # butler-ledger 分支未建被误判"非 404 拉取失败"→ INFRA exit 2，源缺席本应合法跳过）
-  if grep -qiE 'not found|no ref found' "$TMP/api.err" 2>/dev/null; then
+  # 源缺席按 HTTP 状态码判定（"HTTP 404"）：GitHub 404 报文变体多——路径不存在=
+  # "Not Found"、分支未建="No commit found for the ref"、ref 解析失败="No ref found"
+  # ——报文猜谜必漏（2026-08-29 波次通道实测连环抓出两变体）；gh 末尾必打 "(HTTP 404)"
+  if grep -q 'HTTP 404' "$TMP/api.err" 2>/dev/null; then
     return 1   # 源缺席（尚无影子记录/账本分支未建）——过渡期合法，非红
   fi
   echo "FATAL: $repo@$branch $path 拉取失败（非 404）：" >&2; cat "$TMP/api.err" >&2; exit 2
