@@ -38,6 +38,7 @@
 | 有新意图（feature/治理意图） | [ROLE-IR.md](agent/ROLE-IR.md) | **feature IR 开在对应产品仓**（issue 即 IR，无需 PR；intent.yml 模板 org 级继承）；治理 IR 开 .github 仓。IR 流：owner 签署 → spec（[ROLE-SPEC.md](agent/ROLE-SPEC.md)）→ 红队 → 开卡 |
 | 想看全局进度 | `bash ghcb board` | 全状态流水线（ir-draft…done 的 IR 与卡，非只 ready 卡） |
 | App 代签失效（写仓令牌签不出） | [pm-credential-convergence.md](pm-credential-convergence.md) | 按 §2 判定失效 → §3 应急回退（owner PAT，24h 窗口）→ 恢复判定 drill 全绿 |
+| SLO/值班/破线/break-glass 疑问 | [slo-boundary.md](slo-boundary.md) | 责任边界真源（四节：SLO 定义/值班范围/破线升级路径/break-glass——首个托管客户前写死，IR-0006 W4-R2） |
 
 ## §2 高频困惑（#362 实测断裂点，逐条落点）
 
