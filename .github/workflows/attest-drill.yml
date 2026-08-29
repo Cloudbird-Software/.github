@@ -1,0 +1,108 @@
+name: attest-drill
+# 签名证据包演练面（IR-0006 W4-R3 / 卡 #420 / SC-4 / ADR-0103）
+#
+# 全链（AC-8e 部署可回溯）：
+#   .github@SHA 产物（git archive tar.gz）
+#   → CIW attest_pack（SBOM+attestation，RS256——私钥 ATTEST_SIGNING_KEY secret）
+#   → attest_verify 机械验证（AC-8f：digest 复算+验签，INV-01 零 LLM）
+#   → 绑定 archive evidence/（write_evidence 判定记录+证据包文件，PR 面）
+#   → attest-trace 回溯实测（账本反查→包→commit→git archive 重建→内容级验证）
+#
+# 产物本体不入 git（INV-06 摘要纪律）：git 侧只存 SBOM/attestation/事件摘要；
+# 产物可由 materials.git_commit 经 git archive 复得。
+on:
+  workflow_dispatch: {}
+  # 骨架期手动触发；真实部署产物管线接入后转周期（release/tag 钩子）
+
+permissions: {}
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 拉取 CIW 证据包工具（sparse：pipeline/attestation）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --filter=blob:none --sparse \
+            "https://x-access-token:${GH_TOKEN}@github.com/Cloudbird-Software/CI-Workflows.git" ciw
+          git -C ciw sparse-checkout set pipeline/attestation
+      - name: 产物 + 证据包（pack）+ 机械验证（AC-8f）
+        env:
+          ATTEST_SIGNING_KEY: ${{ secrets.ATTEST_SIGNING_KEY }}
+          CARD: Cloudbird-Software/.github#420
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          git archive --format=tar.gz -o artifact.tar.gz "$SHA"
+          python3 ciw/pipeline/attestation/attest_pack.py \
+            --artifact artifact.tar.gz --repo Cloudbird-Software/.github \
+            --commit "$SHA" --card "$CARD" --tenant cloudbird-internal --out bundle
+          # 首发验证：字节级 digest + SBOM 重算 + RS256 验签 + commit/card 锚
+          python3 ciw/pipeline/attestation/attest_verify.py \
+            --bundle bundle --artifact artifact.tar.gz \
+            --pubkey ciw/pipeline/attestation/keys/attest-pub.pub \
+            --expect-commit "$SHA" --expect-card "$CARD"
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+      - name: 绑定 archive evidence/ 判定记录（write_evidence 唯一写入器，PR 面）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          CARD: Cloudbird-Software/.github#420
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ART_D=$(python3 -c "import json;print(json.load(open('bundle/attestation.json'))['subject']['digest']['sha256'])")
+          SBOM_D=$(python3 -c "import json;print(json.load(open('bundle/attestation.json'))['materials']['sbom_sha256'])")
+          BID="evidence/attestations/$SHA-${ART_D:0:12}"
+          git clone --depth 5 "https://x-access-token:${GH_TOKEN}@github.com/Cloudbird-Software/archive.git" arch
+          mkdir -p "arch/$BID"
+          cp bundle/sbom.json bundle/attestation.json "arch/$BID/"
+          cat > ev.json <<EV
+          {
+            "ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "kind": "decision",
+            "action": "attestation-pack",
+            "verdict": "signed",
+            "subject": {"wave": "W4-R3", "card": "$CARD", "tenant": "cloudbird-internal", "commit": "$SHA"},
+            "actor": {"identity": "attest-drill-bot", "role": "bot", "model": null},
+            "inputs_digest": "sha256:$(sha256sum "arch/$BID/attestation.json" | cut -d' ' -f1)",
+            "payload": "{\"bundle_ref\": \"$BID\", \"artifact_digest\": \"$ART_D\", \"sbom_sha256\": \"$SBOM_D\", \"verify\": \"signed+verified\"}"
+          }
+          EV
+          python3 arch/scripts/write_evidence.py --event ev.json --ledger arch/evidence/ledger.jsonl
+          python3 arch/scripts/write_evidence.py --checkpoint --ledger arch/evidence/ledger.jsonl --checkpoints arch/evidence/checkpoints
+          python3 arch/scripts/verify_evidence.py --ledger arch/evidence/ledger.jsonl --checkpoints arch/evidence/checkpoints
+          git -C arch config user.name attest-drill-bot && git -C arch config user.email attest-bot@users.noreply.github.com
+          BR="attest-$RUN_ID"
+          git -C arch checkout -b "$BR"
+          git -C arch add -A
+          git -C arch commit -m "evidence: 签名证据包绑定（IR-0006 W4-R3，run #$RUN_ID，链验通过）"
+          git -C arch push "https://x-access-token:${GH_TOKEN}@github.com/Cloudbird-Software/archive.git" "HEAD:refs/heads/$BR"
+          export GH_TOKEN
+          gh pr create --repo Cloudbird-Software/archive --head "$BR" --title "evidence: 签名证据包绑定（IR-0006 W4-R3 演练，run #$RUN_ID）" \
+            --body "Card: Cloudbird-Software/.github#420
+
+          自动生成（attest-drill run #$RUN_ID）：SBOM+attestation 入 evidence/attestations/，判定记录经 write_evidence 唯一写入器追加（append-only+checkpoint 前进）。verify.yml 链验绿后可合。" \
+            | tee pr-url.txt
+          echo "ARCH_PR=$(grep -o '[0-9]*' pr-url.txt | tail -1)" >> "$GITHUB_ENV"
+      - name: 回溯实测（AC-8e：从判定记录反查产物全链）
+        env:
+          CARD: Cloudbird-Software/.github#420
+        run: |
+          set -euo pipefail
+          # 从 PR 分支账本反查（合并前即可回溯——绑定即生效）
+          BR="attest-$RUN_ID"
+          git -C arch fetch origin "$BR" 2>/dev/null || true
+          bash governance/attest-trace.sh \
+            --ledger arch/evidence/ledger.jsonl \
+            --bundle-root arch \
+            --git-repo . \
+            --verify-cmd "python3 ciw/pipeline/attestation/attest_verify.py --bundle {BUNDLE} --artifact {ARTIFACT} --pubkey ciw/pipeline/attestation/keys/attest-pub.pub --content-only --expect-commit $SHA --expect-card $CARD"
+          echo "OK 回溯全链绿（账本→证据包→commit→git archive 重建→内容级验证）——archive PR #$ARCH_PR 待 verify.yml 绿后合并"
