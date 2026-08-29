@@ -1,0 +1,72 @@
+name: 工作卡（wave）
+description: 波次工作卡——wave-planner 产卡用（IR-0006 W2-C3 / IFACE-03：budget/capabilities/evidence 可选块）
+labels: [type:card]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        卡正文是机器解析契约（conductor T7 解析 / cost-check 波次视图消费）——
+        标题与块名不可改写。budget/capabilities/evidence 三块可选：不写=无预算
+        约束（缺省语义）；写了则必须合法（非法=T7 拒绝就绪，fail-closed）。
+        预算硬停语义：on_exceed: hard-stop 超限置熔断+撤 auto-merge+开 P0
+        （ADR-0040 复位流程不变）；warn 只告警。
+  - type: textarea
+    id: header
+    attributes:
+      label: 卡头（父意图/Spec/波次/依赖）
+      description: 单行引用块——父意图: #n | Spec: specs/IR-NNNN/spec.md vN | 波次: W2 | 依赖: …
+      placeholder: |
+        > 父意图: #402 | Spec: `specs/IR-0006/spec.md` v1 | 波次: W2 | 依赖: W1 退出判据
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: 任务
+      description: 一段话说清本卡要交付什么
+    validations:
+      required: true
+  - type: textarea
+    id: ac
+    attributes:
+      label: AC（Given-When-Then）
+      description: 逐条 id + given/when/then——验收谓词的锚点
+    validations:
+      required: true
+  - type: textarea
+    id: blast
+    attributes:
+      label: blastRadius（预测）
+      description: 预计触碰面（仓:路径 列表）
+    validations:
+      required: true
+  - type: textarea
+    id: budget
+    attributes:
+      label: budget（波次预算）
+      description: >-
+        四元组+on_exceed（YAML）。至少声明一项；on_exceed 缺省 hard-stop。
+        cost-check 按统一账本 subject 聚合对账（BEH-07）；human_minutes 暂无账本源（只报告）。
+      placeholder: |
+        usd: 5.0
+        tokens: 200000
+        wallclock_sec: 7200
+        human_minutes: 120
+        on_exceed: hard-stop
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: capabilities（能力 allowlist）
+      description: >-
+        allowlist 式引用，仅两形态：org-secret:<大写名>（org secret）或
+        vault:<路径>（内网域 Vault——值永不进 Git）。
+      placeholder: |
+        - org-secret:CNB_POOL_KEY
+        - vault:secret/wave/w2c1
+  - type: textarea
+    id: evidence
+    attributes:
+      label: evidence（证据要求）
+      description: 本卡收口必须在本卡生命周期内落进统一账本的 action 列表
+      placeholder: |
+        - gate.merge-verdict
