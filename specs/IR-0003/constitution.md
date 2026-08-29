@@ -7,6 +7,10 @@
 > 审查通过后：本文作为 IR-0003「重订宪法」核心附件走流程，spec v4 吸收条款级变更。
 > v2.1：按 owner 五问修订——§4 全量展开、§11 管家唤醒与统一入口、§12 状态可视化。
 > v2.2：按 owner 业务模式陈述（2026-08-21）增补 §13 及三处小修订（§4C/§9/§10）。
+> v2.3：跨族红队清零版（签署 2026-08-21）。
+> v2.4（IR-0006 W1-A2，卡 #405）：吸收治理总纲 v1.0 三组扩展条款——I3 证据账本三层、
+> I4 Wave 对象 schema、I7 云内网入图三面分离——为 §14；**§5 逐字未动**（硬谓词+shadow
+> 为硬边界，ADR-0103 决策 1：risk_class 仅参数包选择器，裁决语义不参数化）。
 
 ## 0. 一句话（经前提异议修正版）
 
@@ -332,6 +336,52 @@ FDE 的交付动作可复用主流水线——客户定制 = 对产品仓发 IR 
 理由：核心生产流程未跑通前，这些都是无源之水。触发条件：任一假设被验证为真
 （有真实客户/真实训练需求）时，按正常 IR 流程立项。
 
+## 14. 三面分离与证据账本（v2.4，IR-0006 总纲吸收）
+
+> 来源：治理总纲 v1.0 I3/I4/I7 三组扩展条款，经 absorption-map.md 落位吸收
+> （ADR-0103）。本节为宪法级扩展；**§5 硬谓词+shadow 不动**——risk_class
+> 仅是参数包选择器（门禁集/entitlement 档/介入点），永不是裁决输入。
+
+### 14a. I3 证据账本三层（判定/轨迹/丢弃）
+
+一切判定事件（gate 裁决/成本/审批/决策）进统一证据账本，三层分离：
+
+| 层 | 载体 | 纪律 |
+|---|---|---|
+| 判定层 | archive 仓 `evidence/`（git） | append-only + hash 链（ADR-0062 平移）；月度 checkpoint（链头 hash+当月汇总提交 git）；独立脚本可从任意旧 blob 复算整链，**链断=红**（fail-closed） |
+| 轨迹层 | 云内网对象存储（blob） | git 侧仅存摘要+sha256 指针+保留策略字段；payload 内联上限 **4KB，超限拒写** |
+| 丢弃层 | GitHub 事件面 | transient，不承诺持久，可随时消失 |
+
+- 每条判定记录必含 `tenant` 字段（潮玩公司共用额度的计量分离先行——分家工程另行立项）。
+- 三源（metering/butler/drill）新事件按 schema v1 双写过渡，原 JSONL 只读冻结
+  （平移不搬移，可回退）。
+- 字段命名对齐 OTel gen_ai.* 语义约定；schema 落 standards/。
+
+### 14b. I4 Wave 对象（schema 扩展，不新建 kind）
+
+**Wave ≡ card issue + wave-plan.md**（词汇归并，见 absorption-map 二）。卡模板
+扩展三个字段：
+
+- `budget:` 四元组（usd/tokens/wallclock/human_minutes）+ on_exceed——
+  波次级预算**超限硬停**：熔断+撤 auto-merge+开 issue（复位走 ADR-0040 流程不变）。
+- `capabilities:` allowlist 式 org secret / Vault 引用（agent 上下文零凭据不变）。
+- `evidence:` 判定记录指针（id@sha8 形态，禁引 payload）。
+
+### 14c. I7 云内网入图（三面分离）
+
+治理体系按三面组织（ADR-0103 决策 2）：
+
+| 面 | 载体 | 纪律 |
+|---|---|---|
+| 声明面 | Git（治理仓 specs/、governance/、env 定义仓） | 凡不能写进 Git 声明的就不能被输出（铁律） |
+| 执行面 | 多域：GitHub Actions / 云内网（公网服务器+云电脑池+Vault+LLM 路由）/ CNB 池 | 云内网=事实生产工厂，申报入 providers.yaml（self-cloud-pool、vault 条目）+ env 定义仓（environments/*.yaml 期望态+实况上报）；未申报=漂移 |
+| 判定面 | 恒定 GitHub CI（gate/org-gate/conductor） | **判定锚点永不外置**：云内网池与 CNB 同为可删除层，removal 声明同 CNB 模式（删除后判定语义不变，EX-1 延伸） |
+
+- PM 会话凭证收敛：服务器代签 cloudbrid-agent 短令牌（单仓+短 TTL），
+  个人 PAT 退出日常流程（INV 凭据纪律不变）。
+- 飞书多维表格=投影体系**第四投影**（outbound-only）：label 唯一真源，
+  drop & rebuild 单轮保真，人工修改被下轮纠正并告警（§12 纪律延伸）。
+
 ## 审查指引（owner 请重点看）
 
 - §0 一句话的修正（判断不可压缩）——认吗？
@@ -341,3 +391,6 @@ FDE 的交付动作可复用主流水线——客户定制 = 对产品仓发 IR 
 - §7 反退化设计（独立复算、每周亲手一件、决策卡第三选项）——愿意承诺吗？
 - §11 唤醒矩阵 + 统一入口协议、§12 Project 只读投影板（修正 DECISION-04）——认吗？
 - §13 业务模式假设与四个推论（尤其"现在不建"清单）——认吗？
+- §14（v2.4）三组扩展条款：I3 账本三层（4KB 拒写/链断=红/tenant 必有）、
+  I4 Wave schema 扩展不新建 kind、I7 云内网入图（可删除层+判定锚点不外置）——
+  §5 未动，认吸收边界吗？
