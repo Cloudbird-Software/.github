@@ -1,0 +1,128 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "cloudbird/evidence-standard/record@1"
+title: Evidence Ledger Record (v1, IR-0006 W1-B1 / ADR-0103)
+description: |
+  统一证据账本·判定层记录 schema v1。一切判定事件（gate 裁决/成本/审批/决策）
+  经统一发射器写 archive 仓 evidence/（BEH-01）；append-only + 链式 hash
+  （INV-03，ADR-0062 平移）；月度 checkpoint（BEH-02）。
+
+  三层纪律（宪法 §14a / INV-06）：
+  - 判定层（本 schema）：payload 内联上限 4096 字节（UTF-8 编码后），超限拒写；
+  - 轨迹层：大数据落云内网 blob，git 侧只存 payload_ref（sha256 指针）+保留策略字段；
+  - 丢弃层：GitHub 事件面，transient 不承诺持久。
+
+  字段命名对齐 OTel gen_ai.* 语义约定（映射表见同目录 README.md）。
+  消费方：archive scripts/write_evidence.py（写入执法：4KB/tenant/append-only/hash 链）
+  与 scripts/verify_evidence.py（独立复算：链断=红，fail-closed）。
+type: object
+required: [seq, ts, kind, action, verdict, subject, actor, prev_hash, hash]
+properties:
+  seq:
+    type: integer
+    minimum: 1
+    description: "链内序号，从 1 连续递增（断号=红）"
+  ts:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    description: "ISO 8601 UTC（gen_ai 事件时间戳语义）"
+  kind:
+    enum: [gate, cost, approval, decision]
+    description: "判定事件四类（BEH-01）：gate 裁决 / 成本 / 审批 / 决策"
+  action:
+    type: string
+    minLength: 1
+    description: "事件名（受控词表由发射器侧维护，如 gate.merge-verdict / cost.dispatch-burst）"
+  verdict:
+    type: string
+    minLength: 1
+    description: "判定结论（如 pass/fail/blocked/survived/insufficient——语义由 action 域定义）"
+  subject:
+    type: object
+    description: "判定对象四元组（IFACE-01）；card 为三源统一查询 join key（AC-4）"
+    required: [card, tenant]
+    properties:
+      wave:
+        type: string
+        description: "波次（如 W1-B1）；波次内事件可缺省 subject.wave（卡即波次成员）"
+      card:
+        type: string
+        pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"
+        description: "owner/repo#issue——卡绑定（≈ gen_ai.conversation.id 关联语义）"
+      tenant:
+        type: string
+        minLength: 1
+        description: "计量租户（必填，宪法 §14a：每条判定记录必含 tenant；多租户计量分离）"
+      commit:
+        type: string
+        pattern: "^[0-9a-f]{7,40}$"
+        description: "被判定对象 commit SHA（github 拉 PR head 语义）"
+  actor:
+    type: object
+    required: [identity, role]
+    properties:
+      identity:
+        type: string
+        minLength: 1
+        description: "行为者标识（GitHub login / App slug；≡ gen_ai.system 责任主体语义）"
+      role:
+        enum: [owner, agent, bot, human]
+        description: "行为者角色（conductor guard 同词表）"
+      model:
+        type:
+          - "null"
+          - string
+        description: "LLM 判定模型（≡ gen_ai.request.model；非 LLM 判定为 null——机械判定锚点 INV-01）"
+  cost:
+    type: object
+    description: "本次判定消耗（≡ gen_ai.usage.* 归账语义；无消耗可省略整节）"
+    properties:
+      tokens:
+        type: integer
+        minimum: 0
+        description: "token 总量（≡ gen_ai.usage.input_tokens+output_tokens 汇总）"
+      usd:
+        type: number
+        minimum: 0
+        description: "美元成本（metering 归账口径）"
+      wall_sec:
+        type: number
+        minimum: 0
+        description: "墙钟秒数"
+  inputs_digest:
+    type: string
+        # 校验执法在写入器（write_evidence.py）：必须为 64 位十六进制 sha256
+    description: "判定输入摘要 sha256（provenance 锚点；witness 不可伪造性由链 hash 承担）"
+  payload:
+    type:
+      - "null"
+      - string
+    description: |
+      内联判定载荷（摘要/结论正文）。软上限 4096 字节（UTF-8 编码长度）：
+      schema 层文档化，写入器硬执法（超限拒写，INV-06/AC-3）；大数据走轨迹层
+      payload_ref。payload 与 payload_ref 可同时为空（纯判定事实记录）。
+  payload_ref:
+    type:
+      - "null"
+      - object
+    description: "轨迹层指针（W1-B3 协议）：blob sha256+保留策略字段；git 侧零 payload 本体"
+    required: [sha256, store]
+    properties:
+      sha256:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+      store:
+        type: string
+        description: "存储位置标识（如 self-cloud-blob://&lt;bucket&gt;/&lt;key&gt;）"
+      retention:
+        type: string
+        description: "保留策略（如 90d / 1y / forever——EL-2 执行面）"
+  prev_hash:
+    type:
+      - "null"
+      - string
+    description: "链前记录 hash（首条为 null；断链=红，fail-closed）"
+  hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: "本记录内容 hash（sha256，canonical JSON 序列化后计算——不含自身字段）"
+additionalProperties: false
