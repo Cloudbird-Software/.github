@@ -8,8 +8,9 @@ name: elevation
 # 铁律对齐：
 # - 默认拒绝：reason/spec_ref 缺失（HO 场景 3）、能力未声明、角色不匹配、
 #   TTL 越界 → deny（裁决逻辑唯一真源=governance/elevation.py，纯函数可测）。
-# - 判定锚点机械（INV-01/02）：role 取 GitHub author_association（OWNER→owner）
-#   与 actor 身份（cloudbrid-agent[bot]→agent），workflow 不自判。
+# - 判定锚点机械（INV-01/02）：role 取 GitHub author_association（org 仓
+#   OWNER/MEMBER→owner——一人公司语境 MEMBER 即 owner 本人）与 actor 身份
+#   （cloudbrid-agent[bot]→agent），workflow 不自判。
 # - append-only（ADR-0062）：账本经 evidence_shadow.py 链式追加，验链后推送；
 #   幂等=delivery_id（评论 id）已入账即 no-op（重复投递不双写）。
 # - v0 边界：裁决+记账+TTL 收回闭环；不铸造真实平台凭证（提权档
@@ -62,10 +63,15 @@ jobs:
           CARD="Cloudbird-Software/.github#${ISSUE_N}"
           printf '%s\n' "$COMMENT_BODY" >"$TMP/comment.txt"
 
-          # role 判定锚点机械（INV-01）：OWNER→owner；cloudbrid-agent App→agent；其余→none
-          if [[ "$AUTHOR_ASSOC" == "OWNER" ]]; then ROLE=owner
+          # role 判定锚点机械（INV-01）：OWNER/MEMBER→owner（org 仓 owner 的
+          # author_association 呈 MEMBER——一人公司语境 MEMBER 即 owner 本人，
+          # 2026-08-29 实测）；cloudbrid-agent App→agent；其余→none
+          if [[ "$AUTHOR_ASSOC" == "OWNER" || "$AUTHOR_ASSOC" == "MEMBER" ]]; then ROLE=owner
           elif [[ "$ACTOR" == "cloudbrid-agent[bot]" ]]; then ROLE=agent
           else ROLE=none; fi
+          # 影子账本 actor.role 枚举（owner/agent/bot/human）：裁决 role=none 的
+          # 请求方按事实身份记 human（none 非法枚举——实测 exit 3）
+          if [[ "$ROLE" == "none" ]]; then AROLE=human; else AROLE=$ROLE; fi
           echo "role=$ROLE (assoc=$AUTHOR_ASSOC actor=$ACTOR)"
 
           # ---- 台账基线（clone elevation-ledger；不存在=创世） ----
@@ -103,7 +109,7 @@ jobs:
           # ---- 台账追加（schema v1 链式 hash；kind=approval，AC-9c subject 可查询） ----
           V=$(cat "$TMP/verdict.json")
           jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg card "$CARD" \
-              --arg requester "$REQUESTER" --arg role "$ROLE" --argjson v "$V" \
+              --arg requester "$REQUESTER" --arg role "$AROLE" --argjson v "$V" \
               '{ts:$ts, kind:"approval", action:("elevation."+$v.verdict), verdict:$v.verdict,
                 subject:{card:$card, tenant:"cloudbird-internal"},
                 actor:{identity:$requester, role:$role},
