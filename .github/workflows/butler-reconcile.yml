@@ -48,3 +48,33 @@ jobs:
           STALE_DAYS_OVERRIDE: ${{ inputs.stale_days_override }}
           BUTLER_DRY_RUN: ${{ inputs.dry_run }}
         run: bash governance/butler-reconcile.sh
+      - name: 影子账本落盘（butler-ledger 分支，IR-0006 W1-B2 / BEH-03）
+        # butler 源影子持久化：本地 shadow-evidence.jsonl relink 续接 butler-ledger
+        # 基链（双侧验链，防覆盖掩盖篡改）后写回。always()：扫描有发现（exit 1）
+        # 时审计事件同样必须落账（append-only 纪律优先于本轮结论）。
+        if: ${{ always() }}
+        env:
+          BUTLER_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHADOW="governance/butler/shadow-evidence.jsonl"
+          if [[ ! -s "$SHADOW" ]]; then
+            echo "OK 本轮无影子记录（audit_emit 未触发或 dry-run）——跳过（幂等）"
+            exit 0
+          fi
+          git config --global user.name butler-ledger-bot && git config --global user.email butler-bot@users.noreply.github.com
+          if ! git clone --depth 1 "https://x-access-token:${BUTLER_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger -b butler-ledger 2>/dev/null; then
+            git clone --depth 1 "https://x-access-token:${BUTLER_TOKEN}@github.com/Cloudbird-Software/.github.git" ledger
+            git -C ledger checkout -b butler-ledger
+          fi
+          BASE="ledger/$SHADOW"
+          [[ -f "$BASE" ]] || : > "$BASE"
+          python3 governance/evidence_shadow.py relink --base "$BASE" --local "$SHADOW" --out merged.jsonl
+          python3 governance/evidence_shadow.py verify --file merged.jsonl
+          mkdir -p "ledger/governance/butler"
+          cp merged.jsonl "$BASE"
+          git -C ledger add "$SHADOW"
+          git -C ledger diff --cached --quiet && { echo "OK 影子无新增——不提交（幂等）"; exit 0; }
+          git -C ledger commit -m "butler: 影子账本追加（IR-0006 W1-B2 双写，链验通过）"
+          for i in 1 2 3; do git -C ledger push "https://x-access-token:${BUTLER_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/butler-ledger && break
+            git -C ledger pull --rebase "https://x-access-token:${BUTLER_TOKEN}@github.com/Cloudbird-Software/.github.git" butler-ledger || true; sleep 5; done
