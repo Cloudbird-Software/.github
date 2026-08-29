@@ -60,7 +60,8 @@ for ent in json.load(open(sys.argv[1], encoding="utf-8")):
             base64.b64decode(ent["content"]).decode("utf-8"))
 PYEOF
 else
-  if ! grep -qiE 'not found|no ref found' "$TMP/api.err" 2>/dev/null; then
+  # 同 fetch_file：按 "HTTP 404" 状态码判源缺席（报文变体猜谜必漏——见上方注释）
+  if ! grep -q 'HTTP 404' "$TMP/api.err" 2>/dev/null; then
     echo "FATAL: metering-ledger 目录拉取失败：" >&2; cat "$TMP/api.err" >&2; exit 2
   fi
 fi
