@@ -272,8 +272,10 @@ class Feishu:
                        {"records": [self._sanitize(r) for r in records[i:i + 500]]})
 
     def batch_update(self, table_id, records):
+        # POST 必须（run 33254039067 实测）：PUT batch_update 被 400 拒
+        # （field validation failed: fields is required——飞书只认 POST 形态）
         for i in range(0, len(records), 500):
-            self._http("PUT", self._records_path(table_id) + "/batch_update",
+            self._http("POST", self._records_path(table_id) + "/batch_update",
                        {"records": [self._sanitize(r) for r in records[i:i + 500]]})
 
     @staticmethod
@@ -284,8 +286,10 @@ class Feishu:
         return rec
 
     def batch_delete(self, table_id, record_ids):
+        # POST 必须（实测 2026-08-29）：POST batch_delete {"records":[id]} →
+        # deleted:true；DELETE 同路径 → RecordIdNotFound（飞书只认 POST 形态）
         for i in range(0, len(record_ids), 500):
-            self._http("DELETE", self._records_path(table_id) + "/batch_delete",
+            self._http("POST", self._records_path(table_id) + "/batch_delete",
                        {"records": record_ids[i:i + 500]})
 
 
