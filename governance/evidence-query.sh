@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# evidence-query.sh —— 三源统一证据查询（IR-0006 W1-B2 / BEH-03 / ADR-0103，AC-4a）
+# evidence-query.sh —— 四源统一证据查询（IR-0006 W1-B2 / BEH-03 / ADR-0103，AC-4a）
 #
-# 一条命令跨三源拉取 schema v1 影子账本、逐源验链（fail-closed：链断=红）、
+# 一条命令跨源拉取 schema v1 影子账本、逐源验链（fail-closed：链断=红）、
 # 按时间归并输出统一 JSONL（stdout）+ 分源统计（stderr）：
 #   源 1  metering   Cloudbird-Software/CI-Workflows @ metering-ledger   shadow-evidence-*.jsonl（根）
 #   源 2  drill      Cloudbird-Software/.github      @ drill-ledger     governance/drill/shadow-evidence.jsonl
 #   源 3  butler     Cloudbird-Software/.github      @ butler-ledger    governance/butler/shadow-evidence.jsonl
+#   源 4  elevation  Cloudbird-Software/.github      @ elevation-ledger governance/elevation/shadow-evidence.jsonl
+#   （W2-C4 JIT 提权裁决/收回记录——subject 可查询即 AC-9c 锚点）
 #
 # 用法:
 #   bash governance/evidence-query.sh [--card owner/repo#n] [--json]   # --json=汇总行也走 stdout
@@ -67,19 +69,21 @@ else
 fi
 DRILL_OK=0; fetch_file "Cloudbird-Software/.github" "drill-ledger" "governance/drill/shadow-evidence.jsonl" "$TMP/drill.jsonl" && DRILL_OK=1 || [[ $? -eq 1 ]] || exit 2
 BUTLER_OK=0; fetch_file "Cloudbird-Software/.github" "butler-ledger" "governance/butler/shadow-evidence.jsonl" "$TMP/butler.jsonl" && BUTLER_OK=1 || [[ $? -eq 1 ]] || exit 2
+ELEV_OK=0; fetch_file "Cloudbird-Software/.github" "elevation-ledger" "governance/elevation/shadow-evidence.jsonl" "$TMP/elev.jsonl" && ELEV_OK=1 || [[ $? -eq 1 ]] || exit 2
 
 # ---- 逐源验链 + 归并输出（链断=exit 3：不可信数据不出结果） ----
-export CARD_FILTER JSON_ONLY DRILL_OK BUTLER_OK
-python3 - "$DIR/evidence_shadow.py" "$SRC_METER" "$TMP/drill.jsonl" "$TMP/butler.jsonl" "$TMP" <<'PYEOF'
+export CARD_FILTER JSON_ONLY DRILL_OK BUTLER_OK ELEV_OK
+python3 - "$DIR/evidence_shadow.py" "$SRC_METER" "$TMP/drill.jsonl" "$TMP/butler.jsonl" "$TMP/elev.jsonl" "$TMP" <<'PYEOF'
 import glob, json, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
 import evidence_shadow  # noqa: E402  验链与 CI-Workflows 侧同源语义
 
-metering_dir, drill_f, butler_f, tmp = sys.argv[2:6]
+metering_dir, drill_f, butler_f, elev_f, tmp = sys.argv[2:7]
 sources = {"metering": sorted(glob.glob(os.path.join(metering_dir, "shadow-evidence-*.jsonl"))),
            "drill": [drill_f] if os.environ.get("DRILL_OK") == "1" else [],
-           "butler": [butler_f] if os.environ.get("BUTLER_OK") == "1" else []}
+           "butler": [butler_f] if os.environ.get("BUTLER_OK") == "1" else [],
+           "elevation": [elev_f] if os.environ.get("ELEV_OK") == "1" else []}
 errs, recs = [], []
 for src, files in sources.items():
     for f in files:
@@ -102,7 +106,7 @@ for r in out:
 
 summary = {
     "total": len(out),
-    "by_source": {s: sum(1 for r in out if r["source"] == s) for s in ("metering", "drill", "butler")},
+    "by_source": {s: sum(1 for r in out if r["source"] == s) for s in ("metering", "drill", "butler", "elevation")},
     "by_tenant": {},
     "by_card_top": {},
 }
