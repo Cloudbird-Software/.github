@@ -170,7 +170,9 @@ def main() -> int:
           f"指标 {len(policy['metrics'])} 项，违 {len(failures)}）")
 
     if args.event_out:
+        import datetime
         event = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "kind": "gate",
             "action": "eval-noninferiority",
             "verdict": "green" if verdict == "green" else "red",
