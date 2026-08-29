@@ -95,6 +95,7 @@ jobs:
       - name: 回溯实测（AC-8e：从判定记录反查产物全链）
         env:
           CARD: Cloudbird-Software/.github#420
+          RUN_ID: ${{ github.run_id }} # step env 独立——run 33261139414 实测：set -u 下未定义=unbound 红
         run: |
           set -euo pipefail
           # 从 PR 分支账本反查（合并前即可回溯——绑定即生效）
