@@ -1,0 +1,34 @@
+schema_version: 1
+# ============================================================================
+# elevation.yaml —— JIT 提权策略表（唯一授权真源）
+# 卡: IR-0006 W2-C4（.github#415）/ BEH-05 / HO 场景 3
+# 执行: governance/elevation.py adjudicate（转 .github/workflows/elevation.yml 消费）
+#
+# 铁律（默认拒绝）：能力未声明/角色不匹配/超 TTL/缺理由或 spec 引用 = deny。
+# 提权是瞬时能力（JIT）：grant 记录带 expires_at，elevation.yml 每小时 sweep
+# 到期未收回的 grant 补 revoke 记录（AC-9d：无长期驻留提权断言=open-check）。
+# 批准/拒绝/收回记录统一按 schema v1 落 elevation-ledger（kind=approval，
+# subject.card 可查询——evidence-query 第 4 源）。
+# ============================================================================
+defaults:
+  # 未声明 ttl 的缺省（BEH-05：TTL≤波次——波次租约上限 240 分钟，对齐
+  # arbiter capabilities.yaml defaults.ttl_minutes）
+  ttl_minutes: 240
+request:
+  # HO 场景 3（凭证失效面）：无理由或无 spec 引用必拒——fail-closed 方向
+  required: [reason, spec_ref]
+capabilities:
+  # 受控能力档（allowlist；未知=拒绝）。v0 声明三档（写面分级）：
+  org-variable-write:
+    # org Actions 变量写（例：熔断复位 AUTO_MERGE_DISABLED PATCH——ADR-0040
+    # 复位路径人工面，提权代签走本档；短 TTL 严控）
+    allowed_roles: [agent, owner]
+    max_ttl_minutes: 60
+  label-write:
+    # 治理标签写（state:* 切换补偿等）
+    allowed_roles: [agent, owner]
+    max_ttl_minutes: 240
+  ledger-append:
+    # 台账面写（elevation 自身账本外）
+    allowed_roles: [agent, owner]
+    max_ttl_minutes: 120
