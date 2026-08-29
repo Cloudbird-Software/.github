@@ -1,0 +1,110 @@
+name: eval-wave
+# optimization 波次 exit gate（IR-0006 W5-E2 / 卡 #422 / AC-10c+10d / BEH-08）
+#
+# 全链：CIW 基线 commit 抽取被优化物基线版 → 同 harness 同语料跑
+# 基线/候选两份指标报告 → governance/eval-gate.py 非劣性家族裁决（fail-closed）
+# → 判定事件经 write_evidence 追加 archive evidence/ledger.jsonl（PR 面）
+# → 绿才过；红=workflow 红（波次不得收口，无默认绿）。
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  eval-wave:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CARD: Cloudbird-Software/.github#422
+      WAVE: W5-OPT-1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 波次注册表断言（policy/waves.yaml——exit gate 绑定面）
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, sys, yaml
+          w = yaml.safe_load(open("governance/policy/waves.yaml", encoding="utf-8"))
+          assert w["schema"] == "governance-waves/v1"
+          wave = next(x for x in w["waves"] if x["id"] == "W5-OPT-1")
+          assert wave["kind"] == "optimization"
+          assert wave["card"] == "Cloudbird-Software/.github#422"
+          assert re.fullmatch(r"HO-[0-9]{4}@[0-9a-f]{8}", wave["baseline_quad"])
+          assert wave["exit_gate"]["verdict_required"] == "green"
+          print("OK waves.yaml 断言绿（kind/baseline_quad/exit_gate 绑定）")
+          PY
+      - name: 拉取 CIW（候选=优化后 main：rules+harness+corpus）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 50 "https://x-access-token:${GH_TOKEN}@github.com/Cloudbird-Software/CI-Workflows.git" ciw
+          # 基线被优化物：policy 钉的 baseline_commit（优化前）
+          BASELINE_COMMIT=$(python3 -c "import yaml;print(yaml.safe_load(open('governance/policy/waves.yaml'))['waves'][0]['optimized']['baseline_commit'])")
+          git -C ciw show "${BASELINE_COMMIT}:pipeline/ocr/rules.yaml" > baseline-rules.yaml
+          echo "BASELINE_RULES_SHA=$(sha256sum baseline-rules.yaml | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: 基线/候选评测（同 harness 同语料只换被优化物）
+        run: |
+          set -euo pipefail
+          python3 ciw/pipeline/ocr/eval/eval_wave.py \
+            --corpus ciw/pipeline/ocr/eval/corpus.jsonl \
+            --diff ciw/pipeline/ocr/eval/corpus.diff \
+            --rules baseline-rules.yaml --out base-report.json
+          python3 ciw/pipeline/ocr/eval/eval_wave.py \
+            --corpus ciw/pipeline/ocr/eval/corpus.jsonl \
+            --diff ciw/pipeline/ocr/eval/corpus.diff \
+            --rules ciw/pipeline/ocr/rules.yaml --out cand-report.json
+      - name: 非劣性家族裁决（exit gate——红=本 job 红，波次不得收口）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 污染检查输入面=优化 PR diff（数据集 digest 禁入优化材料）
+          OPT_PR=$(python3 -c "import yaml;print(yaml.safe_load(open('governance/policy/waves.yaml'))['waves'][0].get('optimized',{}).get('pr',''))")
+          if [[ -n "$OPT_PR" ]]; then
+            gh pr diff "$OPT_PR" --repo Cloudbird-Software/CI-Workflows > opt-inputs.txt
+          else
+            : > opt-inputs.txt   # 无 PR 面（直推）——空输入面=污染面为空，检查仍机械执行
+          fi
+          DATASET_DG=$(sha256sum ciw/pipeline/ocr/eval/corpus.jsonl | cut -d' ' -f1)
+          python3 governance/eval-gate.py \
+            --policy governance/policy/eval-gates.yaml \
+            --baseline base-report.json --candidate cand-report.json \
+            --card "$CARD" --tenant cloudbird-internal \
+            --dataset-digest "$DATASET_DG" --inputs opt-inputs.txt \
+            --event-out ev.json
+          cp ev.json /tmp/ev.json   # 落账步消费（eval-gate 绿才到这——红已 exit 1）
+      - name: 判定记录落账（write_evidence 唯一写入器，PR 面——AC-10c）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git clone --depth 5 "https://x-access-token:${GH_TOKEN}@github.com/Cloudbird-Software/archive.git" arch
+          python3 - <<'PY'
+          import json
+          ev = json.load(open("/tmp/ev.json"))
+          ev["subject"]["wave"] = "W5-OPT-1"
+          ev["inputs_digest"] = "sha256:" + __import__("hashlib").sha256(open("cand-report.json","rb").read()).hexdigest()
+          json.dump(ev, open("ev.json", "w"), ensure_ascii=False, indent=1)
+          PY
+          python3 arch/scripts/write_evidence.py --event ev.json --ledger arch/evidence/ledger.jsonl
+          python3 arch/scripts/write_evidence.py --checkpoint --ledger arch/evidence/ledger.jsonl --checkpoints arch/evidence/checkpoints
+          python3 arch/scripts/verify_evidence.py --ledger arch/evidence/ledger.jsonl --checkpoints arch/evidence/checkpoints
+          git -C arch config user.name eval-wave-bot && git -C arch config user.email eval-bot@users.noreply.github.com
+          BR="eval-wave-$RUN_ID"
+          git -C arch checkout -b "$BR"
+          git -C arch add -A
+          git -C arch commit -m "evidence: W5-OPT-1 非劣性 run（IR-0006 W5-E2 exit gate 绿，链验通过）"
+          git -C arch push "https://x-access-token:${GH_TOKEN}@github.com/Cloudbird-Software/archive.git" "HEAD:refs/heads/$BR"
+          export GH_TOKEN
+          gh pr create --repo Cloudbird-Software/archive --head "$BR" \
+            --title "evidence: W5-OPT-1 非劣性 run（IR-0006 W5-E2 演练，run #$RUN_ID）" \
+            --body "Card: Cloudbird-Software/.github#422
+
+          自动生成（eval-wave run #$RUN_ID）：optimization 波次 W5-OPT-1 exit gate 裁决（kind=gate / action=eval-noninferiority / verdict=green）经 write_evidence 唯一写入器追加。verify.yml 链验绿后可合——合并即 AC-10c 非劣性 run 记录入账本。"
+          echo "OK exit gate 全链绿：基线/候选同 harness 评测 → 非劣性家族裁决 green → 账本 PR 已开（wave $WAVE）"

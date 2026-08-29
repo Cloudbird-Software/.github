@@ -1,0 +1,30 @@
+# waves.yaml —— 波次注册表（IR-0006 W5-E2 / AC-10d）
+#
+# wave.kind=optimization 的波次路径（走 transitions 状态机 T7→T3→T8 标准
+# 通路）+ **exit gate 附加谓词**：卡收口（state:done）前须存在绑定本波的
+# eval 家族裁决 run 且 verdict=green（fail-closed——eval 家族任一不过=红，
+# 无默认绿）。裁决记录经 write_evidence 追加 archive evidence/ledger.jsonl
+# （append-only，判定层唯一合法写入器）——账本里的 kind=gate /
+# action=eval-noninferiority 事件即"非劣性 run 记录"（AC-10c）。
+#
+# 执行体=.github/workflows/eval-wave.yml（基线/候选同 harness 同语料只换
+# 被优化物——评测装置钉死，指标差异只归因优化本体）。
+schema: governance-waves/v1
+waves:
+  - id: W5-OPT-1
+    kind: optimization            # 首个 optimization 波次（BEH-08）
+    card: Cloudbird-Software/.github#422
+    baseline_quad: HO-0008@557ee371   # holdout eval-quad（引用仅 id@sha8）
+    optimized:
+      repo: Cloudbird-Software/CI-Workflows
+      path: pipeline/ocr/rules.yaml      # 被优化物（真实能力：OCR 后处理规则表）
+      pr: 132                            # 优化 PR（污染检查输入面=其 diff）
+      baseline_commit: 268715216f6882eec6daabc497834af06f99de0b  # 优化前 main（PR #131 合并基）
+    eval:
+      repo: Cloudbird-Software/CI-Workflows
+      harness: pipeline/ocr/eval/eval_wave.py
+      corpus: pipeline/ocr/eval/corpus.jsonl
+    exit_gate:
+      policy: governance/policy/eval-gates.yaml
+      verdict_required: green      # fail-closed：红=波次不得收口
+      ledger_event: eval-noninferiority  # 账本 action 锚（write_evidence 落盘）
