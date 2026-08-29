@@ -1,0 +1,51 @@
+version: 1
+# ============================================================================
+# assets-register.yaml —— 云内网资产登记簿（IR-0006 W1-C1 / ADR-0103）
+# 职责：登记 self-cloud-pool 执行面资产的归属/密钥位置/额度/环境/license 边界。
+# 铁律（同 providers.yaml）：本文件零密钥值——secret 字段只记"位置/引用名"，
+#       值在内网域 Vault，永不进 git、永不进 agent/PM 上下文。
+# GM-4 延伸：未申报资产=漂移（对象在 GitHub 之外的申报侧载体）。
+# 期望态/拓扑随 W1-C2 env 定义仓（environments/*.yaml）承载；本簿登记资产级归属。
+# 数值字段标记 owner-fill 的，由 owner 填真实值——agent 不编造资产事实。
+# ============================================================================
+register:
+  - asset: public-server           # 公网服务器（池化锚点）
+    class: compute-host
+    provider: owner-fill（云厂商/型号）
+    role: 内网调度器宿主 + blob 存储锚点 + 令牌代签服务（W2-C1/C2 落地）
+    env: production-self
+    secrets_location: vault（路径 owner-fill）
+    quota: owner-fill（带宽/出口 IP 数）
+    license: owner-fill
+  - asset: cloud-desktop-pool       # 云电脑池（执行 worker 面）
+    class: compute-worker
+    provider: owner-fill
+    count: owner-fill
+    role: PM 会话/worker 执行域；无状态约束（W2-C1 起执法：持状态负载拒置）
+    env: production-self
+    secrets_location: none（worker 零持久凭据——短票据经服务器签发，W2-C1）
+    quota: owner-fill（API 额度/机时）
+    license: owner-fill（个人/商业边界——分租合规审查点）
+  - asset: vault                    # 内网 Vault 实例
+    class: secret-store
+    role: 执行面凭据面（GitHub PAT 应急副本/飞书凭证/LLM 路由 key——W2-C2 收敛后）
+    env: intranet-only
+    secrets_location: self（物理在内网域，org 不持副本）
+    quota: n/a
+    license: owner-fill
+  - asset: llm-router               # LLM 路由（多模型入口）
+    class: model-gateway
+    role: 执行面 LLM 调用路由；计量经 metering wrapper 统一归账（ADR-0062）
+    env: production-self
+    secrets_location: vault
+    quota: owner-fill（token/速率上限——潮玩公司共用额度须 tenant 分账，W1-B2）
+    license: owner-fill
+tenants:
+  - tenant: cloudbird               # 本公司（默认）
+    shares: [public-server, cloud-desktop-pool, vault, llm-router]
+  - tenant: toy-company             # 潮玩公司（共用 API 额度——计量分离先行）
+    shares: [llm-router]            # 仅额度共用面；计量 tenant tag 注入（W1-B2）
+    note: 分家工程延后（NONGOAL）；本登记先行账目分离
+retention:
+  policy: 本簿为声明面资产（C1 路径 PR+ADR 变更）；数值漂移由 env 定义仓
+    期望态对账覆盖（W4-R1 泛化 drift 引擎），本簿只锁归属与边界。
