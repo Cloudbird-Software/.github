@@ -25,6 +25,16 @@
 #   - actions JSON 为 SLI 字段（#98 口径：auto_merge_rate / check_latency / revert_count）
 #     预留键位——账本 JSON 状态块由 W1-C3 dashboard 脚本负责，本行结构已兼容（机器可
 #     grep '^AUDIT' 提取后 json.loads 尾段）。
+#
+# 影子双写（IR-0006 W1-B2 / BEH-03，ADR-0103）：audit_emit 在输出 AUDIT 行（原层，
+# 只增不改）的同时，按证据 schema v1 追加影子记录到
+#   ${BUTLER_SHADOW_FILE:-<本脚本同目录>/butler/shadow-evidence.jsonl}
+# （kind=gate / action=butler-<名> / verdict=<outcome>；card 哨兵 .github#0，tenant
+# 缺省 cloudbird-internal——env BUTLER_CARD/BUTLER_TENANT 可注入）。影子写入失败
+# =fail-closed（return 2，BEH-01：双写不一致必须当场可见）。影子账本由
+# butler-reconcile 每 6h 落盘 butler-ledger 分支（governance/evidence_shadow.py
+# relink 同款链执法）；其他 workflow 的本地影子随 runner 销毁（丢弃层友海——
+# 持久化优先级在 reconcile 主循环）。
 
 _butler_audit_cli=0
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then _butler_audit_cli=1; fi
@@ -103,6 +113,33 @@ audit_emit() {
       printf '## 管家审计日志（AUDIT，INV-12——宪法 §11）\n' >> "$GITHUB_STEP_SUMMARY" || return 0
     fi
     printf '%s\n' "$line" >> "$GITHUB_STEP_SUMMARY" || return 0
+  fi
+  _shadow_emit "$butler" "$outcome" "$actions" || return 2
+}
+
+# 影子双写（BEH-03）：schema v1 判定记录落本地影子账本（链式 hash，写入器独占）
+_shadow_emit() {
+  [[ -n "$_BUTLER_PY" ]] || return 0   # 无 python 环境：影子无法成链——原层照常（极端降级）
+  local butler="$1" outcome="$2" actions="$3"
+  local here shadow evf
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  shadow="${BUTLER_SHADOW_FILE:-$here/butler/shadow-evidence.jsonl}"
+  evf="$(mktemp)"
+  trap 'rm -f "$evf"' RETURN
+  "$_BUTLER_PY" - "$evf" "$butler" "$outcome" <<'PYEOF' || { echo "FATAL: 影子事件构造失败" >&2; return 2; }
+import datetime, json, sys
+ev = {
+    "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "kind": "gate", "action": f"butler-{sys.argv[2]}", "verdict": sys.argv[3],
+    "subject": {"card": __import__("os").environ.get("BUTLER_CARD", "Cloudbird-Software/.github#0"),
+                "tenant": __import__("os").environ.get("BUTLER_TENANT", "cloudbird-internal")},
+    "actor": {"identity": sys.argv[2], "role": "bot", "model": None},
+}
+open(sys.argv[1], "w", encoding="utf-8").write(json.dumps(ev, ensure_ascii=False))
+PYEOF
+  if ! "$_BUTLER_PY" "$here/evidence_shadow.py" append --file "$shadow" --event-file "$evf" >/dev/null; then
+    echo "FATAL: 影子账本写入失败（$shadow）——fail-closed（BEH-01 双写不一致当场可见）" >&2
+    return 2
   fi
 }
 

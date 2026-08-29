@@ -253,8 +253,8 @@ jobs:
           EOF
           cat rec.json
           python3 governance/drill/drill.py record --history ledger/governance/drill/history.jsonl --json "$(cat rec.json)"
-          git -C ledger add governance/drill/history.jsonl
-          git -C ledger commit -m "drill(seed): 台账追加 $VERDICT（ADR-0069 周演习 run ${RUN_ID}）"
+          git -C ledger add governance/drill/history.jsonl governance/drill/shadow-evidence.jsonl
+          git -C ledger commit -m "drill(seed): 台账追加 $VERDICT（ADR-0069 周演习 run ${RUN_ID}；影子双写 IR-0006 W1-B2）"
           for i in 1 2 3; do git -C ledger push "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/drill-ledger && break
             git -C ledger pull --rebase "https://x-access-token:${DRILL_TOKEN}@github.com/Cloudbird-Software/.github.git" drill-ledger || true; sleep 5; done
           python3 governance/drill/drill.py redrate --history ledger/governance/drill/history.jsonl

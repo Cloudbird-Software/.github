@@ -14,6 +14,7 @@
 """
 import argparse
 import base64
+import hashlib
 import json
 import os
 import random
@@ -227,7 +228,23 @@ def cmd_record(a):
                 die(f"同一 run 的 {rec['kind']} 记录已存在（run_id={rec['run_id']}）")
     with open(a.history, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
-    print(f"OK append 1 行（现有 {len(lines) + 1} 行）")
+    # ---- 影子双写（IR-0006 W1-B2 / BEH-03）：同一判定按证据 schema v1 落影子账本 ----
+    # 原台账只增不改（AC-4b 平移不搬移）；影子事件 kind=gate（演习裁决），
+    # card 哨兵 .github#0（基建事件未绑卡——#0 不参与卡聚合）
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import evidence_shadow
+    shadow = os.path.join(os.path.dirname(os.path.abspath(a.history)), "shadow-evidence.jsonl")
+    shadow_ev = {
+        "ts": rec["ts"], "kind": "gate", "action": f"drill-{rec['kind']}",
+        "verdict": str(rec.get("verdict") or "recorded"),
+        "subject": {"card": "Cloudbird-Software/.github#0", "tenant": "cloudbird-internal"},
+        "actor": {"identity": "drill-seed-bot", "role": "bot", "model": None},
+        "inputs_digest": "sha256:" + hashlib.sha256(
+            json.dumps(rec, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+    evidence_shadow.append(shadow, shadow_ev)
+    print(f"OK append 1 行（现有 {len(lines) + 1} 行；影子 → {shadow}）")
 
 
 def cmd_redrate(a):
@@ -294,7 +311,7 @@ def main():
     p = sub.add_parser("redrate", help="红率+难度趋势聚合（AC-4）")
     p.add_argument("--history", default=os.path.join(here, "history.jsonl"))
     p.add_argument("--fail-unhealthy", action="store_true",
-                   help="红率<100% 时非零退出（workflow 告警用）")
+                   help="红率<100%% 时非零退出（workflow 告警用）")
     p.set_defaults(func=cmd_redrate)
 
     a = ap.parse_args()
