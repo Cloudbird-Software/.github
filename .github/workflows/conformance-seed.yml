@@ -1,0 +1,109 @@
+name: conformance-seed
+# conformance 语料库种子+门禁元治理首跑（IR-0006 W6-M1 / 卡 #423 / AC-1b+1c）
+#
+# 全链：拉 30-50 张已完成卡（state:done type:card）→ 回放三元组语料
+# （初始快照+目标+密封验收，机械校验）→ 四列元治理评审（声明门禁 vs
+# 全仓 job 清单对账）→ 胜出实践晋级首跑（append-only hash 链账本）→
+# 语料+评审+晋级账本落 archive 仓 conformance/（PR 面）。
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      CARD: Cloudbird-Software/.github#423
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 回放采集（30-50 张已完成卡——三元组语料）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p comments
+          # 已完成卡：type:card+state:done closed——取最近 50 张
+          gh api -X GET "search/issues" -f q="repo:Cloudbird-Software/.github is:issue is:closed label:type:card label:state:done" -f per_page=50 -f sort=created -f order=desc \
+            --jq '[.items[] | {number, title, created_at, closed_at, labels: [.labels[].name], body}]' > cards.json
+          N=$(jq length cards.json)
+          echo "拉到已完成卡 $N 张"
+          for num in $(jq -r '.[].number' cards.json); do
+            gh api "repos/Cloudbird-Software/.github/issues/${num}/comments" --paginate \
+              --jq '[.[] | {body}]' > "comments/${num}.json" || echo "[]" > "comments/${num}.json"
+          done
+          python3 governance/conformance-corpus.py harvest \
+            --cards-file cards.json --comments-dir comments --out corpus.jsonl
+          # 机械校验（fail-closed：结构红或 <30 条=本 job 红）
+          python3 governance/conformance-corpus.py validate --corpus corpus.jsonl --min 30
+      - name: 四列元治理评审（声明门禁 vs 全仓 job 清单对账）
+        run: |
+          set -euo pipefail
+          python3 governance/metagov.py review \
+            --policy governance/policy/metrics.yaml \
+            --workflows-dir .github/workflows --out gate-review.json
+      - name: 胜出实践晋级首跑（append-only hash 链，AC-1c）
+        run: |
+          set -euo pipefail
+          cat > rec1.json <<'EOF'
+          {"practice": "fail-closed 双层验证（写入侧宽松+验证侧严格）",
+           "goal": "错误事件进不了账本主链；生成器缺陷在 PR 面早暴露",
+           "evidence": ["run 33263613945（eval-wave 落账步 verify_evidence 红拦截 ts 缺字段）",
+                        "PR Cloudbird-Software/.github#460（缺陷修复留痕）"],
+           "promoted_by": "metagov-review-bot"}
+          EOF
+          cat > rec2.json <<'EOF'
+          {"practice": "同 harness 同语料只换被优化物（eval 归因隔离）",
+           "goal": "optimization 波次指标差异只归因优化本体——非劣性裁决的前提",
+           "evidence": ["run 33263909046（基线/候选同装置评测+GREEN 裁决）",
+                        "PR Cloudbird-Software/CI-Workflows#132（eval harness 落位）"],
+           "promoted_by": "metagov-review-bot"}
+          EOF
+          python3 governance/metagov.py promote --registry promotions.jsonl --record rec1.json
+          python3 governance/metagov.py promote --registry promotions.jsonl --record rec2.json
+          python3 governance/metagov.py verify --registry promotions.jsonl
+      - name: 语料+评审+晋级账本落 archive conformance/（PR 面）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git clone --depth 5 "https://x-access-token:${GH_TOKEN}@github.com/Cloudbird-Software/archive.git" arch
+          mkdir -p arch/conformance
+          cp corpus.jsonl arch/conformance/cards.jsonl
+          cp gate-review.json arch/conformance/gate-review.json
+          cp promotions.jsonl arch/conformance/promotions.jsonl
+          cat > arch/conformance/index.yaml <<EOF
+          schema: conformance-seed/v1
+          generated_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          run_id: ${RUN_ID}
+          corpus_entries: $(grep -c . corpus.jsonl)
+          corpus_sha256: $(sha256sum corpus.jsonl | cut -d' ' -f1)
+          gate_review_sha256: $(sha256sum gate-review.json | cut -d' ' -f1)
+          promotions_records: $(grep -c . promotions.jsonl)
+          promotions_head_hash: $(tail -1 promotions.jsonl | jq -r .hash)
+          EOF
+          git -C arch config user.name conformance-seed-bot && git -C arch config user.email conformance@users.noreply.github.com
+          BR="conformance-seed-$RUN_ID"
+          git -C arch checkout -b "$BR"
+          git -C arch add -f conformance/
+          git -C arch commit -m "conformance: 语料库种子+四列元治理评审+晋级首跑（IR-0006 W6-M1，run #$RUN_ID）"
+          git -C arch push "https://x-access-token:${GH_TOKEN}@github.com/Cloudbird-Software/archive.git" "HEAD:refs/heads/$BR"
+          export GH_TOKEN
+          gh pr create --repo Cloudbird-Software/archive --head "$BR" \
+            --title "conformance: 语料库种子+元治理首跑（IR-0006 W6-M1，run #$RUN_ID）" \
+            --body "Card: Cloudbird-Software/.github#423
+
+          自动生成（conformance-seed run #$RUN_ID）：
+          - conformance/cards.jsonl —— 30-50 张已完成卡回放语料（三元组：初始快照+目标+密封验收，机械校验绿）
+          - conformance/gate-review.json —— 门禁元治理四列评审（声明门禁全对账在册）
+          - conformance/promotions.jsonl —— 胜出实践晋级首跑 2 条（append-only hash 链，verify 绿）
+          - conformance/index.yaml —— 指纹（corpus digest+晋级链头 hash）
+
+          verify.yml 链验绿后可合。"
+          echo "OK W6-M1 全链绿：语料（$(grep -c . corpus.jsonl) 条三元组）+四列评审+晋级 2 条——archive PR 已开"

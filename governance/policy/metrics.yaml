@@ -88,3 +88,48 @@ board:
   # factory-floor 板字段完善（AC-3 / 宪法 §12）：谓词状态数据源=W5-C2 硬谓词信任门
   # （ADR-0071，进行中）——未落前板字段存在但值恒为 pending 标注（字段占位≠造数）
   predicate_status_pending: "pending(W5-C2)"
+
+gate_metagovernance:
+  # 门禁元治理四列指标（IR-0006 W6-M1 / AC-1c——宪法 §4A 阈值唯一来源延伸）：
+  # 每个门禁一行四列；judge=pending 诚实不造数（ADR-0073 决策 7）。
+  # 声明的 gate=<workflow>:<job> 须真实存在于 .github/workflows/*.yml——评审时
+  # 机械对账全仓 job 清单，漂移=红（governance/metagov.py review）。
+  # red_line 列=该门禁 fail-closed 生效锚（负向断言在位=红线可执法；
+  # 带 run 引用=红线已活体触发过——不造数）。
+  four_columns: [gate, judge, data_source, red_line]
+  review_cadence: wave-exit
+  gates:
+    - gate: gate:gate
+      judge: mechanical
+      data_source: governance/tests/*（make gates-pr 治理自测发现面）
+      red_line: "负向断言族在位（test-attest-bind 三负向/test-eval-gate 边界红/test-metagov 断链红）"
+    - gate: eval-wave:eval-wave
+      judge: mechanical
+      data_source: governance/eval-gate.py + policy/eval-gates.yaml（δ/ratio/污染阈值，INV-01）
+      red_line: "run 33263613945（ts 缺字段被账本链验拦截红——fail-closed 生效活体）"
+    - gate: env-drift:drift
+      judge: mechanical
+      data_source: governance/env-drift.py + policy/env-drift.yaml（scope 检测面）
+      red_line: "run 33257903305（dev-self ingress 漂移→exit 1→issue #453 自动开）"
+    - gate: attest-drill:drill
+      judge: mechanical
+      data_source: governance/attest-trace.sh（payload↔attestation 双锚+git archive 重建）
+      red_line: "run 33261139414（RUN_ID unbound 红——绑定步绿/回溯步红分层，无默认绿）"
+    - gate: feishu-drill:drill
+      judge: mechanical
+      data_source: governance/feishu-sync.py（INV-05 label 唯一真源+漂移纠正）
+      red_line: "run 33254361404（人工违规改表被下轮投影纠正+drift 告警入账本）"
+    - gate: governance-drift:drift-check
+      judge: mechanical
+      data_source: governance/GOVERNANCE.yaml + expected-state.json（期望态对账）
+      red_line: "GM-1 模式三消费者实证（governance/env/镜像 tag 后续）"
+    - gate: post-merge-verify:smoke
+      judge: pending
+      data_source: post-merge-verify.yml（合并后冒烟——样本待首红，通道在位）
+      red_line: "pending（fail-closed 通道在位：smoke 红→revert；首红样本尚未发生，不造数）"
+  practice_promotion:
+    # 胜出实践晋级机制（AC-1c）：append-only 账本 archive conformance/promotions.jsonl
+    # （hash 链，改历史必断链——metagov.py promote/verify）。晋级=有证据支撑的
+    # 实践进政策/流程的留痕；evidence 须非空（空证据晋级=自封）。
+    registry: Cloudbird-Software/archive:conformance/promotions.jsonl
+    chain: sha256(canonical JSON 去hash字段)——公式同 write_evidence
