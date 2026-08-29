@@ -74,6 +74,7 @@ spec PR：.github#403（adversary:survived 红队审计通过）；背书 ADR：
 2. **R5 骨架未立项**（IR 非目标：外输三件套另行立项）——conformance/ 产物（32 卡语料+四列评审+晋级账本）已为外输预留底料。
 3. **仪表盘 pending 项**：user_results 全产品仓 pending（埋点未落）、holdout_gap 检测面未建——按 ADR-0073 决策 7 诚实 pending，不造数。
 4. **飞书数字字段字符串怪癖**已修（#450）但飞书 API 形态漂移风险常在——feishu-drill 每日演练=回归面。
+5. **main 直推事件（2026-08-29 17:36 UTC）**：owner 侧另一会话将"一人公司治理体系诊断与落地"巨型提交（15ac9c1）直推 main——绕过全部门禁（治理文件一致性未验）；其携带 holdout/ gitlink 致 CI checkout 全红（#438 同款缺陷），由本 PR 修复（git rm --cached holdout）。直推豁免未登记——建议 owner 醒后按 ADR-0093 同款追认或回退。
 
 ## 结论
 
