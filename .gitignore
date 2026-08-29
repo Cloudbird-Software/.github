@@ -1,3 +1,9 @@
 # Python 编译产物（构建缓存不入库——.#230/#336/#338 曾误提交）
 __pycache__/
 *.pyc
+
+# 工作区内的独立克隆仓（以 gitlink 形式误提交会弄坏 CI checkout——
+# 2026-08-29 9d1f180 实例：fatal: No url found for submodule path）
+.archive-w1d1/
+.ciw/
+env-defs/
