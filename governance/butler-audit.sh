@@ -118,15 +118,17 @@ audit_emit() {
 }
 
 # 影子双写（BEH-03）：schema v1 判定记录落本地影子账本（链式 hash，写入器独占）
+# 注：临时文件清理用显式 rm 不用 RETURN trap——bash 5.2 实测 RETURN trap 会穿透
+# 到调用方函数返回（traps 不随函数作用域恢复），set -u 环境下 $evf 越界即炸
+# （W2-C3 全脚本单测抓出；trap 版曾在 cost-check set -u 下必现 abort）。
 _shadow_emit() {
   [[ -n "$_BUTLER_PY" ]] || return 0   # 无 python 环境：影子无法成链——原层照常（极端降级）
   local butler="$1" outcome="$2" actions="$3"
-  local here shadow evf
+  local here shadow evf ev_rc=0
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   shadow="${BUTLER_SHADOW_FILE:-$here/butler/shadow-evidence.jsonl}"
   evf="$(mktemp)"
-  trap 'rm -f "$evf"' RETURN
-  "$_BUTLER_PY" - "$evf" "$butler" "$outcome" <<'PYEOF' || { echo "FATAL: 影子事件构造失败" >&2; return 2; }
+  "$_BUTLER_PY" - "$evf" "$butler" "$outcome" <<'PYEOF' || ev_rc=$?
 import datetime, json, sys
 ev = {
     "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -137,10 +139,16 @@ ev = {
 }
 open(sys.argv[1], "w", encoding="utf-8").write(json.dumps(ev, ensure_ascii=False))
 PYEOF
+  if [[ $ev_rc -ne 0 ]]; then
+    rm -f "$evf"
+    echo "FATAL: 影子事件构造失败" >&2; return 2
+  fi
   if ! "$_BUTLER_PY" "$here/evidence_shadow.py" append --file "$shadow" --event-file "$evf" >/dev/null; then
+    rm -f "$evf"
     echo "FATAL: 影子账本写入失败（$shadow）——fail-closed（BEH-01 双写不一致当场可见）" >&2
     return 2
   fi
+  rm -f "$evf"
 }
 
 # ---------- CLI 模式（bash butler-audit.sh ...；source 时不执行） ----------
