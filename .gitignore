@@ -14,3 +14,4 @@ env-defs/
 governance/butler/shadow-evidence.jsonl
 governance/feishu/shadow-evidence.jsonl
 governance/env/shadow-evidence.jsonl
+governance/feedback/shadow-evidence.jsonl
