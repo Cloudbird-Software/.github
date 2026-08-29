@@ -39,7 +39,8 @@ entries:
   # 三面分离：本二条目=执行面资产申报（判定锚点恒在 GitHub CI，不随池增减改变）
   - name: self-cloud-pool
     kind: compute           # 自有云内网算力池（公网服务器+云电脑池）
-    entry: 服务器调度器（W2-C1 落地；过渡期=PM 会话经公网服务器驱动云电脑池）
+    entry: 服务器调度器 v0=cnb-bridge 仓 selfcloud/（W2-C1 已落地：Job Contract
+           消费+短票据签发+egress allowlist+无状态约束执法；RUNBOOK §5）
     placement: server-anchored（池化以服务器为锚，ADR-0103 决策 4）
     secrets: []             # 凭据一律走内网域 Vault（本条目零 org secret——分域边界）
     catalog: governance/assets-register.yaml（资产归属/额度/license 边界）
