@@ -1,0 +1,1 @@
+{"action":"butler-feishu-sync","actor":{"identity":"feishu-sync","model":null,"role":"bot"},"hash":"db69dc71e94389a01e89b342c463f9391e44ad78921e9bc9e2b84bde61f35d82","kind":"gate","payload":"{\"skipped\": \"not-provisioned\"}","prev_hash":null,"seq":1,"subject":{"card":"Cloudbird-Software/.github#416","tenant":"cloudbird-internal"},"ts":"2026-08-29T12:42:18Z","verdict":"ok"}
