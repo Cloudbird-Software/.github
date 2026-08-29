@@ -1,0 +1,1 @@
+{"action":"cost.wave-hardstop-drill","actor":{"identity":"wave-drill","role":"bot"},"cost":{"tokens":0,"usd":1.0,"wall_sec":0.0},"hash":"429ad35df221ab7068b44653bf3d0105e91f16680364463b84a83492e740933d","kind":"cost","prev_hash":null,"seq":1,"subject":{"card":"Cloudbird-Software/.github#434","tenant":"cloudbird-internal"},"ts":"2026-08-29T09:30:00Z","verdict":"pass"}
