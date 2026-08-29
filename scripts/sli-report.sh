@@ -9,6 +9,10 @@
 #   pr_duration_p95   = created→merged 秒数的 P95
 #   flaky_rate        = pending（逐 job 日志聚合待 #94 数据源滚动；本期标 pending 不阻塞）
 #   entropy           = 窗口内触及依赖清单的 PR 数（requirements*/package.json/go.mod）+ pending 抑制标记净增
+#   env_face_*        = 环境面 SLI（IR-0006 W4-R2 / AC-8c）：env-ledger 影子账本
+#                       （.github @ env-ledger governance/env/shadow-evidence.jsonl）
+#                       读取窗口内对账轮数/末轮漂移数/收敛率/新鲜度——环境对账
+#                       SLO 骨架数据源（SLO 定义/阈值真源=docs/slo-boundary.md）
 #
 # 抽样审计：从窗口内 agent-合并 PR 随机抽 SLI_SAMPLE_SIZE(3) 个，seed=ISO 周（可复现、防挑软）。
 # 阈值升级：escape_rate>0 连续两周 → 自动开 P1 issue（T5）。
@@ -28,7 +32,54 @@ WINDOW_DAYS="${SLI_WINDOW:-7}"
 STUCK_HOURS="${SLI_STUCK_HOURS:-48}"
 SAMPLE_SIZE="${SLI_SAMPLE_SIZE:-3}"
 SINCE=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=int('$WINDOW_DAYS'))).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+ENV_STALE_HOURS="${SLI_ENV_STALE_HOURS:-48}" # env 对账新鲜度阈值（真源=docs/slo-boundary.md SLO-2；骨架期默认 48h=每日 cron 一次容忍一日缺失）
 INFRA=0
+
+# env_face 计算（纯函数化，self-test 复用）：影子账本行 → 环境面 SLI 行
+# 输入: stdin jsonl 行序列（每行=一次对账事件，payload 含 scope/checked/drifts）
+#        ——stdin 先落临时文件再传 python（heredoc 程序体会抢占 python stdin，
+#          管道数据进不去：self-test 实测教训）
+# 输出: env_face_* 指标行（窗口内轮数/末轮漂移/收敛率/新鲜度）
+env_face_calc() {
+  local _in; _in=$(mktemp) && cat > "$_in"
+  python3 - "$_in" "$WINDOW_DAYS" "$ENV_STALE_HOURS" <<'PYEOF'
+import json, sys, datetime, os
+f, win_d, stale_h = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+now = datetime.datetime.now(datetime.timezone.utc)
+rows = []
+for line in open(f):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        rows.append(json.loads(line))
+    except json.JSONDecodeError:
+        continue
+os.unlink(f)
+envs = [r for r in rows if r.get("kind") == "gate" and "env" in str(r.get("action", ""))]
+if not envs:
+    print("env_face=absent（对账未跑/账本未建过渡期——非红）")
+    sys.exit(0)
+def ts(r):
+    return datetime.datetime.fromisoformat(r["ts"].replace("Z", "+00:00"))
+in_win = [r for r in envs if (now - ts(r)).total_seconds() <= win_d * 86400]
+last = max(envs, key=ts)
+def payload(r):
+    try:
+        return json.loads(r.get("payload", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        return {}
+scope = payload(last).get("scope")
+drifts_last = payload(last).get("drifts")
+conv = (f"{sum(1 for r in in_win if payload(r).get('drifts') == 0) / len(in_win):.2f}"
+        if in_win else "N/A")
+age_h = (now - ts(last)).total_seconds() / 3600
+stale = "STALE" if age_h > stale_h else "OK"
+print(f"env_face_last_run={last['ts']} scope={scope} drifts={drifts_last}")
+print(f"env_face_rounds={len(in_win)}（窗口 {win_d}d） convergence={conv}（零漂移轮/总轮）")
+print(f"env_face_freshness={stale}（age={age_h:.1f}h ≤{stale_h:g}h）")
+PYEOF
+}
 
 die()    { echo "::error::sli-report: $*" >&2; exit 2; }
 infra()  { echo "INFRA $1" >&2; INFRA=$((INFRA+1)); }
@@ -102,6 +153,31 @@ def esc(prev, curr):
     except ValueError: return 'OK'  # N/A 不参与判定
 print(esc('0.05','0.02'), '|', esc('0.0','0.05'), '|', esc('N/A','0.05'))")
   t "T5 连续两周>0 → 升级" "ESCALATE | OK | OK" "$T5"
+
+  # T-env 环境面 SLI（IR-0006 W4-R2 / AC-8c：fixture 三态——零漂移收敛/末轮漂移/账本缺席）
+  ENVF=$(mktemp -d)
+  NOW_TS=$(python3 -c "import datetime;print(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+  cat > "$ENVF/fresh.jsonl" <<EJ
+{"ts": "$NOW_TS", "kind": "gate", "action": "butler-env-drift", "payload": "{\"scope\": [\"dev-self\", \"staging-self\"], \"checked\": 2, \"drifts\": 0}"}
+EJ
+  # STALE 场景：ts 拉远（>>48h）→ freshness=STALE；末轮 drifts=1 → 收敛率 0.00
+  STALE_TS=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=3)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+  cat > "$ENVF/stale.jsonl" <<EJ
+{"ts": "$STALE_TS", "kind": "gate", "action": "butler-env-drift", "payload": "{\"scope\": [\"dev-self\", \"staging-self\"], \"checked\": 2, \"drifts\": 1}"}
+EJ
+  : > "$ENVF/empty.jsonl"
+  F1=$(env_face_calc < "$ENVF/fresh.jsonl")
+  t "T-env 零漂移末轮 → drifts=0 + freshness OK" "0 OK" \
+    "$(grep -oP 'drifts=\K[0-9]+' <<<"$F1" | head -1) $(grep -oP 'env_face_freshness=\K[A-Z]+' <<<"$F1")"
+  t "T-env 窗口内 1 轮零漂移 → convergence=1.00" "1.00" "$(grep -oP 'convergence=\K[0-9.]+' <<<"$F1")"
+  t "T-env scope 进指标行（AC-8c 可查锚点）" "1" "$(grep -c "dev-self" <<<"$F1")"
+  F2=$(env_face_calc < "$ENVF/stale.jsonl")
+  t "T-env 末轮漂移 → drifts=1 + convergence 0.00" "1 0.00" \
+    "$(grep -oP 'drifts=\K[0-9]+' <<<"$F2" | head -1) $(grep -oP 'convergence=\K[0-9.]+' <<<"$F2")"
+  t "T-env 3d 前末轮 → freshness STALE（SLO-2 破线可见）" "STALE" "$(grep -oP 'env_face_freshness=\K[A-Z]+' <<<"$F2")"
+  F3=$(env_face_calc < "$ENVF/empty.jsonl")
+  t "T-env 账本缺席 → absent 过渡期非红" "absent" "$(grep -oP 'env_face=\K[a-z]+' <<<"$F3")"
+
   echo "selftest: PASS=$PASS FAIL=$FAIL"; [[ $FAIL -eq 0 ]] || exit 1
   exit 0
 fi
@@ -127,6 +203,18 @@ for R in $REPOS; do
     --jq ".[] | select(.created_at != null) | {repo:\"$R\", n:.number, created:.created_at}" >> "$TMP/open.jsonl" 2>/dev/null || true
 done
 [[ -s "$TMP/merged.jsonl" ]] || { echo "::notice::窗口内零合并 PR——各比率指标 N/A（T2 语义）"; }
+
+# ---------- 环境面 SLI（IR-0006 W4-R2 / AC-8c：env-ledger 影子账本=数据源） ----------
+# 周报含环境面对账指标（issue 形态可查）；账本分支未建/拉取失败=absent/INFRA
+# （非红——fail-open：SLI 数据源故障不阻塞其余指标采集，infra 计数可见）。
+ENV_LEDGER=$(gh api "repos/$GOV_REPO/contents/governance/env/shadow-evidence.jsonl?ref=env-ledger" \
+  --jq '.content' 2>/dev/null | base64 -d 2>/dev/null) || infra "env-ledger 影子账本拉取失败（W4-R2 环境面）"
+if [[ -n "${ENV_LEDGER:-}" ]]; then
+  printf '%s\n' "$ENV_LEDGER" > "$TMP/env-ledger.jsonl"
+  env_face_calc < "$TMP/env-ledger.jsonl" > "$TMP/env-face.txt" || infra "env_face_calc 失败"
+else
+  echo "env_face=absent（对账未跑/账本未建过渡期——非红）" > "$TMP/env-face.txt"
+fi
 
 python3 - "$TMP" "$SAMPLE_SIZE" "$STUCK_HOURS" "$WINDOW_DAYS" <<'PYEOF' > "$TMP/metrics.txt"
 import json, sys, random, datetime
@@ -180,7 +268,7 @@ if [[ -n "$PREV" && "$PREV" != "N/A" && "$CUR" != "N/A" ]]; then
   python3 -c "exit(0 if float('$PREV')>0 and float('$CUR')>0 else 1)" || ESCALATE=ESCALATE
 fi
 
-REPORT=$(cat "$TMP/metrics.txt")
+REPORT=$(cat "$TMP/metrics.txt" "$TMP/env-face.txt")
 WEEK=$(grep -oP 'SAMPLE_SEED=\K.*' "$TMP/metrics.txt")
 cat > "$TMP/body.md" <<BOD
 # SLI 周报（$WEEK，窗口 ${WINDOW_DAYS}天）
@@ -192,8 +280,9 @@ $REPORT
 - escape_rate：(合入的 [auto-revert] + post-merge P0 issue) / 合并 PR——有分母的风险指标；演练数据（title/body 含「演练」或「[drill]」约定标记）从分子排除且 drills_excluded 计数可见——过滤不可见=作弊通道
 - 人类触碰：agent 合并占比的反向锚点（逐评论/评审计数下版接入）
 - flaky_rate / entropy：pending（数据源 #94/#87/#90 滚动接入）
+- env_face（环境面，IR-0006 W4-R2）：env-ledger 影子账本窗口内对账轮数/末轮漂移/收敛率/新鲜度——SLO 定义与破线处置真源=docs/slo-boundary.md（SLO-1 收敛/SLO-2 新鲜度）
 
-阈值状态：escape_rate 连续两周>0 → P1 升级（本期：$ESCALATE）
+阈值状态：escape_rate 连续两周>0 → P1 升级（本期：$ESCALATE）；env_face 破线判定见 docs/slo-boundary.md（骨架期人工归因，不自动升级）
 BOD
 
 gh issue create --repo "$GOV_REPO" --title "SLI 周报 $WEEK（自动合并门禁自身指标）" \
