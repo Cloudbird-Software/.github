@@ -200,8 +200,11 @@ python3 - "$SHADOW" "$DSHADOW" "$BUTLER_SHADOW" "$ESHADOW" "$TICKETS" "$FEISHU" 
 import base64, json, sys
 shadow, dshadow, bshadow, eshadow, tickets, feishu, envd, fixdir = sys.argv[1:9]
 b64 = lambda p: base64.b64encode(open(p, "rb").read()).decode()
-json.dump([{"type": "file", "name": "shadow-evidence-2026-W35.jsonl", "content": b64(shadow)}],
+# #471：metering 源逐文件拉取（目录列表条目不含 content——单文件 API 含）——
+# 目录列表 fixture 只保留名字（真实形态），正文走单文件 fixture
+json.dump([{"type": "file", "name": "shadow-evidence-2026-W35.jsonl"}],
           open(f"{fixdir}/metering-list.json", "w"))
+json.dump({"type": "file", "content": b64(shadow)}, open(f"{fixdir}/metering-file.json", "w"))
 json.dump({"type": "file", "content": b64(dshadow)}, open(f"{fixdir}/drill.json", "w"))
 json.dump({"type": "file", "content": b64(bshadow)}, open(f"{fixdir}/butler.json", "w"))
 json.dump({"type": "file", "content": b64(eshadow)}, open(f"{fixdir}/elev.json", "w"))
@@ -218,6 +221,8 @@ F="${GH_STUB_FIXTURES:?}"
 case "$url" in
   "repos/Cloudbird-Software/CI-Workflows/contents?ref=metering-ledger")
     cat "$F/metering-list.json" ;;
+  "repos/Cloudbird-Software/CI-Workflows/contents/shadow-evidence-2026-W35.jsonl?ref=metering-ledger")
+    cat "$F/metering-file.json" ;;
   "repos/Cloudbird-Software/.github/contents/governance/drill/shadow-evidence.jsonl?ref=drill-ledger")
     if [[ -f "$F/drill-tampered.json" ]]; then cat "$F/drill-tampered.json"; else cat "$F/drill.json"; fi ;;
   "repos/Cloudbird-Software/.github/contents/governance/butler/shadow-evidence.jsonl?ref=butler-ledger")

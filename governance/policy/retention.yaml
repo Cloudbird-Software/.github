@@ -1,0 +1,33 @@
+version: 1
+# 证据账本保留策略声明（IR-0006 BUDGET-02 / AC-3；#468 补件）
+#
+# 声明位=governance/policy/（可 drift 对账、红队可审，ADR-0082）；调整走
+# C1（PR 引 ADR）。执行面脚本=archive 仓 blob-store.sh（sweep/retention 词表
+# 已过 test-blob-store.sh）——本文件是声明面真源，与执行面分离（声明≠实现，
+# drift-check 对账两者一致性）。
+tiers:
+  adjudication:            # 判定层（archive 仓 evidence/ledger.jsonl——hash 链账本）
+    tier: hot
+    retention: 90d
+    storage: archive-jsonl
+    note: 统一判定层真源；链验证 verify_evidence.py（archive 仓 scripts/）
+  trajectory:              # 轨迹层（内网 blob——完整轨迹/大对象）
+    tier: warm
+    retention: 1y
+    storage: self-cloud-blob
+    note: blob-store.sh sweep 执行面；词表 30d/90d/180d/1y/3y/forever
+  discard:                 # 丢弃层（GitHub 事件面——runner 销毁即弃，仅 digest 入链）
+    tier: digest-only
+    retention: 30d
+    storage: github-native
+    note: 日常 15min 轮影子随 runner 销毁；仅 drill 持久化轮入对应 *-ledger 分支
+checkpoint:
+  cadence: monthly         # BEH-02 月度节奏：月末链头 hash+月度汇总提交 git
+  cron: "33 7 1 * *"       # UTC 每月 1 号 07:33（与 sli-weekly/env-drift 错峰）
+  workflow: .github/workflows/evidence-checkpoint.yml
+  artifact: evidence/checkpoints/YYYY-MM.json   # archive 仓
+  verification: archive 仓 scripts/verify_evidence.py 独立复算（链断=红，fail-closed）
+  freshness_window_days: 40   # 最新 checkpoint 超 40 天=红（防月度跑飞，#469 2B）
+enforcement:
+  sweep_frequency: daily   # blob-store.sh sweep 建议日度（轨迹层过期回收）
+  growth_soft_cap_mb: 200  # BUDGET-01 判定层年增长软上限（gzip 后）

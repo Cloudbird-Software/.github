@@ -87,7 +87,10 @@ cat > "$TMP/dash-p.txt" <<'EOF'
              "cost": {"per_ir_usd": 25.8}}}
 ```
 EOF
-env -u GH_TOKEN -u GITHUB_TOKEN python3 "$EDGE" --dry-run --dashboard-file "$TMP/dash-p.txt" 2>&1 | grep -q "^PENDING needs-human-p90-stop" \
+# #471 修复：grep -q 命中即关读端 → 上游 SIGPIPE → pipefail 误报红（环境竞态）；
+# 改为先落文件再 grep——判定面与输出流解耦
+env -u GH_TOKEN -u GITHUB_TOKEN python3 "$EDGE" --dry-run --dashboard-file "$TMP/dash-p.txt" >"$TMP/outp.txt" 2>&1
+grep -q "^PENDING needs-human-p90-stop" "$TMP/outp.txt" \
   && ok "pending 标注字串 → 诚实跳过（字串口径同判）" || bad "pending 字串误判"
 
 # ---- 去重：open 候选已存在 → DUPLICATE 跳过（RB-B2） ----
@@ -111,8 +114,8 @@ cat > "$TMP/dash-cost.txt" <<'EOF'
              "cost": {"per_ir_usd": 80.5}}}
 ```
 EOF
-env -u GH_TOKEN -u GITHUB_TOKEN python3 "$EDGE" --dry-run --dashboard-file "$TMP/dash-cost.txt" 2>&1 \
-  | grep -q "^SIGNAL per-ir-cost value=80.5 gt 60.0" \
+env -u GH_TOKEN -u GITHUB_TOKEN python3 "$EDGE" --dry-run --dashboard-file "$TMP/dash-cost.txt" >"$TMP/outc.txt" 2>&1
+grep -q "^SIGNAL per-ir-cost value=80.5 gt 60.0" "$TMP/outc.txt" \
   && ok "用量面信号越阈（内联阈值 gt）" || bad "用量越阈漏检"
 
 # ---- 负向：policy 非法 → exit 2 fail-closed（三形态） ----

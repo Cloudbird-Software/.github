@@ -119,6 +119,45 @@ if [[ "${WOUT%%$'\t'*}" == "INFRA" ]] && grep -q "卡清单拉取失败" <<<"$WO
   pass "卡清单拉取失败 → INFRA（预算面不可知）"
 else fail "清单失败应 INFRA，得到：$WOUT"; fi
 
+# ---- 5b) #470/#472 回归：wallclock_sec 超限 → WAVE-EXCEEDED；human_minutes → 可见未执法 ----
+cat >"$TMP/cards-wc.json" <<'EOF'
+[
+  {"number": 504, "body": "## budget（波次预算）\nwallclock_sec: 7200\non_exceed: hard-stop"},
+  {"number": 506, "body": "## budget（波次预算）\nhuman_minutes: 1\non_exceed: hard-stop"}
+]
+EOF
+mkdir -p "$TMP/ledger-wc"
+cat >"$TMP/ledger-wc/shadow-evidence-unified.jsonl" <<'EOF'
+{"ts":"2026-08-29T04:00:00Z","kind":"cost","action":"cost.dispatch","verdict":"pass","subject":{"card":"Cloudbird-Software/.github#504","tenant":"t1"},"cost":{"tokens":1000,"usd":0.1,"wall_sec":8000.0},"seq":1,"prev_hash":null,"hash":"dd"}
+{"ts":"2026-08-29T05:00:00Z","kind":"cost","action":"cost.dispatch","verdict":"pass","subject":{"card":"Cloudbird-Software/.github#506","tenant":"t1"},"cost":{"tokens":900000,"usd":99.0,"wall_sec":8000.0},"seq":2,"prev_hash":"dd","hash":"ee"}
+EOF
+COST_WAVE_CARDS_FILE="$TMP/cards-wc.json" COST_WAVE_LEDGER_DIR="$TMP/ledger-wc" run_chan
+if [[ "${WOUT%%$'\t'*}" == "WAVE-EXCEEDED" ]] && grep -q '"wallclock_sec"' <<<"$WOUT"; then
+  pass "wallclock_sec 超限 → WAVE-EXCEEDED 含超限维（#470：执法面可达）"
+else fail "wallclock 超限应 WAVE-EXCEEDED 含维度，得到：$WOUT"; fi
+
+cat >"$TMP/cards-hm.json" <<'EOF'
+[
+  {"number": 506, "body": "## budget（波次预算）\nhuman_minutes: 1\non_exceed: hard-stop"}
+]
+EOF
+COST_WAVE_CARDS_FILE="$TMP/cards-hm.json" COST_WAVE_LEDGER_DIR="$TMP/ledger-wc" run_chan
+if [[ "${WOUT%%$'\t'*}" == "WAVE-OK" ]] && grep -q "未执法维度" <<<"$WOUT" && grep -q "human_minutes" <<<"$WOUT"; then
+  pass "human_minutes 声明 → WAVE-OK+摘要可见未执法维度（#472：不静默）"
+else fail "human_minutes 应 WAVE-OK+可见未执法，得到：$WOUT"; fi
+
+# ---- 5c) #470 兜底：wave-check 异常退出（任何非 0/4 rc）→ INFRA（fail-closed） ----
+mkdir -p "$TMP/bin-wc"
+printf '#!/usr/bin/env bash\nexit 1\n' >"$TMP/bin-wc/python3"; chmod +x "$TMP/bin-wc/python3"
+# 前置桩 python3 使 wave-check 退出 1（未处理异常语义）；调用后复原 PATH
+PREVPATH="$PATH"
+PATH="$TMP/bin-wc:$PATH"
+COST_WAVE_CARDS_FILE="$TMP/cards-hm.json" COST_WAVE_LEDGER_DIR="$TMP/ledger-wc" run_chan
+PATH="$PREVPATH"
+if [[ "${WOUT%%$'\t'*}" == "INFRA" ]] && grep -q "rc=1" <<<"$WOUT"; then
+  pass "wave-check 异常退出 → INFRA 兜底（#470 方案 C：预算面不可信不静默）"
+else fail "异常退出应 INFRA rc=1，得到：$WOUT"; fi
+
 # ---- 6) 集成段：全脚本（桩 gh 记录调用日志，吸收全部写操作）—— 波次超限 → 硬停三件套 ----
 # 桩 gh：billing=0 用量（数值已按 --jq 口径）、熔断变量 404、issue/pr 清单空；
 # 全部调用落 $GHSTUB_LOG 供三件套调用路径断言（BEH-07：置变量+P0 issue）。

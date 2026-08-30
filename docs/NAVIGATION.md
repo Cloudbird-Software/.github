@@ -31,7 +31,7 @@
 | 产品仓（AI_Web_School / mutual / QW_Arena1 …） | 该仓根部 AGENTS.md 的入口协议块+角色路由节 | 取 ghcb（AGENTS.md 内钉 SHA 命令）→ `ghcb next <owner/repo>` 找卡；无卡不开工，新想法走该仓 intent 表单 |
 | 治理仓 .github | [AGENTS.md](../AGENTS.md)（本仓契约） | 治理变更走 C1（§2，无需卡）；卡工作照入口协议块 |
 | 治理仓 CI-Workflows | 该仓 AGENTS.md | workflow/pipeline 变更=C1 面（.github/ 路径）：PR 引 ADR + owner review |
-| 治理仓 archive | `runs/README.md` | 运行报告只追加（append-only）；ADR 落 `adr/` + 更新 INDEX.yaml |
+| 治理仓 archive | `runs/README.md` | 运行报告只追加（append-only）；ADR 落 `adr/` + 更新 INDEX.yaml；证据账本判定层=`evidence/`（独立复算/写入脚本居 archive 仓 `scripts/verify_evidence.py` 等——月度 checkpoint 由 .github 仓 `evidence-checkpoint.yml` 调度，#469） |
 | 支撑仓 cnb-bridge | 仓内 `REMOVAL.md` + `accounts.yaml` | 池运维 owner 面；派单一律经 .github 仓 `cnb-dispatch` 工作流（key 不入上下文） |
 | 支撑仓 arbiter / holdout | —（owner 直管） | 你不直接调用（见 §2「conductor/arbiter」）；holdout 对 agent 只读 |
 | 发现 bug | [.github/ISSUE_TEMPLATE/bug.yml](../.github/ISSUE_TEMPLATE/bug.yml)（org 级继承，各仓可用） | 提交即机器复现（B1–B5，ADR-0064）：reproduced → 修复合入 → fixed → done；处理 issues 的完整指引=[ROLE-ACCEPT.md](agent/ROLE-ACCEPT.md) |
