@@ -94,7 +94,7 @@ def create_issue(token: str, repo: str, card: str, test_ref: str, ac_ref: str,
         f"- TTL 无裁决 → dead-man 提醒 + 终态=expired（维持暂停）\n\n"
         f"---\n"
         f"*本 issue 由 agent 经 escalate-test-issue.py 自动创建（W2-C4 / AC-18）。"
-        f"与 g060 防篡改阻断互补：本通道是"发现错误"的合法上报，非篡改测试。*"
+        f"与 g060 防篡改阻断互补：本通道是「发现错误」的合法上报，非篡改测试。*"
     )
     status, data = gh_api(token, f"/repos/{repo}/issues", "POST", {
         "title": title,
