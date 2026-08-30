@@ -77,7 +77,11 @@ jobs:
           python3 governance/evidence_shadow.py verify --file merged.jsonl
           mkdir -p "ledger/governance/butler"
           cp merged.jsonl "$BASE"
-          git -C ledger add "$SHADOW"
+          # -f 必带（#475/#476）：governance/butler/shadow-evidence.jsonl 被 .gitignore
+          # 忽略（影子真源在 *-ledger 分支，工作树副本不入库）——无 -f 时 git add
+          # 被 ignore 拦截 exit 1，push 不执行，butler-ledger 分支永远建不出来
+          # （butler 源恒 0）。同类先例：feishu-drill/env-drift/feedback-edge 均 -f。
+          git -C ledger add -f "$SHADOW"
           git -C ledger diff --cached --quiet && { echo "OK 影子无新增——不提交（幂等）"; exit 0; }
           git -C ledger commit -m "butler: 影子账本追加（IR-0006 W1-B2 双写，链验通过）"
           for i in 1 2 3; do git -C ledger push "https://x-access-token:${BUTLER_TOKEN}@github.com/Cloudbird-Software/.github.git" HEAD:refs/heads/butler-ledger && break
