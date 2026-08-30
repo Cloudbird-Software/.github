@@ -228,11 +228,15 @@ wave_channel_check() {
     fi
   fi
   out=$(python3 "$DIR/wave_schema.py" wave-check --cards "$cards" --ledger-dir "$led" 2>/dev/null) || rc=$?
-  if [[ $rc -eq 2 ]]; then
-    printf 'INFRA\twave-check 执行失败（参数/环境 rc=2）\n'; return 0
+  # rc 兜底（#470 方案 C）：0=正常 | 4=超限（期望红，rows 已出交由下方解析）；
+  # 其余任何退出码（含未处理异常 rc=1、环境 rc=2/3）= 预算面不可信 → INFRA，
+  # 不静默通过（fail-closed：未来同类命名错不再吞掉执法）
+  if [[ $rc -ne 0 && $rc -ne 4 ]]; then
+    printf 'INFRA\twave-check 异常退出 rc=%d（fail-closed：预算面不可信，不静默通过）\n' "$rc"; return 0
   fi
   python3 -c 'import json,sys
-rows = json.loads(sys.stdin.read() or "[]")
+s = sys.stdin.read().strip()
+rows = json.loads(s) if s else []
 bad = [r for r in rows if r.get("error")]
 if bad:
     print("INFRA\t波次卡块非法（预算面盲区，fail-closed）：" + "; ".join(r["card"] + " " + r["error"] for r in bad))
@@ -246,6 +250,9 @@ nb = sum(1 for r in rows if not r.get("error"))
 extra = ""
 if warn:
     extra = "；warn 超限（只报告不判定）：" + ", ".join(r["card"] + ":" + "+".join(r["exceeded_dims"]) for r in warn)
+unef = [(r["card"], "+".join(r["unenforced_dims"])) for r in rows if r.get("unenforced_dims")]
+if unef:  # #472：无账本源的声明维度——摘要可见，不静默
+    extra += "；未执法维度（账本无源，可见声明）：" + ", ".join(c + ":" + d for c, d in unef)
 print("WAVE-OK\t预算卡 %d 张对账无 hard-stop 超限%s" % (nb, extra))' <<<"$out"
 }
 # @w2c3-wave-channel-end

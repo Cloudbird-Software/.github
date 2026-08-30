@@ -53,6 +53,12 @@ except ImportError:  # pragma: no cover
 
 BUDGET_KEYS = ("usd", "tokens", "wallclock_sec", "human_minutes")
 ON_EXCEED = ("hard-stop", "warn")
+# 可执法维度 → 账本聚合键映射（#470：声明侧 wallclock_sec vs 账本侧 wall_sec
+# 键名不一致曾致 KeyError→执法不可达；此处单点映射，逐维判定不再依赖书写顺序）
+ENFORCEABLE = {"usd": "usd", "tokens": "tokens", "wallclock_sec": "wall_sec"}
+# 无账本源的声明维度（#472：human_minutes 暂无采集点——行级 unenforced_dims
+# 可见声明，不静默放行也不假装判定；补源后移入 ENFORCEABLE）
+UNENFORCED_KEYS = ("human_minutes",)
 SECTION_RE = re.compile(r"^#{2,6}\s*(budget|capabilities|evidence)\b[^\n]*$",
                         re.MULTILINE)
 CAP_RE = re.compile(r"^(org-secret:[A-Z0-9_]+|vault:[A-Za-z0-9/_.-]+)$")
@@ -151,8 +157,9 @@ def wave_check(cards_file: str, ledger_dir: str) -> tuple:
     """逐卡对账。返回 (rows, exceeded_any)。
 
     聚合口径：subject.card 精确匹配；tenant 归因分离（AC-9b 多租户计量分离）；
-    cost.{usd,tokens,wall_sec} 求和（无 cost 字段记 0）。human_minutes 无账本源
-    ——报告不判定（备注承载）。
+    cost.{usd,tokens,wall_sec} 求和（无 cost 字段记 0）。可执法维度见
+    ENFORCEABLE（声明键→账本聚合键映射）；human_minutes 无账本源——行级
+    unenforced_dims 可见声明（#472：不静默放行，不假装判定）。
     """
     with open(cards_file, encoding="utf-8") as f:
         cards = json.load(f)
@@ -188,13 +195,18 @@ def wave_check(cards_file: str, ledger_dir: str) -> tuple:
                "tokens": sum(t["tokens"] for t in ten.values()),
                "wall_sec": sum(t["wall_sec"] for t in ten.values())}
         on_exceed = budget.get("on_exceed", "hard-stop")
-        exceeded_dims = [k for k in BUDGET_KEYS[:3]
-                         if k in budget and agg[k] > float(budget[k])]
+        exceeded_dims = [k for k in ENFORCEABLE
+                         if k in budget and agg[ENFORCEABLE[k]] > float(budget[k])]
+        unenforced_dims = [k for k in UNENFORCED_KEYS
+                           if k in budget and k not in ENFORCEABLE]
         if exceeded_dims and on_exceed == "hard-stop":
             exceeded = True
-        rows.append({"card": card_ref, "budget": budget, "usage_by_tenant": ten,
-                     "usage_total": agg, "exceeded_dims": exceeded_dims,
-                     "on_exceed": on_exceed})
+        row = {"card": card_ref, "budget": budget, "usage_by_tenant": ten,
+               "usage_total": agg, "exceeded_dims": exceeded_dims,
+               "on_exceed": on_exceed}
+        if unenforced_dims:  # 无账本源的声明维度——可见，不静默（#472）
+            row["unenforced_dims"] = unenforced_dims
+        rows.append(row)
     return rows, exceeded
 
 

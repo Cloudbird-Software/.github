@@ -141,6 +141,46 @@ OUT=$(python3 "$WS" wave-check --cards "$TMP/cards.json" --ledger-dir "$TMP/no-s
 [[ $RC -eq 0 ]] && grep -q '"exceeded_dims": \[\]' <<<"$OUT" \
   && pass "账本目录缺失 → 零用量不误熔断" || fail "空账本误判（rc=$RC）"
 
+# ---- #470 回归：wallclock_sec 超限 → exit 4（键名映射 wall_sec 修复面） ----
+cat >"$TMP/cards-wc.json" <<'EOF'
+[
+  {"number": 504, "body": "## budget（波次预算）\nwallclock_sec: 7200\non_exceed: hard-stop"},
+  {"number": 505, "body": "## budget（波次预算）\nusd: 1.0\nwallclock_sec: 7200\non_exceed: hard-stop"}
+]
+EOF
+mkdir -p "$TMP/ledger-wc"
+cat >"$TMP/ledger-wc/shadow-evidence-2026-W36.jsonl" <<'EOF'
+{"ts":"2026-08-29T04:00:00Z","kind":"cost","action":"cost.dispatch","verdict":"pass","subject":{"card":"Cloudbird-Software/.github#504","tenant":"t1"},"actor":{"identity":"x","role":"bot","model":null},"cost":{"tokens":1000,"usd":0.1,"wall_sec":8000.0},"seq":1,"prev_hash":null,"hash":"dd"}
+{"ts":"2026-08-29T05:00:00Z","kind":"cost","action":"cost.dispatch","verdict":"pass","subject":{"card":"Cloudbird-Software/.github#505","tenant":"t1"},"actor":{"identity":"x","role":"bot","model":null},"cost":{"tokens":1000,"usd":99.0,"wall_sec":8000.0},"seq":2,"prev_hash":"dd","hash":"ee"}
+EOF
+OUT=$(python3 "$WS" wave-check --cards "$TMP/cards-wc.json" --ledger-dir "$TMP/ledger-wc" 2>"$TMP/wc2.err"); RC=$?
+[[ $RC -eq 4 ]] && pass "wallclock_sec 超限 → exit 4（#470：KeyError 修复+维度执法可达）" \
+  || fail "wallclock_sec 超限应 exit 4（rc=$RC，stderr：$(head -2 "$TMP/wc2.err" 2>/dev/null)）"
+python3 - "$OUT" <<'PYEOF' && pass "wallclock+usd 混合卡：两维同报不互吞（#470：usd 超限不再被 wallclock 键错崩掉）" || fail "混合卡断言"
+import json, sys
+rows = {r["card"]: r for r in json.loads(sys.argv[1])}
+c504 = rows["Cloudbird-Software/.github#504"]
+assert c504["exceeded_dims"] == ["wallclock_sec"], c504
+c505 = rows["Cloudbird-Software/.github#505"]
+assert c505["exceeded_dims"] == ["usd", "wallclock_sec"], c505
+PYEOF
+
+# ---- #472 回归：human_minutes 声明 → 行级 unenforced_dims 可见（不静默） ----
+cat >"$TMP/cards-hm.json" <<'EOF'
+[
+  {"number": 506, "body": "## budget（波次预算）\nhuman_minutes: 1\non_exceed: hard-stop"}
+]
+EOF
+OUT=$(python3 "$WS" wave-check --cards "$TMP/cards-hm.json" --ledger-dir "$TMP/ledger-wc" 2>/dev/null); RC=$?
+[[ $RC -eq 0 ]] && python3 - "$OUT" <<'PYEOF' && pass "human_minutes → unenforced_dims 行级可见（#472：账本无源不静默放行）" || fail "human_minutes 可见断言"
+import json, sys
+rows = json.loads(sys.argv[1])
+r = rows[0]
+assert r["exceeded_dims"] == [], r
+assert r.get("unenforced_dims") == ["human_minutes"], r
+PYEOF
+[[ $? -eq 0 ]] || fail "human_minutes 轮 rc=$RC（应 0——无执法面不误红）"
+
 echo "----------------------------------------"
 if [[ $FAILS -eq 0 ]]; then echo "test-wave-schema: PASS"; exit 0; fi
 echo "test-wave-schema: $FAILS 处失败"; exit 1

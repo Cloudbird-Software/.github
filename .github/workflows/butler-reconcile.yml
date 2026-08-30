@@ -68,6 +68,10 @@ jobs:
             git -C ledger checkout -b butler-ledger
           fi
           BASE="ledger/$SHADOW"
+          # #471 关联根因：但书账本首建时 butler-ledger 分支不存在→克隆默认分支，
+          # 而 main 上 governance/butler/ 被 gitignore（影子真源在 *-ledger 分支）——
+          # 目录缺位使 : > "$BASE" 崩、butler 源永远 0 条。先建目录再触基链。
+          mkdir -p "$(dirname "$BASE")"
           [[ -f "$BASE" ]] || : > "$BASE"
           python3 governance/evidence_shadow.py relink --base "$BASE" --local "$SHADOW" --out merged.jsonl
           python3 governance/evidence_shadow.py verify --file merged.jsonl

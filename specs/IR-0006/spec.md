@@ -56,6 +56,7 @@ blastRadius:
   path: governance/（providers.yaml、REPOS.yaml、policy/ 账本条款、ISSUE_TEMPLATE 卡模板）
 - repo: Cloudbird-Software/archive
   path: adr/（ADR-0103）、evidence/（判定层账本）、runs/、决策语料
+  # 独立复算/写入/checkpoint 脚本居本仓 archive:scripts/{verify_evidence,write_evidence,verify_decisions}.py（#469 2A 导航登记）
 - repo: Cloudbird-Software/CI-Workflows
   path: pipeline/metering/（三源对齐、tenant tag 注入）
 - repo: Cloudbird-Software/<env-def-repo>

@@ -1,0 +1,102 @@
+name: evidence-checkpoint
+# IR-0006 BEH-02 月度 checkpoint 调度（#469 2B 补件，ADR-0103 / BUDGET-02）
+#
+# 为什么：checkpoint 生成能力已存在（archive 仓 scripts/write_evidence.py
+# --checkpoint，attest-drill/eval-wave 演练时调用过）但无月度 cron 承载——
+# BEH-02「每月末做 checkpoint」此前靠人工/演练顺带，一旦忘记，账本月度
+# hash 锚点断档（篡改检测窗口拉长）。本工作流补上调度面+新鲜度守卫：
+#   - 月度（每月 1 号 07:33 UTC）：生成当月 checkpoint → verify 链完整 →
+#     有变化则以 PR 形态提交 archive（PR 面 archive gate 再跑一轮
+#     verify_evidence——双保险）；无变化（幂等）=绿跳过。
+#   - 周度（每周三 07:11 UTC）：新鲜度守卫——最新 checkpoint 超 40 天=红
+#     （fail-closed：API 失败亦红，防月度跑飞无人知）。
+# 节奏声明真源=governance/policy/retention.yaml（BUDGET-02 声明位，#468）。
+on:
+  schedule:
+    - cron: "33 7 1 * *"    # 月度 checkpoint 生成（BEH-02）
+    - cron: "11 7 * * 3"    # 周三新鲜度守卫（40 天窗口）
+  workflow_dispatch:
+    inputs:
+      mode:
+        { description: "run 模式（generate=生成+PR / freshness=新鲜度守卫）", type: string, required: false, default: "generate" }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidence-checkpoint
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '33 7 1 * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 拉取 archive 仓（判定层账本+脚本）
+        env:
+          GOVERNANCE_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 \
+            "https://x-access-token:${GOVERNANCE_TOKEN}@github.com/Cloudbird-Software/archive.git" archive
+      - name: 生成当月 checkpoint（write_evidence --checkpoint，幂等只前进）
+        run: |
+          set -euo pipefail
+          cd archive
+          python3 scripts/write_evidence.py --checkpoint \
+            --ledger evidence/ledger.jsonl --checkpoints evidence/checkpoints
+      - name: 独立复算（链完整+checkpoint 对账，fail-closed）
+        run: |
+          set -euo pipefail
+          cd archive
+          python3 scripts/verify_evidence.py --ledger evidence/ledger.jsonl
+      - name: 有变化 → 分支+PR（archive gate 面再验一轮）
+        env:
+          GOVERNANCE_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd archive
+          if git diff --quiet; then
+            echo "OK 幂等——当月 checkpoint 已在（无新链头），跳过提交"
+            exit 0
+          fi
+          git config user.name "cloudbrid-agent[bot]"
+          git config user.email "cloudbrid-agent[bot]@users.noreply.github.com"
+          BR="evidence-checkpoint-$(date -u +%Y-%m)"
+          git checkout -b "$BR"
+          git add evidence/checkpoints/
+          git commit -m "evidence: 月度 checkpoint ${BR}（BEH-02，evidence-checkpoint.yml 调度）"
+          git push "https://x-access-token:${GOVERNANCE_TOKEN}@github.com/Cloudbird-Software/archive.git" HEAD:refs/heads/"$BR"
+          export GH_TOKEN="$GOVERNANCE_TOKEN"
+          gh pr create --repo Cloudbird-Software/archive --base main --head "$BR" \
+            --title "evidence: 月度 checkpoint ${BR}（BEH-02 自动调度）" \
+            --body "月度 checkpoint 自动生成（evidence-checkpoint.yml，#469 2B）。verify_evidence 独立复算通过后提交；PR 面 archive gate 将再跑一轮链完整性+checkpoint 对账（fail-closed 双保险）。"
+
+  freshness:
+    if: github.event_name == 'schedule' && github.event.schedule == '11 7 * * 3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 最新 checkpoint 新鲜度（>40 天=红，API 失败=红）
+        env:
+          GH_TOKEN: ${{ secrets.GOVERNANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # fail-closed：拉取失败=守卫面失明，红
+          LATEST=$(gh api repos/Cloudbird-Software/archive/contents/evidence/checkpoints \
+            --jq '[.[].name | select(test("^\\d{4}-\\d{2}\\.json$"))] | max') \
+            || { echo "::error::checkpoints 目录拉取失败（fail-closed）"; exit 1; }
+          [[ -n "$LATEST" ]] || { echo "::error::无任何 checkpoint（fail-closed）"; exit 1; }
+          MONTH="${LATEST%.json}"
+          python3 - "$MONTH" <<'EOF'
+          import datetime, sys
+          month = sys.argv[1]
+          ckpt = datetime.datetime.strptime(month, "%Y-%m").replace(tzinfo=datetime.timezone.utc)
+          # 月内任一天即可信：按月初计龄（保守——若按月末会更宽松）
+          age = (datetime.datetime.now(datetime.timezone.utc) - ckpt).days
+          print(f"最新 checkpoint {month}，年龄 {age} 天（窗口 40 天）")
+          if age > 40:
+              print(f"::error::checkpoint 过期（{age} 天 > 40 天窗口）——月度生成跑飞，人工介入")
+              sys.exit(1)
+          EOF

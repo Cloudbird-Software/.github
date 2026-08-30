@@ -38,7 +38,7 @@ spec PR：.github#403（adversary:survived 红队审计通过）；背书 ADR：
 |---|---|---|---|
 | 1 | 18 章节落位表+词汇归并表，spec PR 红队 survived | specs/IR-0006/absorption-map.md（落位表"已覆盖映射/吸收后退役"两类+词汇归并）；.github#403 merged，IR#402 带 adversary:survived | ✅ |
 | 2 | ADR-0103 落 archive/adr/ 并入 INDEX.yaml（risk_class=参数包选择器，裁决仍硬谓词+shadow） | archive PR #38/#39 merged；archive/adr/0103*；宪法 §5 未动（调和非回退） | ✅ |
-| 3 | 统一判定层账本（三层/payload 指针/月度 checkpoint/hash 链/tenant/三源同 schema 查询） | archive evidence/ledger.jsonl（链尾 841c63dcaab5）+checkpoints/2026-08.json；**本轮实测**：scripts/verify_evidence.py 独立复算 OK（3 条链完整+checkpoint×1 对账一致）；governance/evidence-query.sh 七源（metering/drill/butler/elevation/tickets/feishu/env）一条命令 | ✅ |
+| 3 | 统一判定层账本（三层/payload 指针/月度 checkpoint/hash 链/tenant/三源同 schema 查询） | archive evidence/ledger.jsonl（链尾 841c63dcaab5）+checkpoints/2026-08.json；**本轮实测**：archive 仓 scripts/verify_evidence.py 独立复算 OK（3 条链完整+checkpoint×1 对账一致——脚本居 archive 仓，导航见 docs/NAVIGATION.md §1 治理仓 archive 行，#469 2A）；governance/evidence-query.sh 七源（metering/drill/butler/elevation/tickets/feishu/env）一条命令 | ✅ |
 | 4 | providers.yaml 含 self-cloud-pool/vault；env-defs 建仓申报 REPOS.yaml，期望态/实况可对账 | .github#427（providers+governance/assets-register.yaml）+#428（REPOS.yaml 申报）；.github#452 env-drift 引擎（run 33257903305 漂移检出→issue #453 自动开→消除自动关，GM-1 实走） | ✅ |
 | 5 | PM 凭证收敛为 cloudbrid-agent 短令牌，个人 PAT 退出日常 | .github#446（gh-app-token 上收+应急回退通道 24h 窗口文档化，ADR-0044）；本会话起全程 GH_TOKEN=gh-app-token.sh 代签 | ✅ |
 | 6 | 飞书多维表格看板（label 唯一真源，drop & rebuild） | .github#447-#451；feishu-ledger 分支（影子账本链验通过）；run 33254361404：人工违规改表被下轮投影纠正+drift 告警入账本（INV-05 实证）；飞书 API 数字字段字符串怪癖/batch POST 形态两实测缺陷修复（#450/#451） | ✅ |
@@ -47,7 +47,7 @@ spec PR：.github#403（adversary:survived 红队审计通过）；背书 ADR：
 | 9 | holdout 扩展 eval registry+非劣性 eval gate，首个 optimization 波次走通 | holdout#9（eval-quad 四元组 pin）+.github#458；W5-OPT-1 波次（waves.yaml 注册）：run 33263909046 基线/候选同 harness 评测+非劣性裁决 GREEN；fail-closed 活体：run 33263613945 ts 缺字段被 verify_evidence 拦截红→#460 修复重跑绿 | ✅ |
 | 10 | 决策语料 append-only 落 archive 开始累积 | archive decisions/ledger.jsonl（链式 hash+机械校验；首条真实记录 ADR-0103 决策情境，五段齐备） | ✅ |
 
-**十条全绿。**
+**十条全绿。**（修订 #473：AC-9/AC-3/AC-4 的后验缺陷见残留第 6 条——登记+修复+回归后方可称全绿，原断言系收口时未扫缺陷面的漏登）
 
 ## 冷上下文六问复测（a-f，主链路零假链）
 
@@ -74,8 +74,16 @@ spec PR：.github#403（adversary:survived 红队审计通过）；背书 ADR：
 2. **R5 骨架未立项**（IR 非目标：外输三件套另行立项）——conformance/ 产物（32 卡语料+四列评审+晋级账本）已为外输预留底料。
 3. **仪表盘 pending 项**：user_results 全产品仓 pending（埋点未落）、holdout_gap 检测面未建——按 ADR-0073 决策 7 诚实 pending，不造数。
 4. **飞书数字字段字符串怪癖**已修（#450）但飞书 API 形态漂移风险常在——feishu-drill 每日演练=回归面。
-5. **main 直推事件（2026-08-29 17:36 UTC）**：owner 侧另一会话将"一人公司治理体系诊断与落地"巨型提交（15ac9c1）直推 main——绕过全部门禁（治理文件一致性未验）；其携带 holdout/ gitlink 致 CI checkout 全红（#438 同款缺陷），由本 PR 修复（git rm --cached holdout）。直推豁免未登记——建议 owner 醒后按 ADR-0093 同款追认或回退。
+5. **main 直推事件（2026-08-29 17:36 UTC）**：owner 侧另一会话将"一人公司治理体系诊断与落地"巨型提交（15ac9c1）直推 main——绕过全部门禁（治理文件一致性未验）；其携带 holdout/ gitlink 致 CI checkout 全红（#438 同款缺陷），由 PR #467 修复（git rm --cached holdout）。直推豁免未登记——建议 owner 醒后按 ADR-0093 同款追认或回退。
+6. **AC 级缺陷（独立验收发现，2026-08-30 第二轮复核 #473 登记——本节为后补，原报告漏登）**：
+   - **#470（P0/SEV:HIGH，命中 AC-9/BEH-07）**：wave_schema 键名不匹配（wallclock_sec vs wall_sec）→ KeyError → wallclock 维度预算执法不可达。**已修**（ENFORCEABLE 映射+cost-check rc 兜底，本修复 PR）。
+   - **#472（P1，命中 AC-9/BUDGET-03）**：human_minutes 无账本源且被 BUDGET_KEYS[:3] 静默排除。**已修**（行级 unenforced_dims 可见声明，本修复 PR；补源完整执法另行立项）。
+   - **#471（命中 AC-4/W6-M2 自测）**：evidence-query metering 源 KeyError（目录列表无 content 字段）→ metering 恒 0 条；test-feedback-edge SIGPIPE 竞态红被 gate for 循环吞掉。**已修**（逐文件拉取+先落文件再 grep+gate 逐测试判定，本修复 PR）。
+   - **#469（GAP，命中 AC-3/BEH-02）**：verify_evidence.py 实居 archive 仓（本仓导航缺失，2A）+ checkpoint 月度无调度（2B）。**已修**（spec blastRadius/NAVIGATION 导航登记+evidence-checkpoint.yml 月度 cron+40 天新鲜度守卫，本修复 PR）。
+   - **#468（GAP，命中 AC-3/BUDGET-02）**：三级保留策略声明位缺失。**已修**（governance/policy/retention.yaml 落盘，本修复 PR）。
+   - 防复发：gate 新增 acceptance 收口守卫（验收报告合并时其 IR 项下不得有未豁免的 open bug/P0 issue——#473 建议处置 4）。
 
 ## 结论
 
-IR#402 十条期望变化全部有运行时证据支撑，冷上下文六问复测通过，20/20 子卡 done。T9 谓词满足，IR-0006 可收口（state:done）。
+IR#402 十条期望变化全部有运行时证据支撑，冷上下文六问复测通过，20/20 子卡 done。T9 谓词满足，IR-0006 收口（state:done）。
+**修订（2026-08-30，#473）**：原「十条全绿」结论与独立验收发现的 AC 级缺陷并存（AC-9 #470/#472、AC-3 #469/#468、AC-4 #471）——系收口时未做缺陷面扫描的漏登。上表结论以「缺陷登记+修复合入+回归实测绿」为准（残留第 6 条逐项登记），acceptance 收口守卫已机械化（gate）。此后验收报告合并=缺陷面已清或已登记的机器判定，不再依赖单方自述。

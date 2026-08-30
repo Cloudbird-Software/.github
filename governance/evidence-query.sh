@@ -64,13 +64,20 @@ PYEOF
 
 SRC_METER="$TMP/metering"; mkdir -p "$SRC_METER"
 if "$GH" api "repos/Cloudbird-Software/CI-Workflows/contents?ref=metering-ledger" >"$TMP/list.json" 2>"$TMP/api.err"; then
-  python3 - "$TMP/list.json" "$SRC_METER" <<'PYEOF'
-import base64, json, sys
+  # #471 修复：目录列表条目不含 content 字段（base64 正文）——只取文件名清单，
+  # 逐文件走 fetch_file（单文件 contents API 含 content；404=并发删除按缺席跳过）
+  python3 - "$TMP/list.json" > "$TMP/meter-files.txt" <<'PYEOF'
+import json, sys
 for ent in json.load(open(sys.argv[1], encoding="utf-8")):
-    if ent["type"] == "file" and ent["name"].startswith("shadow-evidence-") and ent["name"].endswith(".jsonl"):
-        open(f"{sys.argv[2]}/{ent['name']}", "w", encoding="utf-8", newline="\n").write(
-            base64.b64decode(ent["content"]).decode("utf-8"))
+    name = ent.get("name") or ""
+    if ent.get("type") == "file" and name.startswith("shadow-evidence-") and name.endswith(".jsonl"):
+        print(name)
 PYEOF
+  while IFS= read -r mname; do
+    [[ -n "$mname" ]] || continue
+    fetch_file "Cloudbird-Software/CI-Workflows" "metering-ledger" "$mname" "$SRC_METER/$mname" \
+      || { echo "WARN: metering $mname 并发缺席（404）——跳过" >&2; true; }
+  done < "$TMP/meter-files.txt"
 else
   # 同 fetch_file：按 "HTTP 404" 状态码判源缺席（报文变体猜谜必漏——见上方注释）
   if ! grep -q 'HTTP 404' "$TMP/api.err" 2>/dev/null; then

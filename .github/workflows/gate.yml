@@ -183,13 +183,70 @@ jobs:
           # IR-0002 #143 收口：§12 (a)/(b) 分类器 fixture 自测入 CI——(b) 检出
           # 灵敏度（INV-4）自此有机器证据，改分类器不连带过测即红。目录内新增
           # test-*.sh 自动纳入；目录为空=测试面丢失，fail-closed。
+          # #471 修复：逐测试判定——任何单测红都使本步红（原 for 循环退出码=
+          # 最后一个测试，中途红被吞掉=CI 假绿）
           shopt -s nullglob
           tests=(governance/tests/test-*.sh)
           shopt -u nullglob
           if [[ ${#tests[@]} -eq 0 ]]; then
             echo "::error::governance/tests 无 test-*.sh——测试面丢失（fail-closed）"; exit 1
           fi
-          for t in "${tests[@]}"; do echo "-- $t"; bash "$t"; done
+          reds=()
+          for t in "${tests[@]}"; do
+            echo "-- $t"
+            if ! bash "$t"; then reds+=("$t"); fi
+          done
+          if [[ ${#reds[@]} -gt 0 ]]; then
+            printf '::error::治理自测红（%d 个）：%s\n' "${#reds[@]}" "${reds[*]}"
+            exit 1
+          fi
+      - name: acceptance 收口守卫（#473：验收报告合并时 IR 项下不得有 open bug/P0 issue）
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_API: "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}"
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # 触发面：PR 触碰 specs/*/acceptance.md（fail-closed：清单拉取失败=红）
+          PAGE=1; FILES=""
+          while :; do
+            RESP=$(gh api "$PR_API/files?per_page=100&page=$PAGE") \
+              || { echo "::error::PR 文件清单拉取失败（fail-closed）"; exit 1; }
+            FILES="$FILES"$'\n'"$(echo "$RESP" | jq -r '.[].filename')"
+            [[ $(echo "$RESP" | jq 'length') -lt 100 ]] && break
+            PAGE=$((PAGE+1))
+          done
+          ACCEPTS=$(grep -E '^specs/[^/]+/acceptance\.md$' <<<"$FILES" || true)
+          if [[ -z "$ACCEPTS" ]]; then
+            echo "OK 本 PR 不触碰 acceptance.md——守卫不适用"; exit 0
+          fi
+          # 豁免面：本 PR body 声明将关闭的 issue（Fixes/Closes #n）——修复合流=缺口收口
+          PRBODY=$(gh api "$PR_API" --jq .body 2>/dev/null || echo "")
+          FIXED=$(grep -oE '(Fixes|Closes|Resolves) #[0-9]+' <<<"$PRBODY" \
+            | grep -oE '[0-9]+' | sort -un | tr '\n' ' ' || true)
+          echo "acceptance 变更：$ACCEPTS；本 PR 关闭豁免：${FIXED:-无}"
+          # 逐 acceptance：解析其 IR 引用（- IR: ...#NNN 行）→ 查 IR 项下 open bug/P0
+          for f in $ACCEPTS; do
+            IR_NUM=$(grep -oE '#[0-9]+' <<<"$(grep -m1 -E '^- IR: .+#' "$f" || true)" | head -1 | tr -d '#')
+            if [[ -z "$IR_NUM" ]]; then
+              echo "::error::$f 无法解析 IR 引用（- IR: 行缺 #NNN——fail-closed）"; exit 1
+            fi
+            echo "-- $f → IR #$IR_NUM"
+            for LBL in bug P0; do
+              BADS=$(gh api "search/issues?q=repo:${REPO_NAME}+is:issue+is:open+label:${LBL}+%23${IR_NUM}+in:body" \
+                --jq '.items[].number' 2>/dev/null) || { echo "::error::issue 检索失败（label:$LBL，fail-closed）"; exit 1; }
+              for n in $BADS; do
+                if grep -qw "$n" <<<"$(echo ${FIXED:-} | tr ' ' '\n')" 2>/dev/null; then
+                  echo "   豁免 #$n（本 PR 关闭）"
+                else
+                  echo "::error::IR #$IR_NUM 项下 open ${LBL} issue #$n 未登记收口——验收报告不得先于缺陷合并（#473）"
+                  exit 1
+                fi
+              done
+            done
+          done
+          echo "OK acceptance 收口守卫通过"
       - name: REPOS.yaml 引用自检（无重名仓）
         run: |
           python3 - <<'EOF'
