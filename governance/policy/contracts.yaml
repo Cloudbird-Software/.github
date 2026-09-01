@@ -48,11 +48,8 @@ repos:
     contracts:
       - {kind: jsonschema, path: "schema/contracts/**"}
       - {kind: jsonschema, path: "schema/entities/asset.schema.json"}
-      - {kind: jsonschema, path: "schema/entities/brand_kernel.schema.json"}
       - {kind: jsonschema, path: "schema/entities/event.schema.json"}
-      - {kind: jsonschema, path: "schema/entities/production_order.schema.json"}
       - {kind: jsonschema, path: "schema/entities/qc_assertion.schema.json"}
-      - {kind: jsonschema, path: "schema/entities/shot.schema.json"}
       - {kind: jsonschema, path: "schema/entities/video_plan.schema.json"}
       - {kind: jsonschema, path: "schema/common/**"}
     migrations: null
