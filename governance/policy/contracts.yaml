@@ -40,9 +40,20 @@ repos:
     # 迁移 destructive DDL 判定（ADR-0038）
 
   Shorts_Director:
+    # ADR-0105（IR-0007 契约退役，archive/adr）：entities 声明由 glob 收窄为
+    # 显式枚举——契约门引擎对声明路径下的文件删除（CONTRACT_REMOVED）无条件红
+    # 且无 ADR 豁免通道，合法退役的唯一通道即同步收窄本声明（引擎注释认可）。
+    # 代价（有意接受）：新增实体 schema 不再被 glob 自动纳管，须在此登记一行；
+    # 漏登由 review + archive/adr/INDEX.yaml 追溯。
     contracts:
       - {kind: jsonschema, path: "schema/contracts/**"}
-      - {kind: jsonschema, path: "schema/entities/**"}
+      - {kind: jsonschema, path: "schema/entities/asset.schema.json"}
+      - {kind: jsonschema, path: "schema/entities/brand_kernel.schema.json"}
+      - {kind: jsonschema, path: "schema/entities/event.schema.json"}
+      - {kind: jsonschema, path: "schema/entities/production_order.schema.json"}
+      - {kind: jsonschema, path: "schema/entities/qc_assertion.schema.json"}
+      - {kind: jsonschema, path: "schema/entities/shot.schema.json"}
+      - {kind: jsonschema, path: "schema/entities/video_plan.schema.json"}
       - {kind: jsonschema, path: "schema/common/**"}
     migrations: null
 
