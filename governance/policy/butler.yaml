@@ -64,5 +64,11 @@ thresholds:
   # 外部 dead-man 服务的 grace 时长（分钟）——心跳每 30min 一次，grace=60 容忍一次丢失
   deadman_grace_minutes: 60
   # 仓内兜底层：butler-heartbeat 最近一次成功 run 距今超过 N 小时 → 自动 trip
-  #（ADR-0074；3h=连续 6 次缺失 ping；API 查询失败=infra 红不盲 trip）
-  deadman_stale_hours: 3
+  #（ADR-0074；API 查询失败=infra 红不盲 trip）
+  # 阈值勘误（.github#482，2026-09-02）：原值 3 假设 cron */30 严格节拍（"连续 6 次
+  # 缺失"），但 GitHub scheduled runs 延迟显著——实测 9 天/100 次成功 run
+  #（2026-08-24~09-02）最大间隔 11.4h，25/99 间隔 >3h。watch（6h 节拍）间歇把
+  # "cron 延迟"误判为"管家缺席"→ 假 trip 停摆流水线且需人工复位（#482 两连发）。
+  # 24h = 2× 观测最坏间隔取上取整，杜绝误判；真缺席的仓内检出延至 ≤30h，快速通道
+  # 由外部 dead-man 层（hc.io，DEADMAN_PING_URL 已配置）承担（ADR-0074 双层分工）。
+  deadman_stale_hours: 24
