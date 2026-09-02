@@ -20,7 +20,7 @@ jobs:
     # 复用 CI-Workflows hygiene（大文件/凭据类文件/gitleaks 全历史/zizmor 工作流审计）
     # 钉 commit hash（zizmor unpinned-uses：可变 tag 不算钉住；ADR-0021）：
     # hash 即 CI-Workflows v1 tag 当前指向，升级 v1 须同步换 hash
-    uses: Cloudbird-Software/CI-Workflows/.github/workflows/hygiene.yml@61191f87c537f6e887695517121c6e530a838261 # v1
+    uses: Cloudbird-Software/CI-Workflows/.github/workflows/hygiene.yml@ce099e5853725acb04371a6018ce0ce03696dc99 # v1
 
   t14-spec-suite:
     # T-14 第一面（ADR-0083 决策 1/2，testing.yaml T-14，#263 W2-C3 .github#275）：
