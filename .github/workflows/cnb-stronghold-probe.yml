@@ -41,4 +41,4 @@ jobs:
             fi
             echo "### 判读"
             echo "四项 B1 判据：私有仓可创建/API 读写/token 单仓作用域/未授权不可枚举——本报告为原始读数，判定在卡 B1（机械核对）"
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee "$GITHUB_STEP_SUMMARY"
