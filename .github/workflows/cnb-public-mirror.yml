@@ -1,0 +1,78 @@
+name: cnb-public-mirror
+# IR-0010 卡 B4/B6：CNB 公开镜像（ADR-0108 三阵地第三阵地）——GitHub active 全仓 → cnb.cool/Cloudbird-Software/<repo>-mirror。
+# 范围 = governance/REPOS.yaml status:active 全仓（运行时拉清单，不硬编码）；
+# 镜像位 = cnb.cool/Cloudbird-Software/<repo>-mirror（公开只读镜像，勿在镜像侧开发）。
+# token 纪律：CNB_TOKEN_P11 恒在 CI 面（INV-04）；credential helper 注入（username 固定 cnb），零 URL/日志明文。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 23 * * *'   # 每日 UTC 23:00（23:30 mirror-reconcile 三头对账消费本产物）
+permissions:
+  contents: read
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - name: 镜像同步（GitHub active → cnb.cool/Cloudbird-Software/<repo>-mirror）
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN_P11 }}
+        run: |
+          set -eu
+          python3 -u - <<'PY'
+          import json, os, re, shutil, subprocess, urllib.request
+          TOK = os.environ['CNB_TOKEN']
+          SUM = open(os.environ.get('GITHUB_STEP_SUMMARY', os.devnull), 'a', encoding='utf-8')
+          def emit(line):
+              print(line)
+              SUM.write(line + '\n'); SUM.flush()
+          def http(url, method='GET', body=None, hdrs=None, expect_json=True):
+              h = {'User-Agent': 'cnb-public-mirror', 'Content-Type': 'application/json'}
+              h.update(hdrs or {})
+              req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, headers=h, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as r:
+                      d = r.read()
+                      if not expect_json:
+                          return r.status, d
+                      return r.status, (json.loads(d) if d else {})
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()[:200].decode(errors='replace')
+          _, raw = http('https://raw.githubusercontent.com/Cloudbird-Software/.github/main/governance/REPOS.yaml', expect_json=False)
+          active, cur = [], None
+          for line in raw.decode('utf-8').splitlines():
+              m = re.match(r'\s*-\s*name:\s*([\w.\-]+)', line)
+              if m: cur = m.group(1)
+              if cur and re.match(r'\s*status:\s*active\s*($|#)', line):
+                  active.append(cur)
+          active = sorted(set(active))
+          emit('active repos (%d): %s' % (len(active), ' '.join(active)))
+          hdr = {'Authorization': 'Bearer ' + TOK}
+          helper = '!f() { echo username=cnb; echo password="$CNB_TOKEN"; }; f'   # username 固定 cnb（docs.cnb.cool/zh/guide/git-access.html）
+          fail = []
+          for r in active:
+              code, body = http('https://api.cnb.cool/Cloudbird-Software/%s-mirror' % r, hdrs=hdr)
+              if code == 404:
+                  code, cbody = http('https://api.cnb.cool/Cloudbird-Software/-/repos', 'POST',
+                                     {'name': '%s-mirror' % r, 'visibility': 'public',
+                                      'description': 'Cloudbird-Software/%s 公开镜像（只读，ADR-0108 三阵地/卡 B4）' % r}, hdrs=hdr)
+                  if code not in (200, 201):
+                      emit('CREATE-FAIL %s: %s %s' % (r, code, cbody)); fail.append(r); continue
+                  emit('CREATED %s-mirror' % r)
+              elif not (200 <= code < 300):
+                  emit('PROBE-FAIL %s: %s %s' % (r, code, body)); fail.append(r); continue
+              if subprocess.call(['git', 'clone', '--quiet', '--mirror',
+                                  'https://github.com/Cloudbird-Software/%s.git' % r, '/tmp/%s.git' % r]) != 0:
+                  emit('CLONE-FAIL %s' % r); fail.append(r); continue
+              rc = subprocess.call(['git', '-C', '/tmp/%s.git' % r, '-c', 'credential.helper=' + helper,
+                                    'push', '--quiet', '--mirror', 'https://cnb.cool/Cloudbird-Software/%s-mirror.git' % r])
+              shutil.rmtree('/tmp/%s.git' % r, ignore_errors=True)
+              emit(('MIRROR-OK %s' % r) if rc == 0 else ('PUSH-FAIL %s rc=%s' % (r, rc)))
+              if rc != 0: fail.append(r)
+          if fail:
+              emit('FAILED: %s' % ' '.join(fail))
+              raise SystemExit(1)
+          emit('ALL-MIRRORED %d' % len(active))
+          PY

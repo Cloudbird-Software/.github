@@ -1,0 +1,86 @@
+name: answer-leak-scan
+# IR-0010 卡 B6：holdout 泄漏扫描看门狗（fail-closed）——答案层字段一旦回流 GitHub 公开面即红。
+# 触发：周一 UTC 22:00（北京周二 06:00 低峰）+ 手动 dispatch。
+# 扫描纪律：
+#   1) 负控先行——每次运行先在 $RUNNER_TEMP 造 fixture 假条目走同一扫描函数，检不出=检测器失明 exit 2；
+#   2) EXEMPT=HO-0004/HO-0005（canary×2）+HO-0008（eval-quad 设计公开）——三条豁免；
+#   3) MIGRATED 七条必须已剥离：payload 零禁键 + answer_ref.sealed_sha256 匹配 ^[a-f0-9]{64}$（缺失=红）；
+#   4) 任一红 → exit 1（fail-closed）；全绿 → SCAN-CLEAN n。
+# token 纪律：GH_TOKEN=github.token 恒在 CI 面（INV-04）；Accept: application/vnd.github.raw 直取条目字节。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 22 * * 1'   # 每周一 UTC 22:00
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - name: 负控自检 + holdout 泄漏扫描（fail-closed）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          python3 -u - <<'PY'
+          import json, os, re, urllib.request
+          FORBIDDEN = {"then", "golden", "golden_output", "trajectory_expectation", "acceptance", "verdict_method"}
+          EXEMPT = {"HO-0004", "HO-0005", "HO-0008"}   # canary×2 + eval-quad 设计公开（ADR-0056）
+          MIGRATED = {"HO-0001", "HO-0002", "HO-0003", "HO-0006", "HO-0007", "HO-0009", "HO-0010"}
+          SUM = open(os.environ.get('GITHUB_STEP_SUMMARY', os.devnull), 'a', encoding='utf-8')
+          def emit(line):
+              print(line)
+              SUM.write(line + '\n'); SUM.flush()
+          def gh_raw(path):
+              req = urllib.request.Request('https://api.github.com/repos/Cloudbird-Software/' + path,
+                  headers={'User-Agent': 'answer-leak-scan', 'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github.raw'})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return r.read()
+          def scan(entries):
+              """同一扫描函数同时服务负控与真实扫描：返回 [(id, [原因...])]。"""
+              bad = []
+              for e in entries:
+                  eid = e.get('id', '?')
+                  reasons = []
+                  hits = sorted(set(e.get('payload') or {}) & FORBIDDEN)
+                  if hits:
+                      reasons.append('payload 泄漏键 %s' % hits)
+                  if eid in MIGRATED:
+                      sha = (e.get('answer_ref') or {}).get('sealed_sha256', '')
+                      if not re.fullmatch(r'[a-f0-9]{64}', sha or ''):
+                          reasons.append('answer_ref 缺失或 sealed_sha256 非 64hex')
+                  if reasons:
+                      bad.append((eid, reasons))
+              return bad
+          # --- 负控（每次运行先做）：fixture 假条目必须被检出，检不出=检测器失明 ---
+          tmp = os.environ.get('RUNNER_TEMP', '/tmp')
+          fpath = os.path.join(tmp, 'negctl_fixture.json')
+          with open(fpath, 'w', encoding='utf-8') as f:
+              json.dump({"id": "HO-9999", "payload": {"then": {"oracle": "x"}}}, f)
+          fixture = json.load(open(fpath, encoding='utf-8'))
+          if scan(fixture):
+              emit('NEG-CONTROL PASS（fixture 假条目 HO-9999 被检出）')
+          else:
+              emit('NEG-CONTROL FAIL：检测器失明（fixture 未检出）')
+              raise SystemExit(2)
+          # --- 真实扫描：index.yaml → 逐条目 raw → JSON ---
+          index = gh_raw('holdout/contents/entries/index.yaml').decode('utf-8')
+          ids = re.findall(r'-\s*id:\s*(HO-\d{4})', index)
+          bad = []
+          for eid in ids:
+              e = json.loads(gh_raw('holdout/contents/entries/%s.json' % eid))
+              hits = [rs for i, rs in scan([e]) if i == eid]
+              if hits:
+                  emit('RED %s %s' % (eid, '；'.join(hits[0])))
+                  bad.append(eid)
+              else:
+                  emit('PASS %s' % eid)
+          if bad:
+              emit('LEAK-SCAN RED %d/%d（fail-closed：答案字段仍在公开面/剥离未执行，需立即处置）' % (len(bad), len(ids)))
+              raise SystemExit(1)
+          emit('SCAN-CLEAN %d' % len(ids))
+          PY
