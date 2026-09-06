@@ -54,21 +54,21 @@ jobs:
           local_sha = hashlib.sha256(open('answers/holdout-full-archive.jsonl', 'rb').read()).hexdigest()
           print('SEED-PREPARED entries=%d src_commit=%s archive_sha256=%s' % (len(entries), src_commit[:12], local_sha[:16]))
           PY
-          CH='!f(){ echo username=oauth2; echo password="$CNB_TOKEN"; };f'
+          CH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'
           git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo 2>/dev/null \
-            || { CH='!f(){ echo username=P11; echo password="$CNB_TOKEN"; };f'
+            || { CH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'
                  git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo 2>/dev/null \
-                 || { CH='!f(){ echo username="$CNB_TOKEN"; echo password=x-oauth-basic; };f'
+                 || { CH='!f(){ echo username=cnb; echo password=x-oauth-basic; };f'
                       git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo; }; }
           cd repo
           git config user.email randypanding@users.noreply.github.com && git config user.name randypanding
           cp -r ../stage/answers ../stage/ledger ../stage/README.md .
           git add -A && git commit -qm 'seed: holdout 全量档案+台账 genesis（迁移批次一，ADR-0108/S-7，EX-SEED）'
-          CH='!f(){ echo username=oauth2; echo password="$CNB_TOKEN"; };f'
+          CH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'
           if ! git -c credential.helper="$CH" push -q -u origin HEAD:main --force 2>/dev/null; then
-            CH='!f(){ echo username=P11; echo password="$CNB_TOKEN"; };f'
+            CH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'
             if ! git -c credential.helper="$CH" push -q -u origin HEAD:main --force 2>/dev/null; then
-              CH='!f(){ echo username="$CNB_TOKEN"; echo password=x-oauth-basic; };f'
+              CH='!f(){ echo username=cnb; echo password=x-oauth-basic; };f'
               git -c credential.helper="$CH" push -q -u origin HEAD:main --force
             fi
           fi
