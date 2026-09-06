@@ -66,7 +66,7 @@ jobs:
           echo "login=$LOGIN"
           echo '=== 诊断：user 路径 GET ==='
           curl -s -m 20 -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $CNB_TOKEN" "https://api.cnb.cool/$LOGIN/stronghold" || true
-          REPO_PATH="Cloudbird-Software/stronghold"
+          export REPO_PATH="Cloudbird-Software/stronghold"
           code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CNB_TOKEN" "https://api.cnb.cool/$REPO_PATH" || true)
           if [ "$code" != "200" ] && [ -n "$LOGIN" ]; then REPO_PATH="$LOGIN/stronghold"; fi
           echo "REPO_PATH=$REPO_PATH"
@@ -76,7 +76,7 @@ jobs:
           cd repo
           git config user.email randypanding@users.noreply.github.com && git config user.name randypanding
           cp -r ../answers ../ledger ../README.md .
-          git add -A && git commit -qm 'seed: holdout 全量档案+台账 genesis（迁移批次一，ADR-0108/S-7，EX-SEED）'
+          git add -A && (git diff --cached --quiet || git commit -qm 'seed: holdout 全量档案+台账 genesis（迁移批次一，ADR-0108/S-7，EX-SEED）')
           git -c credential.helper="$AUTH" push -q -u origin HEAD:main --force
           echo 'PUSH-OK'
           cd ../..
