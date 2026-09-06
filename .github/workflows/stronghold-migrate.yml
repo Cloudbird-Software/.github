@@ -1,0 +1,111 @@
+name: stronghold-migrate
+# IR-0010 卡 B2 批次二（阵地侧）：holdout 答案层字段级提取入 stronghold + 台账追加。
+# 前提：holdout main 仍为未剥离态（本工作流先于 holdout 剥离 PR 执行）。
+# 分类图与 holdout 剥离 PR 同源（本文件 CLASSIFICATION）；公式=ADR-0056 canonical JSON。
+# token 纪律：CNB_TOKEN_P11 恒在 CI 面（INV-04）；凭据经 credential helper（username=cnb）。
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - name: 答案层字段级提取+台账追加+回读校验
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN_P11 }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          mkdir -p stage && cd stage
+          python3 -u - <<'PY'
+          import base64, datetime, hashlib, json, os, urllib.request
+          def canon(o): return json.dumps(o, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+          def sha(o): return hashlib.sha256(canon(o).encode('utf-8')).hexdigest()
+          CLASSIFICATION = {
+            'HO-0001': ['then'], 'HO-0002': ['golden'], 'HO-0003': ['golden_output'],
+            'HO-0006': ['trajectory_expectation'], 'HO-0007': ['then'],
+            'HO-0009': ['acceptance', 'verdict_method'], 'HO-0010': ['acceptance', 'verdict_method'],
+          }   # HO-0004/0005 canary 与 HO-0008 eval-quad 设计公开，不迁移
+          def gh_raw(path):
+              req = urllib.request.Request('https://api.github.com/repos/Cloudbird-Software/' + path,
+                  headers={'User-Agent': 'migrate', 'Authorization': 'Bearer ' + os.environ['GH_TOKEN']})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return r.read()
+          src_commit = json.loads(gh_raw('holdout/commits/main'))['sha']
+          ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+          rows = []
+          for eid, fields in sorted(CLASSIFICATION.items()):
+              e = json.loads(gh_raw(f'holdout/contents/entries/{eid}.json'))
+              p = e['payload']
+              missing = [f for f in fields if f not in p]
+              assert not missing, (eid, missing)
+              answer_payload = {"id": eid, "fields": {f: p[f] for f in fields}}
+              data = canon(answer_payload)
+              os.makedirs('answers/field-level', exist_ok=True)
+              open(f'answers/field-level/{eid}.answers.json', 'w', encoding='utf-8', newline='').write(data)
+              h = hashlib.sha256(data.encode('utf-8')).hexdigest()
+              rows.append({"id": eid, "fields": fields, "answer_sealed_sha256": h,
+                           "target": f"answers/field-level/{eid}.answers.json"})
+              print(f'ANSWER-HASH {eid} {h}')
+          open('migrate_meta.json', 'w').write(json.dumps({"src_commit": src_commit, "ts": ts, "rows": rows}))
+          PY
+          AUTH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'   # CNB 官方认证（docs.cnb.cool/zh/guide/git-access.html）
+          git -c credential.helper="$AUTH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo
+          cd repo
+          git config user.email randypanding@users.noreply.github.com && git config user.name randypanding
+          python3 -u - <<'PY'
+          import hashlib, json, os, shutil
+          def canon(o): return json.dumps(o, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+          meta = json.load(open('../stage/migrate_meta.json'))
+          already = False
+          rows = []
+          for line in open('ledger/stronghold.jsonl', encoding='utf-8'):
+              line = line.strip()
+              if line:
+                  rows.append(json.loads(line))
+                  if rows[-1].get('type') == 'migration-b2':
+                      already = True
+          if already:
+              print('LEDGER-ALREADY-MIGRATED（幂等跳过追加）')
+          else:
+              prev = rows[-1]['hash']
+              for i, r in enumerate(meta['rows']):
+                  row = {"seq": len(rows) + 1, "id": r['id'], "type": "migration-b2", "date": meta['ts'][:10],
+                         "fields": r['fields'], "answer_sealed_sha256": r['answer_sealed_sha256'],
+                         "target": r['target'], "source_commit": meta['src_commit'][:12],
+                         "note": ("IR-0010 卡 B2 批次二（owner 豁免授权，ADR-0109 回签附录）：答案层字段入真值区，"
+                                  "GitHub 侧条目重封为 answer_ref 指针（sealed_sha256 引用纪律不变——指向新密封值）")}
+                  row['prev_hash'] = prev
+                  row['hash'] = hashlib.sha256(canon(row).encode('utf-8')).hexdigest()
+                  rows.append(row)
+                  prev = row['hash']
+              open('ledger/stronghold.jsonl', 'w', encoding='utf-8', newline='\n').write(
+                  '\n'.join(json.dumps(r, ensure_ascii=False, sort_keys=True) for r in rows) + '\n')
+              print(f'LEDGER-APPENDED seq 2..{len(rows)}')
+          for r in meta['rows']:
+              tgt = os.path.join('answers/field-level', os.path.basename(r['target']))
+              os.makedirs(os.path.dirname(tgt), exist_ok=True)
+              shutil.copyfile(os.path.join('../stage/answers/field-level', os.path.basename(r['target'])), tgt)
+          PY
+          git add -A && (git diff --cached --quiet || git commit -qm 'migrate: 卡 B2 批次二——答案层字段级入真值区+台账追加（owner 豁免授权）')
+          git -c credential.helper="$AUTH" push -q origin HEAD:main --force
+          echo 'PUSH-OK'
+          cd ../..
+          python3 -u - <<'PY'
+          import hashlib, json, os, urllib.request
+          meta = json.load(open('stage/migrate_meta.json'))
+          bad = []
+          for r in meta['rows']:
+              req = urllib.request.Request('https://api.cnb.cool/Cloudbird-Software/stronghold/-/git/raw/main/' + r['target'],
+                  headers={'User-Agent': 'migrate', 'Authorization': 'Bearer ' + os.environ['CNB_TOKEN']})
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  remote = resp.read()
+              if hashlib.sha256(remote).hexdigest() != r['answer_sealed_sha256']:
+                  bad.append(r['id'])
+          print('VERIFY', 'OK' if not bad else f'MISMATCH {bad}')
+          print('MIGRATED', len(meta['rows']))
+          PY
