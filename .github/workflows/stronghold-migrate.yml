@@ -61,7 +61,7 @@ jobs:
           python3 -u - <<'PY'
           import hashlib, json, os, shutil
           def canon(o): return json.dumps(o, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-          meta = json.load(open('../stage/migrate_meta.json'))
+          meta = json.load(open('../migrate_meta.json'))
           already = False
           rows = []
           for line in open('ledger/stronghold.jsonl', encoding='utf-8'):
@@ -90,7 +90,7 @@ jobs:
           for r in meta['rows']:
               tgt = os.path.join('answers/field-level', os.path.basename(r['target']))
               os.makedirs(os.path.dirname(tgt), exist_ok=True)
-              shutil.copyfile(os.path.join('../stage/answers/field-level', os.path.basename(r['target'])), tgt)
+              shutil.copyfile(os.path.join('../answers/field-level', os.path.basename(r['target'])), tgt)
           PY
           git add -A && (git diff --cached --quiet || git commit -qm 'migrate: 卡 B2 批次二——答案层字段级入真值区+台账追加（owner 豁免授权）')
           git -c credential.helper="$AUTH" push -q origin HEAD:main --force
