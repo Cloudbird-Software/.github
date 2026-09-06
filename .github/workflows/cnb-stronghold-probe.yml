@@ -5,6 +5,9 @@ on:
       do_create:
         description: "是否尝试创建 stronghold 私有仓（默认 false=只读探测）"
         default: "false"
+      account:
+        description: "CNB 账号别名（对应 org secret CNB_TOKEN_<大写别名>，如 XUEMEI/P11）"
+        default: "XUEMEI"
 permissions:
   contents: none
 jobs:
@@ -13,7 +16,7 @@ jobs:
     steps:
       - name: CNB 阵地核验（token 恒在 CI 面，agent 零接触——INV-04）
         env:
-          CNB_TOKEN: ${{ secrets.CNB_TOKEN_XUEMEI }}
+          CNB_TOKEN: ${{ secrets[format('CNB_TOKEN_{0}', github.event.inputs.account)] }}
           DO_CREATE: ${{ github.event.inputs.do_create }}
         run: |
           set -u
