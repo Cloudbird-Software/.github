@@ -1,7 +1,8 @@
 name: stronghold-seed
 # IR-0010 卡 B2 迁移批次一：holdout 答案层全量档案入 CNB stronghold（真值区，ADR-0108/S-7）。
 # 批次二（GitHub 侧字段级剥离+sealed 指针改写+unseal 管线重定向）另行执行——不在本工作流范围。
-# token 纪律：CNB_TOKEN_P11 恒在 CI 面（INV-04）；credential helper 注入，URL/日志零明文。
+# token 纪律：CNB_TOKEN_P11 恒在 CI 面（INV-04）；credential helper 注入（username=cnb），
+# URL/日志零明文；诊断命令一律用 git 自带凭据脱敏输出。
 on:
   workflow_dispatch:
 permissions:
@@ -10,6 +11,8 @@ jobs:
   seed:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GIT_TERMINAL_PROMPT: "0"
     steps:
       - name: holdout 全量档案入 stronghold + 台账 genesis + 回读校验
         env:
@@ -40,7 +43,7 @@ jobs:
               return json.dumps(d, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
           genesis = {"seq": 1, "type": "meta", "id": "EX-SEED", "date": time.strftime('%Y-%m-%d'),
                      "note": ("stronghold 开张（批次一）：holdout 十条全量档案+索引快照入真值区；源 commit=%s；"
-                              "hash 链公式=fractures/LEDGER.jsonl 同款（canon 紧凑 JSON，sha256 除 hash 外全字段）。"
+                              "hash 链公式=fractures/LEDGER.jsonl 同款。"
                               "批次二=GitHub 侧字段级剥离+sealed 指针+unseal 管线重定向（另行执行）。") % src_commit[:12]}
           genesis['prev_hash'] = '0' * 64
           genesis['hash'] = hashlib.sha256(canon(genesis).encode('utf-8')).hexdigest()
@@ -54,32 +57,36 @@ jobs:
           local_sha = hashlib.sha256(open('answers/holdout-full-archive.jsonl', 'rb').read()).hexdigest()
           print('SEED-PREPARED entries=%d src_commit=%s archive_sha256=%s' % (len(entries), src_commit[:12], local_sha[:16]))
           PY
-          CH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'
-          git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo 2>/dev/null \
-            || { CH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'
-                 git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo 2>/dev/null \
-                 || { CH='!f(){ echo username=cnb; echo password=x-oauth-basic; };f'
-                      git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo; }; }
+          AUTH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'   # CNB 官方认证：username 固定 cnb（docs.cnb.cool/zh/guide/git-access.html）
+          echo '=== 诊断：whoami ==='
+          curl -s -m 20 -H "Authorization: Bearer $CNB_TOKEN" https://api.cnb.cool/user | head -c 120; echo
+          echo '=== 诊断：org 路径 GET /Cloudbird-Software/stronghold ==='
+          curl -s -m 20 -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $CNB_TOKEN" https://api.cnb.cool/Cloudbird-Software/stronghold
+          LOGIN=$(curl -s -m 20 -H "Authorization: Bearer $CNB_TOKEN" https://api.cnb.cool/user | python3 -c 'import json,sys; print(json.load(sys.stdin).get("login",""))' || true)
+          echo "login=$LOGIN"
+          echo '=== 诊断：user 路径 GET ==='
+          curl -s -m 20 -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $CNB_TOKEN" "https://api.cnb.cool/$LOGIN/stronghold" || true
+          REPO_PATH="Cloudbird-Software/stronghold"
+          code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CNB_TOKEN" "https://api.cnb.cool/$REPO_PATH" || true)
+          if [ "$code" != "200" ] && [ -n "$LOGIN" ]; then REPO_PATH="$LOGIN/stronghold"; fi
+          echo "REPO_PATH=$REPO_PATH"
+          echo '=== 诊断：ls-remote（凭据脱敏由 git 保证）==='
+          git -c credential.helper="$AUTH" ls-remote "https://cnb.cool/$REPO_PATH.git" 2>&1 | head -3 || true
+          git -c credential.helper="$AUTH" clone -q "https://cnb.cool/$REPO_PATH.git" repo
           cd repo
           git config user.email randypanding@users.noreply.github.com && git config user.name randypanding
           cp -r ../stage/answers ../stage/ledger ../stage/README.md .
           git add -A && git commit -qm 'seed: holdout 全量档案+台账 genesis（迁移批次一，ADR-0108/S-7，EX-SEED）'
-          CH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'
-          if ! git -c credential.helper="$CH" push -q -u origin HEAD:main --force 2>/dev/null; then
-            CH='!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f'
-            if ! git -c credential.helper="$CH" push -q -u origin HEAD:main --force 2>/dev/null; then
-              CH='!f(){ echo username=cnb; echo password=x-oauth-basic; };f'
-              git -c credential.helper="$CH" push -q -u origin HEAD:main --force
-            fi
-          fi
-          echo 'PUSH-OK（认证形态详见上面 clone 分支；凭据零明文）'
+          git -c credential.helper="$AUTH" push -q -u origin HEAD:main --force
+          echo 'PUSH-OK'
+          cd ../..
           python3 - <<'PY'
           import hashlib, json, os, urllib.request
-          req = urllib.request.Request('https://api.cnb.cool/Cloudbird-Software/stronghold/-/git/raw/main/answers/holdout-full-archive.jsonl',
+          req = urllib.request.Request('https://api.cnb.cool/' + os.environ['REPO_PATH'] + '/-/git/raw/main/answers/holdout-full-archive.jsonl',
               headers={'User-Agent': 'seed', 'Authorization': 'Bearer ' + os.environ['CNB_TOKEN']})
           with urllib.request.urlopen(req, timeout=60) as r:
               remote = r.read()
-          local = open('../stage/answers/holdout-full-archive.jsonl', 'rb').read()
+          local = open('stage/answers/holdout-full-archive.jsonl', 'rb').read()
           print('VERIFY', 'OK' if hashlib.sha256(remote).hexdigest() == hashlib.sha256(local).hexdigest() else 'MISMATCH')
           print('remote entries:', len(remote.decode('utf-8').strip().splitlines()))
           PY
