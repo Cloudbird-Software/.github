@@ -62,7 +62,7 @@ jobs:
           with open(fpath, 'w', encoding='utf-8') as f:
               json.dump({"id": "HO-9999", "payload": {"then": {"oracle": "x"}}}, f)
           fixture = json.load(open(fpath, encoding='utf-8'))
-          if scan(fixture):
+          if scan([fixture]):   # 单条目包 list（scan 以列表迭代；直接传 dict 会迭代出字符串键）
               emit('NEG-CONTROL PASS（fixture 假条目 HO-9999 被检出）')
           else:
               emit('NEG-CONTROL FAIL：检测器失明（fixture 未检出）')
