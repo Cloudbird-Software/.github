@@ -22,17 +22,19 @@ jobs:
           python3 - <<'PY'
           import json, os, re, subprocess, urllib.request
           TOK = os.environ['GITCODE_TOKEN']
-          def http(url, method='GET', body=None, hdrs=None):
+          def http(url, method='GET', body=None, hdrs=None, expect_json=True):
               h = {'User-Agent': 'gitcode-mirror', 'Content-Type': 'application/json'}
               h.update(hdrs or {})
               req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, headers=h, method=method)
               try:
                   with urllib.request.urlopen(req, timeout=60) as r:
                       d = r.read()
+                      if not expect_json:
+                          return r.status, d
                       return r.status, (json.loads(d) if d else {})
               except urllib.error.HTTPError as e:
                   return e.code, e.read()[:200].decode(errors='replace')
-          _, raw = http('https://raw.githubusercontent.com/Cloudbird-Software/.github/main/governance/REPOS.yaml')
+          _, raw = http('https://raw.githubusercontent.com/Cloudbird-Software/.github/main/governance/REPOS.yaml', expect_json=False)
           active, cur = [], None
           for line in raw.decode('utf-8').splitlines():
               m = re.match(r'\s*-\s*name:\s*([\w.\-]+)', line)
