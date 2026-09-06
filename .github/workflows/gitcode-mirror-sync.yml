@@ -1,0 +1,66 @@
+name: gitcode-mirror-sync
+# B5 灾备镜像（ADR-0108 三阵地结构；owner 2026-09-06 指令：备份平台 Gitee→gitcode.com）。
+# 范围 = governance/REPOS.yaml status:active 全仓（运行时拉清单，不硬编码）；
+# 镜像位 = gitcode.com/feasylol/<repo>（公开只读镜像，勿在镜像侧开发）。
+# token 纪律：GITCODE_TOKEN 恒在 CI 面（INV-04），credential helper 注入，永不入 URL/日志。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 21 * * *'   # 每日 UTC 21:00（北京 05:00 低峰）
+permissions:
+  contents: read
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 镜像同步（GitHub active → gitcode.com/feasylol）
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import json, os, re, subprocess, urllib.request
+          TOK = os.environ['GITCODE_TOKEN']
+          def http(url, method='GET', body=None, hdrs=None):
+              h = {'User-Agent': 'gitcode-mirror', 'Content-Type': 'application/json'}
+              h.update(hdrs or {})
+              req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, headers=h, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as r:
+                      d = r.read()
+                      return r.status, (json.loads(d) if d else {})
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()[:200].decode(errors='replace')
+          _, raw = http('https://raw.githubusercontent.com/Cloudbird-Software/.github/main/governance/REPOS.yaml')
+          active, cur = [], None
+          for line in raw.decode('utf-8').splitlines():
+              m = re.match(r'\s*-\s*name:\s*([\w.\-]+)', line)
+              if m: cur = m.group(1)
+              if cur and re.match(r'\s*status:\s*active\s*($|#)', line):
+                  active.append(cur)
+          active = sorted(set(active))
+          print('active repos (%d): %s' % (len(active), active))
+          hdr = {'PRIVATE-TOKEN': TOK}
+          helper = '!f() { echo username=feasylol; echo password="$GITCODE_TOKEN"; }; f'
+          fail = []
+          for r in active:
+              code, _ = http('https://api.gitcode.com/api/v5/repos/feasylol/%s' % r, hdrs=hdr)
+              if code == 404:
+                  code, body = http('https://api.gitcode.com/api/v5/user/repos', 'POST',
+                                    {'name': r, 'private': False,
+                                     'description': 'Cloudbird-Software/%s 灾备镜像（只读，ADR-0108 三阵地；勿在此开发）' % r}, hdrs=hdr)
+                  if code not in (200, 201):
+                      print('CREATE-FAIL %s: %s %s' % (r, code, body)); fail.append(r); continue
+                  print('CREATED %s' % r)
+              if subprocess.call(['git', 'clone', '--quiet', '--mirror',
+                                  'https://github.com/Cloudbird-Software/%s.git' % r, '/tmp/%s.git' % r]) != 0:
+                  print('CLONE-FAIL %s' % r); fail.append(r); continue
+              rc = subprocess.call(['git', '-C', '/tmp/%s.git' % r, '-c', 'credential.helper=' + helper,
+                                    'push', '--quiet', '--mirror', 'https://gitcode.com/feasylol/%s.git' % r])
+              print('MIRROR-OK %s' % r if rc == 0 else 'PUSH-FAIL %s rc=%s' % (r, rc))
+              if rc != 0: fail.append(r)
+          if fail:
+              print('FAILED:', fail); raise SystemExit(1)
+          print('ALL-MIRRORED', len(active))
+          PY

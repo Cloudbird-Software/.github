@@ -1,0 +1,30 @@
+name: age-key-check
+# O-2/B3：BACKUP_AGE_KEY 与登记公钥的互操作验证（真 age 加解密往返，dispatch 手动）。
+# 公钥登记位=ADR-0109 回签附录（archive）；私钥恒在 secret 面，零日志（INV-04）。
+on:
+  workflow_dispatch:
+permissions:
+  contents: none
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 安装 age 并做密钥互操作验证
+        env:
+          BACKUP_AGE_KEY: ${{ secrets.BACKUP_AGE_KEY }}
+          EXPECT_PUB: age10ea9tw6wccjnz7ym0ujw32a05yxx932sn5v3tfj3z98yrr024v5qge837v
+        run: |
+          set -eu
+          sudo apt-get update -qq && sudo apt-get install -y -qq age \
+            || { curl -fsSL -o /tmp/age.tar.gz https://github.com/FiloSottile/age/releases/download/v1.1.1/age-v1.1.1-linux-amd64.tar.gz \
+                 && tar -xzf /tmp/age.tar.gz -C /tmp && sudo mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/; }
+          printf '%s\n' "$BACKUP_AGE_KEY" > "$RUNNER_TEMP/k.txt"; chmod 600 "$RUNNER_TEMP/k.txt"
+          DERIVED=$(age-keygen -y "$RUNNER_TEMP/k.txt")
+          echo "derived-pubkey=$DERIVED"
+          if [ "$DERIVED" != "$EXPECT_PUB" ]; then
+            echo 'FAIL: 派生公钥与登记公钥不一致（bech32 编码或密钥错位）——登记侧需复核'; exit 1
+          fi
+          printf 'dga-interop-payload-2026-09-06\n' | age -e -r "$DERIVED" -o "$RUNNER_TEMP/t.age"
+          age -d -i "$RUNNER_TEMP/k.txt" "$RUNNER_TEMP/t.age" | grep -q 'dga-interop-payload' && echo 'ROUNDTRIP=PASS'
+          rm -f "$RUNNER_TEMP/k.txt" "$RUNNER_TEMP/t.age"
+          echo 'AGE-INTEROP=PASS（互操作验证通过：私钥可解自己公钥封的密文）'
