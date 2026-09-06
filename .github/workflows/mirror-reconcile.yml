@@ -113,7 +113,8 @@ jobs:
               sealed = ''
               if code == 200:
                   try:
-                      sealed = (json.loads(e).get('answer_ref') or {}).get('sealed_sha256', '')
+                      doc = json.loads(e)
+                      sealed = ((doc.get('payload') or {}).get('answer_ref') or doc.get('answer_ref') or {}).get('sealed_sha256', '')
                   except Exception:
                       pass
               code2, blob = http('https://api.cnb.cool/Cloudbird-Software/stronghold/-/git/raw/main/answers/field-level/%s.answers.json' % eid,

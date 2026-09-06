@@ -50,7 +50,8 @@ jobs:
                   if hits:
                       reasons.append('payload 泄漏键 %s' % hits)
                   if eid in MIGRATED:
-                      sha = (e.get('answer_ref') or {}).get('sealed_sha256', '')
+                      ar = (e.get('payload') or {}).get('answer_ref') or e.get('answer_ref') or {}
+                      sha = ar.get('sealed_sha256', '')
                       if not re.fullmatch(r'[a-f0-9]{64}', sha or ''):
                           reasons.append('answer_ref 缺失或 sealed_sha256 非 64hex')
                   if reasons:
