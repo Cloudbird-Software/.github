@@ -17,6 +17,8 @@ entries:
     catalog: Cloudbird-Software/cnb-bridge accounts.yaml
     limits: automation-limits.yaml#cnb（档位 light/std/heavy、并发、配额告警线）
     removal: cnb-bridge/REMOVAL.md（可删除层，删除后核心治理语义不变）
+    trust_level: E3          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
+    data_classes_allowed: [D-公开]
   - name: llm-verifier
     kind: model             # 红队/verifier 判定模型（kimi k2.7）
     entry: adversary 工作流（repository_dispatch / workflow_dispatch）
@@ -24,12 +26,16 @@ entries:
     vars: [LLM_ENDPOINT1, MODEL1]
     metering: CI-Workflows pipeline/metering/metering-wrapper.sh（ADR-0062 账本）
     note: 判定链唯一 LLM 通道；NPC 无 logprobs 永不做判定（ADR-0082）
+    trust_level: E1          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
+    data_classes_allowed: [D-公开]
   - name: llm-spec-author
     kind: model             # spec 起草快速通道（可选——PM 自著等价，ADR-0085）
     entry: CI-Workflows spec-author.yml（workflow_dispatch）
     secrets: [LLM_API_KEY]
     metering: 同上
     note: 冷上下文流水线（INV-04）；产出仍须过 suite 门+红队
+    trust_level: E2          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
+    data_classes_allowed: [D-公开]
   - name: github-apps
     kind: identity          # 写仓身份（AG-1：开发/验证分离）
     entry: scripts/gh-app-token.sh（单仓作用域 1h 令牌）
@@ -37,6 +43,8 @@ entries:
     note: cloudbrid-agent（开发）+ verifier-app（仅测试/验证路径写权，ADR-0076）
   # ---- IR-0006 W1-C1（ADR-0103）：云内网入图 ----------------------------------
   # 三面分离：本二条目=执行面资产申报（判定锚点恒在 GitHub CI，不随池增减改变）
+    trust_level: E2          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
+    data_classes_allowed: [D-公开]
   - name: self-cloud-pool
     kind: compute           # 自有云内网算力池（公网服务器+云电脑池）
     entry: 服务器调度器 v0=cnb-bridge 仓 selfcloud/（W2-C1 已落地：Job Contract
@@ -46,8 +54,29 @@ entries:
     catalog: governance/assets-register.yaml（资产归属/额度/license 边界）
     removal: 可删除层（同 CNB 模式：删除后 gate/org-gate/conductor 判定语义不变，EX-1 延伸断言）
     note: 执行面基础设施≠harness（自建判据 ≥3 次妥协不变）；worker egress allowlist+W2-C1 起执法
+    trust_level: E2          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
+    data_classes_allowed: [D-公开]
   - name: vault
     kind: secret            # 内网 Vault（执行面凭据面）
     entry: 内网 Vault 实例（物理在内网域；org 不持有其副本）
     scope: 执行面内网域 only（非 org secret 面——两分域互不重叠）
     note: agent/PM 上下文零凭据不变（INV 纪律）；PM 令牌收敛后=服务器代签的中介（W2-C2）
+    trust_level: E1          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
+    data_classes_allowed: [D-公开]
+
+  # ---- IR-0010 卡 B1/B8b：新增登记 -------------------------------------------
+  - name: cnb-private
+    kind: repo-private     # CNB 私有阵地（stronghold，真值区——ADR-0108 proposed）
+    entry: 待卡 B1 实测核验通过后启用（创建+API 权限+配额+不可枚举四项）
+    secrets: []            # 专用分域 token（INV-04 延伸）——B1 核验后经 owner 面注入
+    removal: ADR-0108 失效语义节（阵地丢失=台账+Gitee 密文 bundle 重建）
+    trust_level: E1
+    data_classes_allowed: [D-公开, D-内部]   # 注意：不含 D-客户敏感（宪法触发器，test-providers-schema 执法）
+  - name: deepseek-v4-flash
+    kind: model            # E1 第二判定端点（B8b 登记；经 sensenova 渠道）
+    entry: 影子模式（verifier-exam 抽样）——条款定性（B8a 第 3 项）通过前不路由真实判定流量
+    secrets: [LLM_API_KEY_SENSENOVA]   # 待 owner 注入 org secret 后生效
+    metering: CI-Workflows pipeline/metering/metering-wrapper.sh（同 llm-verifier）
+    note: 切换条件=主端点异常（ADR-0104 类事件）或 owner 裁决；eval-quad 基线 pin 待 holdout 写权（owner 面）
+    trust_level: E1
+    data_classes_allowed: [D-公开]
