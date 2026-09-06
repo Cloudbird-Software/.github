@@ -203,6 +203,16 @@ repos:
       入口协议块、CODEOWNERS、workflows gates/meta/combo-smoke、数据集/holdout 密封清单、dependabot；
       登记依据 flows.new_repo step 4；初始空仓建仓 bootstrap 直推（(b) 类：建仓时序上 PR 流程尚未就绪）
       登记于 direct_push_exemptions（本 PR 同步），先例 ADR-0092/ADR-0090/ADR-0021
+
+  - name: dga-theory
+    layer: L0
+    visibility: public
+    status: active
+    role: 理论层 SSOT 载仓——DGA 文档族正本+absorption map+词汇归并+补丁演化链
+      （ADR-0107 层级声明 / IR-0009）；缺件：DGA 人类版 v1.0.1 原文（README 缺件声明，
+      FR-009 open）；bootstrap 直推 (b) 类豁免已登记 expected-state（ADR-0109 决策 2）
+    key_paths: [README.md, VOCABULARY.md, absorption-map/, patches/]
+    entry_protocol: false   # 文档仓无协议块（drift §17 不适用）；AGENTS.md 索引块待补（下批 PR）
     key_paths: [configs/gates/, docs/gates/, packages/, tools/, datasets/, tests/, reports/, AGENTS.md, .github/workflows/]
     entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 

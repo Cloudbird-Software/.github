@@ -1,0 +1,44 @@
+name: cnb-stronghold-probe
+on:
+  workflow_dispatch:
+    inputs:
+      do_create:
+        description: "是否尝试创建 stronghold 私有仓（默认 false=只读探测）"
+        default: "false"
+permissions:
+  contents: none
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CNB 阵地核验（token 恒在 CI 面，agent 零接触——INV-04）
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN_XUEMEI }}
+          DO_CREATE: ${{ github.event.inputs.do_create }}
+        run: |
+          set -u
+          API=https://api.cnb.cool
+          {
+            echo "## CNB stronghold 探针报告（$(date -u +%FT%TZ)）"
+            echo "### 1) 配额可查询"
+            code=$(curl -s -o /tmp/q.json -w '%{http_code}' -H "Authorization: Bearer $CNB_TOKEN" "$API/Cloudbird-Software/-/charge/quota" || echo ERR)
+            echo "GET /-/charge/quota → $code"; head -c 300 /tmp/q.json || true; echo
+            echo "### 2) 未授权访问被拒（对抗项）"
+            ucode=$(curl -s -o /dev/null -w '%{http_code}' "$API/Cloudbird-Software/stronghold" || echo ERR)
+            echo "无 token GET stronghold → $ucode（期望 401/403/404）"
+            echo "### 3) 授权读私有仓"
+            acode=$(curl -s -o /tmp/s.json -w '%{http_code}' -H "Authorization: Bearer $CNB_TOKEN" "$API/Cloudbird-Software/stronghold" || echo ERR)
+            echo "带 token GET stronghold → $acode（404=不存在待创建；200=已存在）"
+            echo "### 4) 创建尝试（do_create=$DO_CREATE）"
+            if [ "$DO_CREATE" = "true" ]; then
+              ccode=$(curl -s -o /tmp/c.json -w '%{http_code}' -X POST -H "Authorization: Bearer $CNB_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"name":"stronghold","private":true,"description":"CNB 私有阵地（真值区）——ADR-0108"}' \
+                "$API/Cloudbird-Software/stronghold" || echo ERR)
+              echo "POST create stronghold → $ccode"; head -c 300 /tmp/c.json || true; echo
+            else
+              echo "跳过（只读探测）"
+            fi
+            echo "### 判读"
+            echo "四项 B1 判据：私有仓可创建/API 读写/token 单仓作用域/未授权不可枚举——本报告为原始读数，判定在卡 B1（机械核对）"
+          } >> "$GITHUB_STEP_SUMMARY"
