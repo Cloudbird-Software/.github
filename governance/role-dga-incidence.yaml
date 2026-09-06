@@ -1,0 +1,20 @@
+# ROLE 增量条款对账注册（IR-0009 卡 A5；DGA-INCREMENT-PACK 6.2）
+source_adr: "ADR-0107"
+registered_at: "2026-09-06"
+roles:
+  ROLE-IR:
+    obligations: ["裁量登记", "判例援引"]
+    section_sha256: 2f32ee7212a5085d68af4f670adabb00a102b8758e9bac9c86c9e250220afb4d
+  ROLE-SPEC:
+    obligations: ["裁量登记", "分歧申报", "判例援引"]
+    section_sha256: bbe1d9674e732fcde86b74adb2214578db0e5170c3c5f3414782ab964de34ca7
+  ROLE-IMPLEMENT:
+    obligations: ["裁量登记", "分歧申报", "负结果查询"]
+    section_sha256: bbd4ec3748d06aee19febaf64e49ec863c7ebfa2de2db5d845b932a453a69f7a
+  ROLE-ACCEPT:
+    obligations: ["分歧申报", "判例援引"]
+    section_sha256: 54505fd989dea7b14122fdace2707f205feed7ec524ac9dfc718322882dd5b81
+agents_md:
+  n8_line: "分歧必须申报"
+  block_sha256: 1e04cba8bf7dd54ad180fc3762b638f1210022a7ff2064dbd7e5a26d7441db89
+  block_lines: 10
