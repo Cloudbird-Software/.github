@@ -12,14 +12,15 @@ permissions:
 jobs:
   mirror:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 150
     steps:
       - name: 镜像同步（GitHub active → gitcode.com/feasylol）
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GIT_TERMINAL_PROMPT: "0"
         run: |
           set -eu
-          python3 - <<'PY'
+          python3 -u - <<'PY'
           import json, os, re, subprocess, urllib.request
           TOK = os.environ['GITCODE_TOKEN']
           def http(url, method='GET', body=None, hdrs=None, expect_json=True):
