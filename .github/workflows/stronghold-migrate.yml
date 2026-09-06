@@ -32,14 +32,15 @@ jobs:
           }   # HO-0004/0005 canary 与 HO-0008 eval-quad 设计公开，不迁移
           def gh_raw(path):
               req = urllib.request.Request('https://api.github.com/repos/Cloudbird-Software/' + path,
-                  headers={'User-Agent': 'migrate', 'Authorization': 'Bearer ' + os.environ['GH_TOKEN']})
+                  headers={'User-Agent': 'migrate', 'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github.raw'})
               with urllib.request.urlopen(req, timeout=60) as r:
                   return r.read()
           src_commit = json.loads(gh_raw('holdout/commits/main'))['sha']
           ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
           rows = []
           for eid, fields in sorted(CLASSIFICATION.items()):
-              e = json.loads(gh_raw(f'holdout/contents/entries/{eid}.json'))
+              e = json.loads(gh_raw(f'holdout/contents/entries/{eid}.json'))  # raw Accept 直取条目字节
               p = e['payload']
               missing = [f for f in fields if f not in p]
               assert not missing, (eid, missing)
