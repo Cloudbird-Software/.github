@@ -71,9 +71,10 @@ jobs:
                                 hdrs={'Authorization': 'Bearer ' + os.environ['GH_TOKEN']})
               github_head = data.get('sha') if (code == 200 and isinstance(data, dict)) else None
               gitcode_head = ls_remote('https://gitcode.com/feasylol/%s.git' % r)           # 公开匿名
-              cnb_head = ls_remote('https://cnb.cool/Cloudbird-Software/%s-mirror.git' % r)  # 公开匿名
+              cnb_name = (r[1:] if r.startswith('.') else r) + '-mirror'   # CNB 命名规则：前导点仓去点（.github → github-mirror），与 cnb-public-mirror 同款映射
+              cnb_head = ls_remote('https://cnb.cool/Cloudbird-Software/%s.git' % cnb_name)  # 公开匿名
               if cnb_head is None:   # 失败时 credential helper 重试一次
-                  cnb_head = ls_remote('https://cnb.cool/Cloudbird-Software/%s-mirror.git' % r, cred=True)
+                  cnb_head = ls_remote('https://cnb.cool/Cloudbird-Software/%s.git' % cnb_name, cred=True)
               if github_head and github_head == gitcode_head == cnb_head:
                   emit('GREEN %s %s' % (r, github_head[:12])); green.append(r)
               else:
