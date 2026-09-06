@@ -1,0 +1,134 @@
+name: mirror-reconcile
+# IR-0010 卡 B6：镜像三头对账（github_head = gitcode_head = cnb_head → GREEN）+ stronghold 台账 hash 链验证 + answer_ref 交叉对账。
+# ⚠ 时序说明（非漂移）：周中合并后当夜镜像未跑（cron 次日 UTC 23:00 才跑）会造成瞬时 RED——
+#   先派发 cnb-public-mirror 再重跑本工作流即消；gitcode 侧镜像滞后（head 为空）同理。
+# 触发：每日 UTC 23:30（镜像后半小时）+ 手动 dispatch。
+# token 纪律：CNB_TOKEN_P11/GITCODE_TOKEN 恒在 CI 面（INV-04）；gitcode/CNB ls-remote 走公开匿名，
+#   CNB 失败才用 credential helper（username=cnb）重试一次；台账/答案区经 Bearer 取（stronghold 私有）。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 23 * * *'   # 每日 UTC 23:30（cnb-public-mirror 后半小时）
+permissions:
+  contents: read
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - name: 三头对账 + 台账链验证 + answer_ref 交叉对账
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN_P11 }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          python3 -u - <<'PY'
+          import hashlib, json, os, re, subprocess, urllib.request
+          MIGRATED = ["HO-0001", "HO-0002", "HO-0003", "HO-0006", "HO-0007", "HO-0009", "HO-0010"]
+          SUM = open(os.environ.get('GITHUB_STEP_SUMMARY', os.devnull), 'a', encoding='utf-8')
+          def emit(line):
+              print(line)
+              SUM.write(line + '\n'); SUM.flush()
+          def http(url, method='GET', body=None, hdrs=None, expect_json=True):
+              h = {'User-Agent': 'mirror-reconcile', 'Content-Type': 'application/json'}
+              h.update(hdrs or {})
+              req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, headers=h, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as r:
+                      d = r.read()
+                      if not expect_json:
+                          return r.status, d
+                      return r.status, (json.loads(d) if d else {})
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()[:200].decode(errors='replace')
+          def ls_remote(url, cred=False):
+              cmd = ['git']
+              if cred:
+                  cmd += ['-c', 'credential.helper=!f(){ echo username=cnb; echo password="$CNB_TOKEN"; };f']
+              cmd += ['ls-remote', url, 'HEAD']
+              p = subprocess.run(cmd, capture_output=True, text=True)
+              if p.returncode != 0:
+                  return None
+              out = p.stdout.strip().split('\t')
+              return out[0] if out and out[0] else None
+          # --- active 清单（同 cnb-public-mirror：REPOS.yaml 运行时解析）---
+          _, raw = http('https://raw.githubusercontent.com/Cloudbird-Software/.github/main/governance/REPOS.yaml', expect_json=False)
+          active, cur = [], None
+          for line in raw.decode('utf-8').splitlines():
+              m = re.match(r'\s*-\s*name:\s*([\w.\-]+)', line)
+              if m: cur = m.group(1)
+              if cur and re.match(r'\s*status:\s*active\s*($|#)', line):
+                  active.append(cur)
+          active = sorted(set(active))
+          emit('active repos (%d)' % len(active))
+          # --- 逐仓三头对账：GitHub commits/main vs gitcode HEAD vs CNB mirror HEAD ---
+          green, red = [], []
+          for r in active:
+              code, data = http('https://api.github.com/repos/Cloudbird-Software/%s/commits/main' % r,
+                                hdrs={'Authorization': 'Bearer ' + os.environ['GH_TOKEN']})
+              github_head = data.get('sha') if (code == 200 and isinstance(data, dict)) else None
+              gitcode_head = ls_remote('https://gitcode.com/feasylol/%s.git' % r)           # 公开匿名
+              cnb_head = ls_remote('https://cnb.cool/Cloudbird-Software/%s-mirror.git' % r)  # 公开匿名
+              if cnb_head is None:   # 失败时 credential helper 重试一次
+                  cnb_head = ls_remote('https://cnb.cool/Cloudbird-Software/%s-mirror.git' % r, cred=True)
+              if github_head and github_head == gitcode_head == cnb_head:
+                  emit('GREEN %s %s' % (r, github_head[:12])); green.append(r)
+              else:
+                  emit('RED %s github=%s gitcode=%s cnb=%s' % (r, (github_head or 'NONE')[:12],
+                       (gitcode_head or 'NONE')[:12], (cnb_head or 'NONE')[:12]))
+                  red.append(r)
+          # --- stronghold 台账 hash 链验证（canon 公式=ADR-0056，同 fractures/LEDGER.jsonl 款）---
+          code, chain_raw = http('https://api.cnb.cool/Cloudbird-Software/stronghold/-/git/raw/main/ledger/stronghold.jsonl',
+                                 hdrs={'Authorization': 'Bearer ' + os.environ['CNB_TOKEN']}, expect_json=False)
+          chain_ok, chain_msg = False, ''
+          if code != 200:
+              chain_msg = '取台账失败 HTTP %s' % code
+          else:
+              def canon(o): return json.dumps(o, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+              prev, ok, n = '0' * 64, True, 0
+              for ln, line in enumerate(chain_raw.decode('utf-8').splitlines(), 1):
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  expect_hash = hashlib.sha256(canon({k: v for k, v in row.items() if k != 'hash'}).encode('utf-8')).hexdigest()
+                  if row.get('prev_hash') != prev:
+                      ok, chain_msg = False, 'line %d prev_hash 断链' % ln
+                      break
+                  if row.get('hash') != expect_hash:
+                      ok, chain_msg = False, 'line %d hash 重算不符' % ln
+                      break
+                  prev, n = row['hash'], n + 1
+              if ok:
+                  chain_ok, chain_msg = True, '%d 行全部衔接' % n
+          emit('CHAIN-%s %s' % ('OK' if chain_ok else 'BROKEN', chain_msg))
+          # --- answer_ref 交叉对账：holdout MIGRATED 条目 sealed_sha256 == stronghold 答案文件字节 sha256 ---
+          match, mismatch = [], []
+          for eid in MIGRATED:
+              code, e = http('https://api.github.com/repos/Cloudbird-Software/holdout/contents/entries/%s.json' % eid,
+                             hdrs={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                                   'Accept': 'application/vnd.github.raw'}, expect_json=False)
+              sealed = ''
+              if code == 200:
+                  try:
+                      sealed = (json.loads(e).get('answer_ref') or {}).get('sealed_sha256', '')
+                  except Exception:
+                      pass
+              code2, blob = http('https://api.cnb.cool/Cloudbird-Software/stronghold/-/git/raw/main/answers/field-level/%s.answers.json' % eid,
+                                 hdrs={'Authorization': 'Bearer ' + os.environ['CNB_TOKEN']}, expect_json=False)
+              stronghold_sha = hashlib.sha256(blob).hexdigest() if code2 == 200 else None
+              if sealed and stronghold_sha and sealed == stronghold_sha:
+                  emit('MATCH %s %s' % (eid, sealed[:12])); match.append(eid)
+              else:
+                  emit('MISMATCH %s answer_ref=%s stronghold=%s' % (eid, sealed[:12] or 'MISSING',
+                       (stronghold_sha or 'NONE')[:12]))
+                  mismatch.append(eid)
+          # --- 汇总（任一 RED/BROKEN/MISMATCH → exit 1，fail-closed）---
+          emit('RECONCILE-SUMMARY green=%d red=%d chain=%s match=%d mismatch=%d' % (
+              len(green), len(red), 'OK' if chain_ok else 'BROKEN', len(match), len(mismatch)))
+          if red or mismatch or not chain_ok:
+              raise SystemExit(1)
+          emit('ALL-RECONCILED %d' % len(active))
+          PY
