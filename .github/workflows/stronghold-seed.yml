@@ -1,0 +1,85 @@
+name: stronghold-seed
+# IR-0010 卡 B2 迁移批次一：holdout 答案层全量档案入 CNB stronghold（真值区，ADR-0108/S-7）。
+# 批次二（GitHub 侧字段级剥离+sealed 指针改写+unseal 管线重定向）另行执行——不在本工作流范围。
+# token 纪律：CNB_TOKEN_P11 恒在 CI 面（INV-04）；credential helper 注入，URL/日志零明文。
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: holdout 全量档案入 stronghold + 台账 genesis + 回读校验
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN_P11 }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          mkdir -p stage && cd stage
+          python3 - <<'PY'
+          import base64, hashlib, json, os, time, urllib.request
+          def gh(path):
+              req = urllib.request.Request('https://api.github.com/repos/Cloudbird-Software/' + path,
+                  headers={'User-Agent': 'seed', 'Authorization': 'Bearer ' + os.environ['GH_TOKEN']})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.loads(r.read())
+          src_commit = gh('holdout/commits/main')['sha']
+          entries = []
+          for i in range(1, 11):
+              e = gh('holdout/contents/entries/HO-%04d.json' % i)
+              entries.append(json.loads(base64.b64decode(e['content']).decode('utf-8')))
+          index_yaml = base64.b64decode(gh('holdout/contents/entries/index.yaml')['content']).decode('utf-8')
+          os.makedirs('answers', exist_ok=True)
+          with open('answers/holdout-full-archive.jsonl', 'w', encoding='utf-8') as f:
+              for e in entries:
+                  f.write(json.dumps(e, ensure_ascii=False, sort_keys=True) + '\n')
+          open('answers/index-snapshot.yaml', 'w', encoding='utf-8').write(index_yaml)
+          def canon(d):
+              return json.dumps(d, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+          genesis = {"seq": 1, "type": "meta", "id": "EX-SEED", "date": time.strftime('%Y-%m-%d'),
+                     "note": ("stronghold 开张（批次一）：holdout 十条全量档案+索引快照入真值区；源 commit=%s；"
+                              "hash 链公式=fractures/LEDGER.jsonl 同款（canon 紧凑 JSON，sha256 除 hash 外全字段）。"
+                              "批次二=GitHub 侧字段级剥离+sealed 指针+unseal 管线重定向（另行执行）。") % src_commit[:12]}
+          genesis['prev_hash'] = '0' * 64
+          genesis['hash'] = hashlib.sha256(canon(genesis).encode('utf-8')).hexdigest()
+          os.makedirs('ledger', exist_ok=True)
+          open('ledger/stronghold.jsonl', 'w', encoding='utf-8').write(json.dumps(genesis, ensure_ascii=False, sort_keys=True) + '\n')
+          open('README.md', 'w', encoding='utf-8').write(
+              '# stronghold —— CNB 私有阵地（真值区）\n\n'
+              '> ADR-0108（S-7 签署 2026-09-06）；三阵地结构：考卷公开答案密封。私有仓，唯一写权=CI 面（INV-04）。\n\n'
+              '- `answers/` —— holdout 全量档案（迁移批次一）\n'
+              '- `ledger/stronghold.jsonl` —— 迁移台账（hash 链）\n')
+          local_sha = hashlib.sha256(open('answers/holdout-full-archive.jsonl', 'rb').read()).hexdigest()
+          print('SEED-PREPARED entries=%d src_commit=%s archive_sha256=%s' % (len(entries), src_commit[:12], local_sha[:16]))
+          PY
+          CH='!f(){ echo username=oauth2; echo password="$CNB_TOKEN"; };f'
+          git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo 2>/dev/null \
+            || { CH='!f(){ echo username=P11; echo password="$CNB_TOKEN"; };f'
+                 git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo 2>/dev/null \
+                 || { CH='!f(){ echo username="$CNB_TOKEN"; echo password=x-oauth-basic; };f'
+                      git -c credential.helper="$CH" clone -q https://cnb.cool/Cloudbird-Software/stronghold.git repo; }; }
+          cd repo
+          git config user.email randypanding@users.noreply.github.com && git config user.name randypanding
+          cp -r ../stage/answers ../stage/ledger ../stage/README.md .
+          git add -A && git commit -qm 'seed: holdout 全量档案+台账 genesis（迁移批次一，ADR-0108/S-7，EX-SEED）'
+          CH='!f(){ echo username=oauth2; echo password="$CNB_TOKEN"; };f'
+          if ! git -c credential.helper="$CH" push -q -u origin HEAD:main --force 2>/dev/null; then
+            CH='!f(){ echo username=P11; echo password="$CNB_TOKEN"; };f'
+            if ! git -c credential.helper="$CH" push -q -u origin HEAD:main --force 2>/dev/null; then
+              CH='!f(){ echo username="$CNB_TOKEN"; echo password=x-oauth-basic; };f'
+              git -c credential.helper="$CH" push -q -u origin HEAD:main --force
+            fi
+          fi
+          echo 'PUSH-OK（认证形态详见上面 clone 分支；凭据零明文）'
+          python3 - <<'PY'
+          import hashlib, json, os, urllib.request
+          req = urllib.request.Request('https://api.cnb.cool/Cloudbird-Software/stronghold/-/git/raw/main/answers/holdout-full-archive.jsonl',
+              headers={'User-Agent': 'seed', 'Authorization': 'Bearer ' + os.environ['CNB_TOKEN']})
+          with urllib.request.urlopen(req, timeout=60) as r:
+              remote = r.read()
+          local = open('../stage/answers/holdout-full-archive.jsonl', 'rb').read()
+          print('VERIFY', 'OK' if hashlib.sha256(remote).hexdigest() == hashlib.sha256(local).hexdigest() else 'MISMATCH')
+          print('remote entries:', len(remote.decode('utf-8').strip().splitlines()))
+          PY
