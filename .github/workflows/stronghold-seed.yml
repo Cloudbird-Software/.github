@@ -75,7 +75,7 @@ jobs:
           git -c credential.helper="$AUTH" clone -q "https://cnb.cool/$REPO_PATH.git" repo
           cd repo
           git config user.email randypanding@users.noreply.github.com && git config user.name randypanding
-          cp -r ../stage/answers ../stage/ledger ../stage/README.md .
+          cp -r ../answers ../ledger ../README.md .
           git add -A && git commit -qm 'seed: holdout 全量档案+台账 genesis（迁移批次一，ADR-0108/S-7，EX-SEED）'
           git -c credential.helper="$AUTH" push -q -u origin HEAD:main --force
           echo 'PUSH-OK'
