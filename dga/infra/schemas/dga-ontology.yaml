@@ -1,0 +1,46 @@
+# dga-ontology.yaml — DGA-INFRA 本体主 schema（M0 定稿）
+#
+# 本体论宪法层的机器可读投影（human v1.1 §5.6 双投影结构：叙事文档给责任层，
+# schema 给系统执行；两投影同版本演化）。
+#
+# 五层框架（human v1.1 §5.2）落位：
+#   Object 层   → include/core.yaml + include/closure.yaml(ClosureUnit) + include/pools.yaml
+#   Link 层     → include/closure.yaml（AccountabilityLink/ClosureNesting/RoleSlot/OriginalProjection）
+#   Action 层   → include/actions.yaml（ActionType）
+#   Function 层 → include/functions.yaml（FunctionType）
+#   Security 层 → include/base.yaml（SecurityMark mixin，挂接关键类）
+#
+# 六元组映射（human v1.1 §5.3）：
+#   Intent→Intent  Context→ContextAsset+CalibrationDomain  Capability→CapabilityEntity
+#   Action→ActionType  Evidence→EvidenceEntity
+#   Accountability→AccountabilityLink（必填）+ Security（裁决权限谓词→OPA 层）
+#
+# 权威源（DGA-INFRA 第 1 章）：本 schema 本身权威源=Git（经批准版本，S5 签发流）；
+#   结构性修改（新增/删除实体类型、修改关系约束）归 S5 裁决（human v1.1 §5.1 宪法级）。
+#
+# ID 体系：见 include/base.yaml 的 id 槽（类前缀-序号，M0 第一天定稿）。
+# FAIR URI：base URI 当前为 example.org 占位，正式域名待 S5 定夺（登记 BUILD-LOG）。
+id: https://example.org/dga-infra/ontology/
+name: dga-ontology
+title: DGA-INFRA 本体（五层 + 治理实体）
+description: >
+  DGA-INFRA 建设的对象模型定稿（M0）：实现 DGA 五层本体（人类版 v1.1 第五章）
+  与 INFRA 治理实体（DGA-INFRA v1.0 第 1/3/5 章）。声明层选型 LinkML
+  （SEL-13，ontology-research-2026-09-06.md，S5 已采纳）；运行时投影由生成器产出
+  （JSON Schema/Python/SQL DDL/文档），权限谓词与跨实例约束强制在 OPA/服务端层。
+license: MIT
+prefixes:
+  linkml: https://w3id.org/linkml/
+  dga: https://example.org/dga-infra/ontology/
+  dcterms: http://purl.org/dc/terms/
+default_prefix: dga
+default_range: string
+imports:
+  - linkml:types
+  - include/enums
+  - include/base
+  - include/core
+  - include/actions
+  - include/functions
+  - include/closure
+  - include/pools

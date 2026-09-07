@@ -1,0 +1,64 @@
+# functions.yaml — DGA-INFRA 本体 Function 层（M0 定稿）
+# 依据：human v1.1 §5.2 Function 层（绑定在实体类型上的可演化逻辑——评估定义、
+#       校准逻辑、漂移检测、度量计算）、§5.9（判定/执行分离的本体投影）；
+#       DGA-INFRA R-POL-04（换模型评审≠获得校准判定）、R-POOL-CALIB。
+id: https://example.org/dga-infra/ontology/functions
+name: dga-functions
+title: DGA-INFRA Function 层
+description: >
+  判定层——对世界状态做出断言的读/判路径。Action 是写路径，Function 是读/判路径；
+  执行者与判定者是不同类型的公民（human v1.1 §5.2）。
+license: MIT
+prefixes:
+  linkml: https://w3id.org/linkml/
+  dga: https://example.org/dga-infra/ontology/
+default_prefix: dga
+default_range: string
+imports:
+  - linkml:types
+  - enums
+  - base
+
+classes:
+
+  FunctionType:
+    class_uri: dga:FunctionType
+    mixins:
+      - SecurityMark
+    slots:
+      - id
+      - name
+      - created_at
+    slot_usage:
+      id:
+        pattern: "^FN-[0-9]{4,}$"
+    attributes:
+      function_kind:
+        range: FunctionKind
+        required: true
+        description: 判定函数类别（评估/校准/漂移检测/度量计算）。
+      input_schema_ref:
+        range: string
+        required: true
+        description: 类型化输入 schema 引用（typed in）。
+      output_schema_ref:
+        range: string
+        required: true
+        description: 类型化输出 schema 引用（typed out）。
+      calibration_domain_ref:
+        range: string
+        description: 所属校准域（CalibrationDomain id，CAL-xxxx；R-POOL-CALIB：校准有效性声明）。
+      version:
+        range: SemVer
+        required: true
+        description: 函数版本（可独立演化、独立审计、可交叉比对——三重度量的结构支点）。
+      hidden_sealed_ref:
+        range: string
+        description: >
+          隐匿判定集密封指针（hash 引用纪律，human v1.1 §4.3 其二·附形态乙：
+          考卷公开、答案密封）。执行侧上下文装配物理不含本字段内容。
+    description: >
+      判定类型（Function 层唯一类）。每个 Function 定义：类型化输入输出、所属校准域、
+      版本。为什么独立于 Action：判定逻辑混入操作实现会使判定不可独立演化、不可独立
+      审计、不可交叉比对（human v1.1 §5.2）。执行者不能修改校准参数与已记录失败
+      （R-POL-04）；换模型评审≠获得校准判定。

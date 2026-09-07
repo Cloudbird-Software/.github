@@ -1,0 +1,44 @@
+# degradation.yaml — DGA-INFRA 降级链权威定义（M2 资源池 v0）
+# 规范依据：DGA-INFRA-v1.0 3.5 降级链（R-POOL-DEGRADE）：
+#   T1 主力付费 → T1 备用付费 → 低成本付费 → [队列等待 / 任务挂起] → 升级 S5；
+#   免费层（T0）只承接 T0 任务，**不作为任何客户链路的降级终点**；
+#   禁止自动跳到 S5 未批准的成本等级；等待超过闭环授权的决断时距 ⇒ 挂起 [MET-01]。
+# 权威源：本文件为策略权威（Git 经批准版本，R-GOV-02）；运行时投影 =
+#   pool_routing_policies.fallback_chain（dga_control）与 litellm_settings.default_fallbacks。
+# 实现级（本机 v0）：pools/route_check.py 按候选序逐端点尝试；全败且无策略拒绝 ⇒ 返回
+#   decision=queued（队列/挂起态）；策略性全败 ⇒ denied（红线不排队，详见 README 裁决语义）。
+
+id: DEG-0001
+name: customer-chain-v0
+applies_to:                       # 适用链路
+  - routing_policy: RTP-0001      # dga_control.pool_routing_policies
+  - endpoints: [paid-judge]       # 客户链路主力起点（T1）
+
+chain:                            # 顺序即降级顺序（3.5）
+  - step: 1
+    target: paid-judge            # T1 主力付费（mock-paid，EPL-0002）
+    tier: low-paid
+    note: 客户链路唯一 v0 在位付费端点
+  - step: 2
+    target: t1-backup             # T1 备用付费
+    tier: low-paid
+    status: NOT_PROVISIONED       # v0 未接入：账本无第二个 T1 端点（缺口登记 README §遗留）
+  - step: 3
+    target: low-cost-paid         # 低成本付费
+    tier: low-paid
+    status: NOT_PROVISIONED       # v0 未接入
+  - step: 4
+    target: QUEUE/SUSPEND         # 队列等待 → 超决断时距挂起（MET-01）
+    decision_timespan: P1D        # 占位值；真实决断时距随闭环 Authorization（AUT）下发
+    note: route_check.py 全败（可用性）时返回 decision=queued 即此步的实现级形态
+  - step: 5
+    target: ESCALATE-S5           # 升级 S5（人类裁决，责任守恒）
+    note: 挂起事件与升级卡片走 S5DecisionCard（本体 DC-xxxx）
+
+# ===== 红线注释（钉死，不可删除）=====
+# T0 禁令：free-workhorse（T0）/gray-probe（T0，灰区隔离）**不在本链任何一步**，
+#   严禁被追加为客户链路降级终点（3.5：免费层不作任何客户链路的降级终点；
+#   3.3：客户业务数据禁 T0）。litellm_settings.default_fallbacks 中的 mock-free 兜底
+#   仅为 v0 全 mock 拓扑下的网关层重试演示，不构成链定义，两处语义不得混淆。
+# 成本级纪律：chain 各步 tier 均在 RTP-0001.allowed_cost_tiers = [free, low-paid] 内；
+#   追加 high-paid/enterprise 步须先经 S5 批准并更新白名单（3.5 禁自动跳级）。
