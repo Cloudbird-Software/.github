@@ -1,0 +1,251 @@
+# pools.yaml — DGA-INFRA 本体：资源池化体系对象（M0 定稿）
+# 依据：DGA-INFRA 第 3 章（3.1 池对象模型全字段；3.2 信任标签；3.4 TOS；3.5 降级链；
+#       3.6 成本熔断；3.8 校准域）；R-SEC-02（凭据引用）。
+# 权威源：资源池账本（账号/配额/健康/信任标签）= 控制面 DB（第 1 章权威源表）。
+id: https://example.org/dga-infra/ontology/pools
+name: dga-pools
+title: DGA-INFRA 资源池对象
+description: >
+  Provider / PoolAccount / LogicalEndpoint / RoutingPolicy 及配额、健康值对象。
+  每个池对象是资产目录中的正式资产：有稳定 ID、具名责任人、健康度量、验证时间、
+  退役方式（DGA-INFRA 3.1）。
+license: MIT
+prefixes:
+  linkml: https://w3id.org/linkml/
+  dga: https://example.org/dga-infra/ontology/
+default_prefix: dga
+default_range: string
+imports:
+  - linkml:types
+  - enums
+  - base
+
+classes:
+
+  QuotaState:
+    class_uri: dga:QuotaState
+    attributes:
+      rpm_limit:
+        range: integer
+        description: 每分钟请求数限额（RPM）。
+      tpm_limit:
+        range: integer
+        description: 每分钟 token 限额（TPM）。
+      daily_quota:
+        range: float
+        description: 日额余量。
+      monthly_quota:
+        range: float
+        description: 月额余量。
+      credit_balance:
+        range: float
+        description: 信用池余量。
+      observed_at:
+        range: datetime
+        description: 账本观测时间（R-POOL-QUOTA：账本 vs 供应商面板定期抽查，误差超阈值报警）。
+    description: >
+      配额状态值对象（DGA-INFRA 3.1 Account.quota_state：RPM/TPM/日额/月额/信用池余量）。
+      无独立 ID 的内嵌值对象，随 PoolAccount 存续。
+
+  HealthSnapshot:
+    class_uri: dga:HealthSnapshot
+    attributes:
+      availability_pct:
+        range: float
+        description: 可用性（百分比 0-100）。
+      latency_ms_p95:
+        range: integer
+        description: P95 延迟（毫秒）。
+      error_rate:
+        range: float
+        description: 错误率（0-1）。
+      last_failure_at:
+        range: datetime
+        description: 最近故障时间。
+      last_check_at:
+        range: datetime
+        description: 最近健康检查时间（验证时间——资产目录要件）。
+    description: >
+      健康快照值对象（DGA-INFRA 3.1 Account.health：可用性/延迟/错误率/最近故障）。
+      池健康度量进入治理度量体系与公示仪表（3.9 R-POOL-EVID）。
+
+  Provider:
+    class_uri: dga:Provider
+    slots:
+      - id
+      - name
+      - created_at
+      - retired_at
+    slot_usage:
+      id:
+        pattern: "^PRV-[0-9]{4,}$"
+    attributes:
+      tos_risk_matrix_ref:
+        range: string
+        description: >
+          TOS 风险矩阵引用（DGA-INFRA 3.4：每个 Provider 出具 TOS 风险矩阵——多账号
+          条款/免费层用途限制/数据使用条款/个人订阅转 API 许可度）。
+      data_usage_terms_summary:
+        range: string
+        description: 数据使用条款摘要（T0/T1/T2 定级依据之一）。
+      notes:
+        range: string
+        description: 备注。
+    description: >
+      供应商（DGA-INFRA 3.1：anthropic/google/deepseek/openai/cloudflare/rayway 等）。
+      池对象模型顶层；每个 Provider 的 TOS 风险矩阵是池准入依据（R-POOL-COMPLIANCE）。
+
+  PoolAccount:
+    class_uri: dga:PoolAccount
+    mixins:
+      - SecurityMark
+    slots:
+      - id
+      - name
+      - created_at
+      - retired_at
+    slot_usage:
+      id:
+        pattern: "^ACC-[0-9]{4,}$"
+    attributes:
+      provider:
+        range: string
+        required: true
+        description: 所属供应商（Provider id，PRV-xxxx）。
+      credential_ref:
+        range: CredentialRef
+        required: true
+        description: >
+          凭据引用（明文仅存凭据库，此处仅存引用——R-SEC-02；轮换有 runbook 与撤销
+          验证——R-SEC-03）。
+      cost_tier:
+        range: CostTier
+        required: true
+        description: 成本分层（free/low-paid/high-paid/enterprise）。
+      quota_state:
+        range: QuotaState
+        inlined: true
+        description: 配额状态（内嵌值对象）。
+      trust_label:
+        range: TrustLevel
+        required: true
+        description: >
+          信任标签（T0/T1/T2）。个人订阅账号一律 T0（R-POOL-COMPLIANCE 强制）；
+          数据红线：客户业务数据禁止路由至 T0 端点（R-POOL-DATA）。
+      tos_risk:
+        range: TosRiskLevel
+        description: TOS 合规风险标签（灰区账号强制 T0 且隔离；agent 发现灰区即升级 S5）。
+      health:
+        range: HealthSnapshot
+        inlined: true
+        description: 健康快照（内嵌值对象）。
+      accountable_person:
+        range: Person
+        description: 具名责任人（池对象=资产目录正式资产的要件，DGA-INFRA 3.1）。
+    description: >
+      池账号（DGA-INFRA 3.1：一个 Provider 可多账号）。字段全集=credential_ref/
+      cost_tier/quota_state/trust_label/tos_risk/health。多付费个人账号轮换是 S5 认可的
+      价值获取策略：不禁止、不默认，风险显式标注（R-POOL-COMPLIANCE）。
+
+  LogicalEndpoint:
+    class_uri: dga:LogicalEndpoint
+    mixins:
+      - SecurityMark
+    slots:
+      - id
+      - name
+      - created_at
+      - retired_at
+    slot_usage:
+      id:
+        pattern: "^EPL-[0-9]{4,}$"
+    attributes:
+      endpoint_name:
+        range: string
+        required: true
+        description: 逻辑端点名（如 free-workhorse / paid-judge / t1-only，DGA-INFRA 3.1）。
+      trust_level:
+        range: TrustLevel
+        required: true
+        description: >
+          端点级信任标签（3.2：端点带 trust 标签；任务 sensitivity ≤ 端点 trust——
+          不等式谓词属 OPA 层，本字段保证端点侧在位）。
+      bound_accounts:
+        range: string
+        multivalued: true
+        description: 绑定的账号集合（PoolAccount id 列表，ACC-xxxx）。
+      routing_policy_ref:
+        range: string
+        description: 路由策略（RoutingPolicy id，RTP-xxxx）。
+      accountable_person:
+        range: Person
+        description: 具名责任人。
+    description: >
+      逻辑端点（DGA-INFRA 3.1：绑定 Account 集合+路由策略）。池路由是资源层的
+      harness（[DER-03] 成对律在资源层的实现，3.2）。
+
+  RoutingPolicy:
+    class_uri: dga:RoutingPolicy
+    mixins:
+      - SecurityMark
+    slots:
+      - id
+      - name
+      - created_at
+    slot_usage:
+      id:
+        pattern: "^RTP-[0-9]{4,}$"
+    attributes:
+      target_capability:
+        range: string
+        description: 能力约束——路由针对的能力需求（3.1：按能力路由）。
+      allowed_cost_tiers:
+        range: CostTier
+        multivalued: true
+        description: >
+          成本约束——S5 批准的成本等级白名单（3.5：禁止自动跳到 S5 未批准的成本等级）。
+      min_trust_level:
+        range: TrustLevel
+        description: 信任约束——任务允许的端点最低信任级。
+      max_data_sensitivity:
+        range: SensitivityLevel
+        description: >
+          本策略可承接的最大任务敏感度（与端点 trust_level 构成"sensitivity ≤ trust"
+          路由谓词的两端字段；谓词强制在 OPA 层——M0 诚实边界登记）。
+      quota_constraints:
+        range: string
+        description: 配额约束（3.1：按配额路由；余量阈值、独占/共享等声明）。
+      calibration_domain_ref:
+        range: string
+        description: >
+          漂移约束——关联校准域（CalibrationDomain id，CAL-xxxx；3.8：池组成变化触发
+          漂移重估工作流）。
+      fallback_chain:
+        range: string
+        multivalued: true
+        description: >
+          降级链（有序）：T1 主力付费 → T1 备用付费 → 低成本付费 → 队列等待/挂起 →
+          升级 S5（3.5 R-POOL-DEGRADE；免费层 T0 不作为任何客户链路的降级终点）。
+          列表顺序即降级顺序。
+      budget_cap:
+        range: Budget
+        inlined: true
+        description: 预算上限（3.6 R-POOL-BUDGET：闭环级预算上限声明）。
+      virtual_key_isolated:
+        range: boolean
+        description: >
+          是否启用每执行单元独立虚拟 key 限额（R-POL-03：池路由的虚拟 key 限额落实
+          子任务不放大授权）。
+      suspension_on_timespan_expiry:
+        range: boolean
+        description: 等待超过闭环授权的决断时距 ⇒ 挂起（3.5；MET-01）。
+      approval_ref:
+        range: string
+        description: 批准来源（Authorization id，AUT-xxxx；策略变更走 Git 批准版本）。
+      accountable_person:
+        range: Person
+        description: 具名责任人。
+    description: >
+      路由策略（DGA-INFRA 3.1 全字段：按能力/成本/信任/配额/漂移五约束路由；
+      扩展承载降级链/预算/虚拟 key/时距挂起）。策略本体进 Git（权威源=Git 经批准
+      版本），运行时投影进 LiteLLM 与 OPA。

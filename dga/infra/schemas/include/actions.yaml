@@ -1,0 +1,77 @@
+# actions.yaml — DGA-INFRA 本体 Action 层（M0 定稿）
+# 依据：human v1.1 §5.2 Action 层（类型化的、可审计的、带权限前置的写操作）；
+#       DGA-INFRA R-POL（策略）、R-FLOW（流程）。
+# 落位：Action Type 在 MCP 网关 Action Registry 注册（ontology-research §2.3）：
+#       未注册即无调用路径。执行编排=Temporal，权限强制=OPA，审计=证据存储。
+id: https://example.org/dga-infra/ontology/actions
+name: dga-actions
+title: DGA-INFRA Action 层
+description: >
+  动词层——类型化的、可审计的、带权限前置的写操作。
+  组织由"允许发生什么"定义，不由"存在什么"定义（human v1.1 §5.2）。
+license: MIT
+prefixes:
+  linkml: https://w3id.org/linkml/
+  dga: https://example.org/dga-infra/ontology/
+default_prefix: dga
+default_range: string
+imports:
+  - linkml:types
+  - enums
+  - base
+
+classes:
+
+  ActionType:
+    class_uri: dga:ActionType
+    mixins:
+      - SecurityMark
+    slots:
+      - id
+      - name
+      - created_at
+    slot_usage:
+      id:
+        pattern: "^ACT-[0-9]{4,}$"
+    attributes:
+      params_schema_ref:
+        range: string
+        required: true
+        description: >
+          参数 schema 引用（JSON Schema URI；由本仓库 LinkML 生成物提供，
+          MCP 网关注册时强制绑定——ontology-research §三.2）。
+      preconditions:
+        range: string
+        multivalued: true
+        description: 前置条件（可执行谓词声明；强制点在服务端/工具网关，R-POL-01）。
+      side_effects:
+        range: string
+        required: true
+        multivalued: true
+        description: 副作用声明——将修改哪些实体与关系（审计与回滚的依据，R-IR-02）。
+      permission_predicate_ref:
+        range: string
+        required: true
+        description: 权限谓词引用（OPA policy 路径；"模型被告知不能做"不算权限控制，R-POL-01）。
+      required_evidence_type:
+        range: EvidenceType
+        required: true
+        description: 必须产生的证据类型（六元组 Evidence 分量的构造化，human v1.1 §5.10）。
+      failure_semantics:
+        range: FailureSemantics
+        required: true
+        description: 失败语义（可重试/需补偿/待核实；R-FLOW-02/03）。
+      idempotency_key:
+        range: string
+        description: 幂等键模板（R-FLOW-03：幂等键+结果核对+补偿；Temporal 语义不默认保证恰好一次）。
+      retry_owner:
+        range: string
+        description: 唯一重试责任方（R-FLOW-02：每个有外部副作用的步骤必须有唯一重试责任方）。
+      executor_binding:
+        range: string
+        description: 绑定的执行能力（CapabilityEntity id，CAP-xxxx）。
+    description: >
+      操作类型（Action 层唯一类；R-POL/R-FLOW 锚点类）。每个操作类型定义：参数 schema、
+      前置条件、副作用声明、权限谓词、必须产生的证据类型、失败语义、幂等键。
+      为什么动词层是治理的实体：实体清单可以复制，但"在什么条件下允许做什么操作"的
+      知识是治理的实体本身（human v1.1 §5.2）。判定者不得持有本层执行权限（§5.9）。

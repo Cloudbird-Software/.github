@@ -1,0 +1,321 @@
+# enums.yaml — DGA-INFRA 本体枚举与受控词表（M0 定稿）
+# 依据：DGA-INFRA-v1.0 第 3.1/3.2/3.4 节（TrustLevel/CostTier/TOS）；
+#       DGA-human v1.1 §2.3（自治阶梯 L0-L5）、§2.1/§5.4（角色槽）、§3.2（知识形态）
+# 纪律：枚举取值键为 ASCII（保证各生成器兼容），中文显示名置于 text（人类投影用）。
+#       枚举值变更 = 实例层参数变更，须走 S5 签发流（human v1.1 §5.6 版本纪律）。
+id: https://example.org/dga-infra/ontology/enums
+name: dga-enums
+title: DGA-INFRA 枚举与受控词表
+description: >
+  DGA-INFRA 本体全部枚举（M0 定稿）。信任分级、成本分层、数据分级、决断时距、
+  角色槽类型、闭环状态等的受控词表。
+license: MIT
+prefixes:
+  linkml: https://w3id.org/linkml/
+  dga: https://example.org/dga-infra/ontology/
+default_prefix: dga
+default_range: string
+imports:
+  - linkml:types
+
+enums:
+
+  TrustLevel:
+    description: >
+      信任标签（DGA-INFRA 3.2，R-POOL-TRUST）。端点带 trust 标签，任务带 sensitivity
+      标签，路由规则：任务 sensitivity ≤ 端点 trust。个人订阅账号一律 T0（R-POOL-COMPLIANCE）。
+    permissible_values:
+      T0:
+        title: T0
+        description: 免费层/个人订阅账号（TOS 下供应商可能用数据训练、产能无保障）；仅允许公开数据、内部低敏任务、合成测试数据
+      T1:
+        title: T1
+        description: 付费 API（合同明确数据不用途、产能有 SLA）；允许一般客户业务数据
+      T2:
+        title: T2
+        description: 企业级端点/zero-retention/客户指定端点；允许敏感客户数据与判定仪器运行
+
+  DataClass:
+    description: >
+      数据保密级别（Security 层标记维度，human v1.1 §5.2 Security 层）。
+      与 DGA-INFRA 3.3 数据红线（R-POOL-DATA）对接：客户业务数据禁止路由至 T0 端点。
+    permissible_values:
+      D_PUBLIC:
+        title: D_公开
+        description: 可对外公开的数据
+      D_INTERNAL:
+        title: D_内部
+        description: 公司内部数据，不外发
+      D_CUSTOMER_SENSITIVE:
+        title: D_客户敏感
+        description: 客户敏感数据；仅 T2（或合同显式允许+已脱敏至证据级的例外）可处理
+
+  SensitivityLevel:
+    description: >
+      任务敏感度标签（DGA-INFRA 3.2 路由判定的任务侧）。与 TrustLevel 平行编号：
+      S0≤T0、S1≤T1、S2≤T2；路由谓词"sensitivity ≤ trust"属 OPA 层强制，
+      schema 只保证两端字段在位（M0 诚实边界登记）。
+    permissible_values:
+      S0_PUBLIC:
+        title: S0_公开
+        description: 公开数据/合成测试数据
+      S1_INTERNAL:
+        title: S1_内部
+        description: 内部低敏任务（T0 白名单默认定义见 S5-PENDING-DEFAULTS #3）
+      S2_CUSTOMER_SENSITIVE:
+        title: S2_客户敏感
+        description: 涉客户业务数据/敏感数据；禁止进 T0 端点（R-POOL-DATA 硬红线）
+
+  CostTier:
+    description: 成本分层（DGA-INFRA 3.1 Account.cost_tier）。禁止自动跳到 S5 未批准的成本等级（R-POOL-DEGRADE）。
+    permissible_values:
+      FREE:
+        title: free
+        description: 免费层
+      LOW_PAID:
+        title: low-paid
+        description: 低成本付费层
+      HIGH_PAID:
+        title: high-paid
+        description: 主力付费层
+      ENTERPRISE:
+        title: enterprise
+        description: 企业级合约端点
+
+  TosRiskLevel:
+    description: >
+      TOS 合规风险标签（DGA-INFRA 3.4，R-POOL-COMPLIANCE）。每个 Provider 出具
+      TOS 风险矩阵；灰区账号隔离于 T0；agent 不得自行判定灰区可否使用，发现即升级 S5。
+    permissible_values:
+      CLEAR:
+        title: clear
+        description: 条款明确允许当前用法
+      GREY_ZONE:
+        title: grey-zone
+        description: 条款灰区；接受范围由 S5 裁决，账号强制 T0 标签
+      HIGH_RISK:
+        title: high-risk
+        description: 条款明确限制或禁止；账号隔离，不得接入生产路由
+
+  ClosureState:
+    description: >
+      闭环生命周期状态（Object 层生命周期状态机，human v1.1 §5.2 Object 层要件）。
+      含 R-FLOW-02"结果不明进待核实"与 R-POOL-DEGRADE"挂起"两个治理异常态；
+      R-EVID-05：证据缺失与业务失败/结果不确定分别登记。
+    permissible_values:
+      DRAFT:
+        title: 草稿
+        description: 六元组登记中，未获生产执行资格
+      REGISTERED:
+        title: 已登记
+        description: 六元组齐备入 Git（R-GOV-02），待授权
+      AUTHORIZED:
+        title: 已授权
+        description: 有效授权与预算在位（Authorization 关联）
+      RUNNING:
+        title: 运行中
+        description: 正常执行
+      AWAITING_VERIFICATION:
+        title: 待核实
+        description: 结果不明（R-FLOW-02）；禁止盲目重发
+      SUSPENDED:
+        title: 挂起
+        description: 决断时距耗尽/预算熔断/降级链终点（R-POOL-DEGRADE、MET-01）
+      COMPLETED:
+        title: 已完成
+        description: 证据齐备并通过验收判定
+      FAILED:
+        title: 已失败
+        description: 业务失败（与证据缺失区分登记，R-EVID-05）
+      RETIRED:
+        title: 已退役
+        description: 闭环退役，含退役方式登记（资产目录要求）
+
+  RoleType:
+    description: >
+      角色槽类型（human v1.1 §2.1 角色与执行者分离、§5.4 嵌套+角色槽）。
+      角色是稳定结构槽位，填充物（具体的人/agent/模型组合）可替换：
+      换执行者不换角色，换模型不换结构。
+    permissible_values:
+      EXECUTION:
+        title: S1 执行
+        description: 产出闭环意图所指向的产物（VSM S1）
+      COORDINATION:
+        title: S2 协调
+        description: 平抑振荡（资源争用、节奏冲突、重复工作）（VSM S2）
+      CONTROL:
+        title: S3 控制
+        description: 日常运转监管与例外处理（VSM S3）
+      AUDIT:
+        title: S3* 审计
+        description: 审计职能（VSM S3*）
+      INTELLIGENCE:
+        title: S4 智能
+        description: 环境扫描与未来建模（能力前沿/生态/方法/环境四类扫描）（VSM S4）
+      IDENTITY:
+        title: S5 身份
+        description: 目的、价值排序与最终取舍；不可代理（VSM S5）
+      INTENT_HOLDER:
+        title: 意图持有
+        description: 该闭环意图的持有者
+      CONTEXT_PROVIDER:
+        title: 上下文提供
+        description: 提供决策前提（上下文资产）的角色
+      VERIFIER:
+        title: 验证
+        description: 证据判读与验收的角色（判定侧）
+      ACCOUNTABLE:
+        title: 负责
+        description: 责任锚定槽位；填充物必须是具名的人（责任守恒律）
+
+  AutonomyLevel:
+    description: >
+      自治阶梯（human v1.1 §2.3）。跳级即事故：晋升以上一级证据记录为前提；
+      L2+ 的前置条件是评估体系先行达标（先决条件结构）。
+    permissible_values:
+      L0:
+        title: L0 每步复核
+        description: agent 起草，人执行每一步
+      L1:
+        title: L1 批次复核
+        description: agent 完成一批，人验收批次
+      L2:
+        title: L2 里程碑门禁
+        description: 阶段间人审，阶段内自主
+      L3:
+        title: L3 异常升级
+        description: 常态全自主，异常或越界时升级
+      L4:
+        title: L4 战略自主
+        description: 在授权预算与意图内完全自主，仅周期汇报
+      L5:
+        title: L5 存在性自主
+        description: 闭环存续本身由其绩效决定
+
+  EvidenceType:
+    description: 证据契约类型（DGA-INFRA R-EVID-01 四类 + R-POL-05 策略判定记录）。
+    permissible_values:
+      EXECUTION_RECEIPT:
+        title: 执行收据
+        description: 外部副作用的发生凭证（R-FLOW-02/03/04）
+      ACCEPTANCE_VERDICT:
+        title: 验收判定
+        description: 验收判定记录
+      AUTHORIZATION_RECORD:
+        title: 签发记录
+        description: 授权与签发记录
+      CALIBRATION_ASSET:
+        title: 校准资产
+        description: 校准与漂移记录（含校准域声明，R-POOL-CALIB）
+      POLICY_DECISION:
+        title: 策略判定记录
+        description: OPA decision log（R-POL-05：策略判定记录=证据一等公民）
+
+  KnowledgeForm:
+    description: 知识形态（human v1.1 §3.2：规格/记忆/负结果/能力前沿认知）。
+    permissible_values:
+      SPEC:
+        title: 规格
+        description: 可执行的意图声明；决策前提的权威定义
+      MEMORY:
+        title: 记忆
+        description: 案例库、判例库——分布的经验快照
+      NEGATIVE_RESULT:
+        title: 负结果
+        description: 已验证不可行+原因+当时条件；须携带过期条件
+      CAPABILITY_FRONTIER:
+        title: 能力前沿
+        description: 边界测试与边界快照——可行域实时地图
+
+  ExecutorType:
+    description: 能力实体类型（六元组 Capability 分量的载体，human v1.1 §5.3）。
+    permissible_values:
+      AGENT:
+        title: agent
+        description: agent 执行体
+      TOOL:
+        title: 工具
+        description: 工具/MCP 适配器
+      MODEL:
+        title: 模型
+        description: 模型端点（经池接入）
+      PIPELINE:
+        title: 流程引擎
+        description: 流程引擎（Temporal workflow 等）
+
+  FunctionKind:
+    description: 判定层函数类别（human v1.1 §5.2 Function 层：评估定义、校准逻辑、漂移检测、度量计算）。
+    permissible_values:
+      EVALUATION:
+        title: 评估
+        description: eval 定义与判读
+      CALIBRATION:
+        title: 校准
+        description: 校准逻辑（含校准域声明）
+      DRIFT_DETECTION:
+        title: 漂移检测
+        description: 三条漂移触发线检测（能力/规格/本体漂移，human v1.1 §5.7）
+      METRIC:
+        title: 度量
+        description: 治理度量计算
+
+  GradientZone:
+    description: 信息梯度分区（human v1.1 §5.8 单向信息梯度）。
+    permissible_values:
+      TRUTH_ZONE:
+        title: 真值区
+        description: 完整实体+判定基准隐匿部分
+      WORKSPACE:
+        title: 工作区
+        description: 任务化投影——执行者所需最小决策前提
+      REDUNDANCY_ZONE:
+        title: 冗余区
+        description: 灾备镜像——只读、加密
+
+  FailureSemantics:
+    description: 失败语义（R-FLOW-02/03/04：唯一重试责任方、幂等+补偿、结果不明进待核实）。
+    permissible_values:
+      RETRY_SAFE:
+        title: 可重试
+        description: 幂等操作，可安全重试，须有幂等键
+      COMPENSATE:
+        title: 需补偿
+        description: 已生效副作用需补偿动作回滚
+      MARK_UNVERIFIED:
+        title: 待核实
+        description: 结果不明——进"待核实"状态，禁止盲目重发（R-FLOW-02）
+
+types:
+  DecisionTimespan:
+    uri: dga:types/DecisionTimespan
+    base: str
+    description: >
+      决断时距（human v1.1 §2.3）：闭环在无人复核情况下自主决策的最大时间跨度。
+      ISO 8601 duration 格式（如 P7D、PT24H、P1M）。
+    pattern: "^P(?!$)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+(\\.\\d+)?S)?)?$"
+
+  SemVer:
+    uri: dga:types/SemVer
+    base: str
+    description: 语义化版本号（spec/harness/函数版本）。
+    pattern: "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+
+  GitCommit:
+    uri: dga:types/GitCommit
+    base: str
+    description: Git commit 哈希（缩写 7 位至完整 40 位）。本体版本参与校准域声明（human v1.1 §5.7 第三触发线）。
+    pattern: "^[0-9a-f]{7,40}$"
+
+  CredentialRef:
+    uri: dga:types/CredentialRef
+    base: str
+    description: >
+      凭据引用（R-SEC-02：凭证明文仅存凭据库，控制面/Git/飞书仅存引用）。
+      URI 形态，如 openbao://secret/pool/acc-0001。
+    pattern: "^[a-z][a-z0-9+.-]*://[^\\s]+$"
+
+  Sha256Hex:
+    uri: dga:types/Sha256Hex
+    base: str
+    description: SHA-256 内容摘要（小写十六进制，64 位）。证据内容摘要（R-EVID-03）。
+    pattern: "^[0-9a-f]{64}$"

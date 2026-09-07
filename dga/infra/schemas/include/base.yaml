@@ -1,0 +1,79 @@
+# base.yaml — DGA-INFRA 本体基座：共享槽位 + Security 层混入（M0 定稿）
+# 依据：human v1.1 §5.2 Security 层（贯穿四层的信任标记与权限谓词）、§5.8 单向信息梯度；
+#       DGA-INFRA 第 4 章"ID 体系第一天定稿"。
+id: https://example.org/dga-infra/ontology/base
+name: dga-base
+title: DGA-INFRA 本体基座
+description: >
+  全部类共享的槽位（ID 体系、命名、审计时间戳）与 SecurityMark 安全标记混入。
+  ID 前缀体系 M0 第一天定稿：每个具名类有唯一前缀，全局 pattern 统一校验，
+  各类以 slot_usage 收紧为本类前缀。
+license: MIT
+prefixes:
+  linkml: https://w3id.org/linkml/
+  dga: https://example.org/dga-infra/ontology/
+default_prefix: dga
+default_range: string
+imports:
+  - linkml:types
+  - enums
+
+slots:
+
+  id:
+    identifier: true
+    range: string
+    pattern: "^(CU|INT|CTX|CAP|ACT|FN|EVD|CMT|AUT|DC|PSN|CAL|PRJ|SVC|PRV|ACC|EPL|RTP|ALK|CNL|RSL|OPR)-[0-9]{4,}$"
+    description: >
+      全局唯一稳定标识：类前缀-序号（ID 体系 M0 第一天定稿，DGA-INFRA 第 4 章）。
+      前缀对照：CU=ClosureUnit INT=Intent CTX=ContextAsset CAP=CapabilityEntity
+      ACT=ActionType FN=FunctionType EVD=EvidenceEntity CMT=Commitment AUT=Authorization
+      DC=S5DecisionCard PSN=Person CAL=CalibrationDomain PRJ=Project SVC=Service
+      PRV=Provider ACC=PoolAccount EPL=LogicalEndpoint RTP=RoutingPolicy
+      ALK=AccountabilityLink CNL=ClosureNesting RSL=RoleSlot OPR=OriginalProjection。
+      本全局 pattern 由各类 slot_usage 收紧为单前缀。
+    annotations:
+      - tag: fair_uri
+        value: 实例 URI = {default_prefix}/{类名}/{id}；正式对外域名待 S5 定夺（当前 example.org 占位）
+
+  name:
+    range: string
+    description: 人类可读名称（飞书表格等投影的主显示字段）。
+
+  created_at:
+    range: datetime
+    description: 登记时间（UTC）。
+
+  retired_at:
+    range: datetime
+    description: 退役时间（资产目录要求：每个池对象/资产有退役方式与时间）。
+
+  trust_level:
+    range: TrustLevel
+    description: 信任等级（T0/T1/T2，DGA-INFRA 3.2）。
+
+  data_class:
+    range: DataClass
+    description: 保密级别（D_公开/D_内部/D_客户敏感）。
+
+  boundary:
+    range: string
+    description: >
+      归属/信任边界坐标（Security 层标记维度，human v1.1 §5.2），如
+      company-cloud / customer-onprem / s5-personal。信息梯度上的位置声明（§5.8：
+      每个信息存储的位置必须声明其在梯度上的坐标）。
+
+classes:
+
+  SecurityMark:
+    mixin: true
+    description: >
+      Security 层安全标记混入（human v1.1 §5.2 第五层：贯穿 Object/Link/Action/Function
+      四层的信任标记与权限谓词）。作为 mixin 挂接到关键类：携带 trust_level/data_class/
+      boundary 三标记。为什么是独立层而非散落注解：安全策略需要独立演进，散落的标记
+      不可审计——"这个操作曾被允许吗"需要统一裁决点（OPA 层）回答；本 mixin 只保证
+      字段在位，路由/调用谓词的强制在 OPA 层（M0 诚实边界）。
+    slots:
+      - trust_level
+      - data_class
+      - boundary

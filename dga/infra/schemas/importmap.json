@@ -1,0 +1,10 @@
+{
+  "linkml": "https://w3id.org/linkml/",
+  "enums": "include/enums",
+  "base": "include/base",
+  "core": "include/core",
+  "actions": "include/actions",
+  "functions": "include/functions",
+  "closure": "include/closure",
+  "pools": "include/pools"
+}

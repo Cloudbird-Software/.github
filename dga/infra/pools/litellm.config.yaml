@@ -1,0 +1,49 @@
+# litellm.config.yaml — DGA-INFRA LiteLLM Proxy 配置（M2 资源池 v0）
+# 选型依据：SEL-05（CMP-05）：OSS 自托管单实例 + PostgreSQL，无 Redis（单实例无需）；
+#           OSS 明列 virtual keys / spend tracking / budgets / fallbacks（R-POL-03 三证据的承载面）。
+# 权威源纪律（SEL-05 §3.7）：控制面池账本（dga_control.pool_*）=权威源，本文件与其 DB 表
+#           （LiteLLM_VerificationToken 等）=运行时投影；model_name 与 pool_endpoints.litellm_model 对齐。
+# 纪律：本配置零真实 provider key——两模型均 mock_response 短路（安装版 1.100.0 main.py L475
+#       明确支持： provided→return mock completion），api_key 为本机占位非凭据（R-SEC-02：
+#       真实凭据仅经 OpenBao 引用注入，不落 Git）。
+
+model_list:
+  - model_name: mock-free            # = pool_endpoints.litellm_model（EPL-0001 free-workhorse, T0）
+    litellm_params:
+      model: openai/mock-free        # openai 兼容形态占位；mock_response 命中即短路，永不发出真实上游请求
+      api_key: mock-local-placeholder-free   # 本机占位非凭据（无真实 key 可填，纪律见上）
+      mock_response: "mock-response[free-workhorse/T0]: v0 free-tier synthesis ok"
+      # 自定义定价（prompt_cost 形态）：mock 无官方价目，显式定价使 spend 可计算——
+      # 支撑 R-POL-03 预算执法（负面测试⑤）与 R-POOL-QUOTA 配额校准。数值为本机演示值非真实价目。
+      input_cost_per_token: 0.001
+      output_cost_per_token: 0.001
+
+  - model_name: mock-paid            # = pool_endpoints.litellm_model（EPL-0002 paid-judge, T1）
+    litellm_params:
+      model: openai/mock-paid
+      api_key: mock-local-placeholder-paid   # 本机占位非凭据
+      mock_response: "mock-response[paid-judge/T1]: v0 paid-tier synthesis ok"
+      input_cost_per_token: 0.001
+      output_cost_per_token: 0.001
+
+general_settings:
+  # master key 从环境变量取（os.environ/ 形态）；启动脚本 export 的 sk-dga-local-dev 为
+  # 本机占位非凭据（services/scripts/start-litellm.sh 内有同款注释钉死）。
+  master_key: os.environ/DGA_LITELLM_MASTER_KEY
+  # LiteLLM 状态库（SEL-05 §6-2 默认方案：与控制面 PG 同实例、独立数据库，物理分库防误写）。
+  # 安装版 1.100.0 实测：database_url 必须置于 general_settings 下（顶层键不生效，run.log 有
+  # "Set DATABASE_URL or general_settings.database_url" 提示；首次踩坑已登记 BUILD-LOG）。
+  database_url: postgresql://dga@localhost:5432/dga_litellm
+
+litellm_settings:
+  # R-POOL-BUDGET（3.6）：全局预算上限——v0 本机占位值（演示熔断面在位；真实值由 S5 批准的
+  # 全司日/月熔断额度下发，属 M3+ 控制面下发职责）
+  max_budget: 100.0
+  budget_duration: 30d
+  # 降级链默认（3.5；OSS 明列 fallbacks）：paid 主端点失败→mock-free 兜底。
+  # 注意：此方向仅为 v0 全 mock 拓扑的演示链——生产客户链路降级终点不得是 T0（degradation.yaml 钉死）
+  default_fallbacks: ["mock-free"]
+  num_retries: 2
+  request_timeout: 30
+  drop_params: true
+  set_verbose: false

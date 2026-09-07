@@ -1,0 +1,249 @@
+# closure.yaml — DGA-INFRA 本体：闭环单元（Object）+ 关系层 Link（M0 定稿）
+# 依据：human v1.1 §2.1 六元组、§5.4 嵌套+角色槽（正确形态：父引用字段建立嵌套，
+#       角色是独立类型化槽位）、§5.8 单向信息梯度（投影关系是本体 Link 类型）；
+#       DGA-INFRA R-GOV-02/03（六元组绑定 Git/运行时分离；缺具名责任人拒绝生产执行）。
+id: https://example.org/dga-infra/ontology/closure
+name: dga-closure
+title: DGA-INFRA 闭环单元与关系层
+description: >
+  ClosureUnit（六元组闭环实体，含 parent 自引用嵌套）与 Link 层四类：
+  AccountabilityLink（责任挂接）、ClosureNesting（嵌套关系）、RoleSlot（角色槽）、
+  OriginalProjection（信息梯度投影关系）。
+license: MIT
+prefixes:
+  linkml: https://w3id.org/linkml/
+  dga: https://example.org/dga-infra/ontology/
+default_range: string
+imports:
+  - linkml:types
+  - enums
+  - base
+  - core
+  - actions
+
+classes:
+
+  ClosureUnit:
+    class_uri: dga:ClosureUnit
+    mixins:
+      - SecurityMark
+    slots:
+      - id
+      - name
+      - created_at
+    slot_usage:
+      id:
+        pattern: "^CU-[0-9]{4,}$"
+    attributes:
+      intent:
+        range: Intent
+        inlined: true
+        recommended: true
+        description: 意图（六元组之一）——闭环存在的原因。
+      context:
+        range: ContextAsset
+        recommended: true
+        multivalued: true
+        inlined_as_list: true
+        description: 上下文（六元组之二）——行动的决策前提。
+      capability:
+        range: CapabilityEntity
+        recommended: true
+        description: 能力（六元组之三）——执行手段。
+      action:
+        range: ActionType
+        recommended: true
+        multivalued: true
+        inlined_as_list: true
+        description: 行动（六元组之四）——允许的操作集合（ActionType 列表）。
+      evidence:
+        range: EvidenceEntity
+        recommended: true
+        multivalued: true
+        inlined_as_list: true
+        description: 证据（六元组之五）——缺证据的闭环叫赌博。
+      accountability:
+        range: AccountabilityLink
+        required: true
+        inlined: true
+        description: >
+          责任（六元组之六，REQUIRED）——闭环终点的具名的人。缺责任人的闭环叫事故待发；
+          新闭环缺具名责任人 ⇒ 拒绝生产执行资格（R-GOV-03，M0 负面测试锚点）。
+          本槽缺失必须使校验失败。
+      state:
+        range: ClosureState
+        recommended: true
+        description: 生命周期状态机（Object 层要件，human v1.1 §5.2）。
+      parent:
+        range: ClosureUnit
+        description: >
+          父闭环（嵌套关系的实体侧表达；组织=闭环的递归嵌套图，human v1.1 §2.1）。
+          嵌套的 Link 侧正式登记用 ClosureNesting；本字段是父引用快捷键。
+          子闭环的决断时距不得超过父闭环（约束谓词在 OPA 层强制）。
+      decision_timespan:
+        range: DecisionTimespan
+        description: 决断时距（human v1.1 §2.3）——无人复核的最大自主时间跨度。
+      autonomy_level:
+        range: AutonomyLevel
+        description: 当前自治等级（L0-L5；跳级即事故）。
+      authorization_ref:
+        range: string
+        description: 有效授权（Authorization id，AUT-xxxx）。
+      git_binding_ref:
+        range: string
+        description: 六元组稳定定义在 Git 中的绑定位置（R-GOV-02：稳定定义与运行时动态值分离）。
+    description: >
+      闭环单元（六元组：Intent/Context/Capability/Action/Evidence/Accountability）——
+      组织分析的最小单元（human v1.1 §2.1）。六元缺一闭环在治理上不完整；
+      其中 accountability 必填（R-GOV-03），其余五元 recommended（缺省须说明）。
+      采用嵌套+角色槽路线而非类继承（human v1.1 §5.4：类继承把嵌套压扁成分类，
+      递归性丢失）。同构于 VSM：每个闭环节点内部可挂完整五职能子节点，任意深度。
+
+  AccountabilityLink:
+    class_uri: dga:AccountabilityLink
+    slots:
+      - id
+      - name
+      - created_at
+    slot_usage:
+      id:
+        pattern: "^ALK-[0-9]{4,}$"
+    attributes:
+      closure:
+        range: ClosureUnit
+        required: true
+        description: 被挂接的闭环（ClosureUnit id，CU-xxxx）。
+      responsible_person:
+        range: Person
+        required: true
+        description: >
+          责任人（具名的人，Person 类型——类型系统层面排除 agent 充当责任锚点；
+          责任守恒律 human v1.1 §1.4；R-GOV-03）。
+      responsibility_scope:
+        range: string
+        description: 责任范围声明（对什么后果应答）。
+      delegated_executor:
+        range: string
+        description: 受托执行体（CapabilityEntity id，CAP-xxxx）——执行权可授，责任不随之转移。
+      assumed_at:
+        range: datetime
+        description: 责任接手时间。
+    description: >
+      责任挂接关系（Link 层；六元组 Accountability 分量在本体的正式载体，human v1.1
+      §5.3 映射：Accountability → Link 责任挂接关系（必填约束））。
+      closure→responsible_person 的关系约束：目标必须是具名的人。
+      本关系的 required 性质是 R-GOV-03 负面测试（缺责任人拒绝创建）的 schema 锚点。
+
+  ClosureNesting:
+    class_uri: dga:ClosureNesting
+    slots:
+      - id
+      - name
+      - created_at
+    slot_usage:
+      id:
+        pattern: "^CNL-[0-9]{4,}$"
+    attributes:
+      parent_closure:
+        range: string
+        required: true
+        description: 父闭环（ClosureUnit id，CU-xxxx）。
+      child_closure:
+        range: string
+        required: true
+        description: 子闭环（ClosureUnit id，CU-xxxx）。
+      nesting_rationale:
+        range: string
+        description: 拆分理由（近可分解性的分解记录）。
+      timespan_constraint_checked:
+        range: boolean
+        description: >
+          "子决断时距 ≤ 父决断时距"约束已核验标记（登记时人工/工具核验）。
+          纯 schema 无法表达跨实例不等式——该谓词属 OPA/运行时强制（M0 诚实边界）；
+          本字段保证核验动作本身被记录在位。
+      authority_inheritance_declared:
+        range: boolean
+        description: >
+          权限继承声明（R-POL-02：子任务权限 ≤ 父任务；拆十个 agent 不获得十倍预算）。
+    description: >
+      嵌套关系（Link 层；human v1.1 §5.4：闭环实体表+父引用建立递归嵌套；
+      Simon 近可分解性的 agent 实现——分解单位从部门变为闭环，粘合剂从汇报关系
+      变为嵌套关系）。关系合法性谓词"子闭环自治不得放大父闭环约束"在本结构上是
+      Link 层标准合法性谓词（变异度律的可执行形态）。
+
+  RoleSlot:
+    class_uri: dga:RoleSlot
+    slots:
+      - id
+      - name
+      - created_at
+    slot_usage:
+      id:
+        pattern: "^RSL-[0-9]{4,}$"
+    attributes:
+      closure:
+        range: string
+        required: true
+        description: 所属闭环（ClosureUnit id，CU-xxxx）。
+      role:
+        range: RoleType
+        required: true
+        description: 角色类型（稳定结构槽位；VSM 五职能+意图/上下文/验证/责任槽）。
+      filler_person:
+        range: Person
+        description: 填充物（人）——与 filler_capability 二选一；角色稳定、执行者可替换。
+      filler_capability:
+        range: CapabilityEntity
+        description: 填充物（能力实体：agent/模型组合）——与 filler_person 二选一。
+      filled_at:
+        range: datetime
+        description: 填充时间（换填充物=撤换记录，撤槽须走责任检查：在途闭环的责任不得悬空）。
+    description: >
+      角色槽（Link 层；human v1.1 §5.4：实体在闭环中扮演的角色是独立的类型化槽位）。
+      "角色稳定、执行者可替换"的结构表达：换执行者不动结构（§2.1/§3.4 岗位重定义的
+      构造基础）。责任槽（ACCOUNTABLE）的填充物只能是 Person——由
+      AccountabilityLink 强制，本槽不做第二责任源。
+
+  OriginalProjection:
+    class_uri: dga:OriginalProjection
+    slots:
+      - id
+      - name
+      - created_at
+    slot_usage:
+      id:
+        pattern: "^OPR-[0-9]{4,}$"
+    attributes:
+      original_ref:
+        range: string
+        required: true
+        description: 原件（真值区实体 id）。
+      projection_ref:
+        range: string
+        required: true
+        description: 投影（低权限区实体 id）。
+      gradient_zone:
+        range: GradientZone
+        description: 投影目标分区（真值区/工作区/冗余区，human v1.1 §5.8）。
+      clipping_declaration:
+        range: string
+        required: true
+        multivalued: true
+        description: 裁剪声明——被裁剪/脱敏的字段清单（投影携带裁剪后的子集，须显式声明）。
+      transform_pipeline:
+        range: string
+        description: 脱敏管道描述（投影关系的物化实现）。
+      writeback_allowed:
+        range: boolean
+        description: >
+          是否允许回写（默认 false——禁止反向写：投影没有对原件的回写路径，
+          修改须走受治理的回流流程，human v1.1 §5.8 不变量一）。
+      cross_read_allowed:
+        range: boolean
+        description: >
+          是否允许跨梯度读（默认 false——低权限区行动者无法读高权限区内容；
+          判定隔离由此获得架构保证而非纪律约定，human v1.1 §5.8 不变量二）。
+    description: >
+      原件-投影关系（Link 层；human v1.1 §5.8：投影关系本身是本体 Link 类型，
+      可见性不是部署细节而是实体的结构属性）。信息只从高权限区向低权限区投影，
+      反向读取与反向写入在架构上禁止。
