@@ -1,0 +1,3 @@
+# Fingerprints only. Do not paste trigger literals into comments (full-history scan).
+# dga/infra/controls/negtest-m2.md: LiteLLM budget-exceeded transcript (generic-api-key FP)
+a329f6eab701e5a74ace4826f919cd85d0fe3d7a:dga/infra/controls/negtest-m2.md:generic-api-key:159
