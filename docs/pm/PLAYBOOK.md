@@ -192,8 +192,7 @@ IR 级收口，证据可机械回查。门禁=T9 谓词（ADR-0085 决策 5）�
    可读全文；漂移处置是 owner 面动作，你只消费结论。
 4. **PR**：title/body 引用 ADR-NNNN（gate adr-required 机器拦，幽灵 ADR 不放行）；
    bug 修复关联 bug 单（B3 状态回写靠它）。
-5. **合并**：owner-only review + merge。你的自主性在生成侧（写什么、怎么写），
-   判定与合并归 owner 与 gate（§0 红线）——包括 `.github/workflows/`：能提 PR，
-   不能自批。
+5. **合并**：机器门绿后由 CEO agent 合入（DEC-011）。人不是合入瓶颈；S5 / IR 签署仍归董事长。
+   生成侧自主，判定归 gate。`.github/workflows/` 可提 PR，合入仍走门绿+DEC-011 纪律。
 
 迷路时先读 `docs/NAVIGATION.md`（全入口路由），再回来翻本手册对应阶段。
