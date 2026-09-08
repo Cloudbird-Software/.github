@@ -24,6 +24,7 @@ PM（项目经理）工作契约（ADR-0085/0095，索引型；治理仓豁免�
 | IR→spec：spec PR 必带测试设计逐类讨论（差分/属性/模糊…）+ holdout；**spec agent 不得直接实现** | [ROLE-SPEC.md](docs/agent/ROLE-SPEC.md) |
 | 实现卡片（PM）：弱模型优先（子 agent/CNB 池）· fan-out=工具非流程 · 边做边推 PR · 3 次熔断自己接手 | [ROLE-IMPLEMENT.md](docs/agent/ROLE-IMPLEMENT.md) |
 | 验收 / 人类让你处理 issues：卡/IR 完成度检查 · bug 复现三值判定 | [ROLE-ACCEPT.md](docs/agent/ROLE-ACCEPT.md) |
+| 经营公司（董事长 copilot / L4） | [ROLE-CEO.md](docs/agent/ROLE-CEO.md) |
 
 ## PM 优先（ADR-0085）
 
