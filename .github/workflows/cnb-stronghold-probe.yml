@@ -16,10 +16,19 @@ jobs:
     steps:
       - name: CNB 阵地核验（token 恒在 CI 面，agent 零接触——INV-04）
         env:
-          CNB_TOKEN: ${{ secrets[format('CNB_TOKEN_{0}', github.event.inputs.account)] }}
+          CNB_TOKEN_XUEMEI: ${{ secrets.CNB_TOKEN_XUEMEI }}
+          CNB_TOKEN_P11: ${{ secrets.CNB_TOKEN_P11 }}
+          ACCOUNT: ${{ github.event.inputs.account }}
           DO_CREATE: ${{ github.event.inputs.do_create }}
         run: |
           set -u
+          acc=$(printf '%s' "$ACCOUNT" | tr '[:lower:]' '[:upper:]')
+          case "$acc" in
+            XUEMEI) CNB_TOKEN="$CNB_TOKEN_XUEMEI" ;;
+            P11) CNB_TOKEN="$CNB_TOKEN_P11" ;;
+            *) echo "::error::unknown CNB account alias $ACCOUNT"; exit 2 ;;
+          esac
+          unset CNB_TOKEN_XUEMEI CNB_TOKEN_P11
           API=https://api.cnb.cool
           {
             echo "## CNB stronghold 探针报告（$(date -u +%FT%TZ)）"
