@@ -1,4 +1,4 @@
-# 统一证据账本·标准（v1）
+# 统一证据账本·标准（v1 + v2 扩展 profile）
 
 > IR-0006 W1-B1 / ADR-0103。判定层记录 schema：[record.schema.yaml](record.schema.yaml)
 > （`$id: cloudbird/evidence-standard/record@1`）；轨迹层指针协议：
@@ -58,3 +58,49 @@ OTel 采集面，无需字段翻译层。
 - cost-check 波次视图（W2-C3）：`subject` 聚合自本账本。
 - 三源统一查询（W1-B2）：`subject.card` 为 join key。
 - 飞书投影/SLI 周报（W3/W4）：只读消费。
+
+## Evidence schema v2 — DGA 六元组扩展 profile
+
+> DGA-human-v1.1 §2.1 / §2.2；`runtime/bin/verify_receipt_dga.py` 执法。
+
+v2 在 v1 判定层/轨迹层/丢弃层之上，新增**六元组扩展 profile**：
+回执（receipt）或契约卡（contract card）可附加 `dga` 映射块，
+将 DGA 六元组显式绑定到证据实体。机器门 `verify_receipt_dga.py`
+按本 profile 校验映射齐备性；无 `dga` 块时回退为 legacy PASS
+（不阻断既有四字段回执）。
+
+### 回执 JSON/DGA 字段映射
+
+在回执 Markdown 中，可在既有 `status / evidence / escalate / next`
+四字段之后追加 `dga` 块（YAML-like 映射）：
+
+```markdown
+status: ok
+evidence:
+  - 写 runtime/bin/verify_receipt_dga.py
+escalate: none
+next: archive
+dga:
+  Intent: "校验回执六元组映射存在性"
+  Context: "runtime/bin 已有 verify_receipt v1.8 四字段门"
+  Capability: "verify_receipt_dga.py 六元组校验脚本"
+  Action: "写新脚本 + 测试 + 接入 verify_all 套件"
+  Evidence: "test_verify_receipt_dga.py 全绿 + verify_all rc=0"
+  Accountability: "CEO Agent 负责实现；失败升级董事长"
+```
+
+- **必填**：`Intent / Context / Capability / Action / Evidence / Accountability`
+  六键全齐。
+- **可选**：`dga` 块缺失时，`verify_receipt_dga.py` 输出 `PASS (legacy)`。
+- **校验粒度**：`verify_receipt_dga.py` 只校验六键存在性与非空值，
+  不校验语义内容（语义由人工/上层 spec 负责）。
+- **契约卡复用**：契约卡已有 `## 六事映射` 小节，
+  `verify_receipt_dga.py` 复用 `six_element_check.py` 的小节截取逻辑
+  校验六元齐备；小节缺失或缺元均 FAIL。
+
+### 与 v1 schema 的关系
+
+- v1 `record.schema.yaml` 的 `subject / actor / verdict` 继续有效；
+  v2 `dga` 块是回执 payload 的扩展元数据，不入 v1 schema 必填。
+- `payload_ref` 仍指向轨迹层大体积原始数据；`dga` 块只含轻量文本映射，
+  内联在回执 Markdown 中，不受 4096 字节 payload 软上限约束。

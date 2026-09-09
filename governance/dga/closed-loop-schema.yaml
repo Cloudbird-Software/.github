@@ -1,0 +1,67 @@
+version: 1
+org: Cloudbird-Software
+title: DGA 六元组闭环 schema
+description: |
+  DGA-human-v1.1 §2.1：六元组闭环单元定义。每元含定义、必填字段、
+  机器可验证载体映射（仓/路径）。六元齐备为 A-10 开工核查前提。
+elements:
+  Intent:
+    definition: "闭环类型 + 责任人关系"
+    required_fields: [type, owner, goal]
+    carriers:
+      - repo: .github
+        path: governance/GOVERNANCE.yaml
+        field: risk_posture
+      - repo: .github
+        path: specs/IR-*/spec.md
+        field: taskId
+  Context:
+    definition: "上下文资产 + 校准域实体"
+    required_fields: [calibration_domain, models, environments]
+    carriers:
+      - repo: .github
+        path: governance/role-dga-incidence.yaml
+        field: roles
+      - repo: env-defs
+        path: environments/*.yaml
+        field: environment
+  Capability:
+    definition: "能力实体（执行器/工具）"
+    required_fields: [registered_tools, permissions]
+    carriers:
+      - repo: CI-Workflows
+        path: .github/workflows/*.yml
+        field: jobs
+      - repo: template-service
+        path: Makefile
+        field: targets
+  Action:
+    definition: "类型化写操作"
+    required_fields: [type, scope, approval]
+    carriers:
+      - repo: .github
+        path: state/inbox/*/task-*.md
+        field: schema
+      - repo: arbiter
+        path: CAS
+        field: lease
+  Evidence:
+    definition: "证据实体（回执/审计/校准事件）"
+    required_fields: [receipt, audit_trail, calibration_event]
+    carriers:
+      - repo: archive
+        path: evidence/*.jsonl
+        field: record
+      - repo: .github
+        path: state/outbox/**/*.md
+        field: status
+  Accountability:
+    definition: "责任挂接关系（必填约束）"
+    required_fields: [named_owner, review_rule, S5_role]
+    carriers:
+      - repo: .github
+        path: CODEOWNERS
+        field: pattern
+      - repo: .github
+        path: governance/GOVERNANCE.yaml
+        field: risk_posture
