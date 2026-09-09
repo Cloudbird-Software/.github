@@ -23,7 +23,7 @@ repos:
     visibility: public
     status: active
     role: 治理总仓——GOVERNANCE/rulesets/expected-state/policies/agent 标准 schema/初始化与漂移脚本
-    key_paths: [governance/, standards/agent/, scripts/, specs/]
+    key_paths: [governance/, scripts/, specs/]
     entry_protocol: true   # AGENTS.md 携带统一入口协议块（宪法 §11；drift §17 对账，ADR-0055）
 
   - name: CI-Workflows
