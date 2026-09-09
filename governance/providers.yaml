@@ -66,9 +66,9 @@ entries:
 
   # ---- IR-0010 卡 B1/B8b：新增登记 -------------------------------------------
   - name: cnb-private
-    kind: repo-private     # CNB 私有阵地（stronghold，真值区——ADR-0108 proposed）
-    entry: 待卡 B1 实测核验通过后启用（创建+API 权限+配额+不可枚举四项）
-    secrets: []            # 专用分域 token（INV-04 延伸）——B1 核验后经 owner 面注入
+    kind: repo-private     # CNB 私有阵地（stronghold，真值区——ADR-0108 accepted）
+    entry: stronghold 已建成并启用（P11 建仓 201，run 34027551317；XUEMEI 403/P11 201 权限矩阵实测；API/配额/不可枚举四项已核验通过）
+    secrets: [CNB_TOKEN_P11]            # 专用分域 token（INV-04 延伸）——stronghold 写权账号=P11
     removal: ADR-0108 失效语义节（阵地丢失=台账+Gitee 密文 bundle 重建）
     trust_level: E1
     data_classes_allowed: [D-公开, D-内部]   # 注意：不含 D-客户敏感（宪法触发器，test-providers-schema 执法）
