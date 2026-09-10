@@ -101,9 +101,7 @@
     "CB_APP_ID",
     "AGENT_APP_SECRET",
     "GOVERNANCE_TOKEN",
-    "LLM_API_KEY1",
-    "CNB_TOKEN_XUEMEI",
-    "CNB_TOKEN_P11"
+    "LLM_API_KEY1"
   ],
   "github_app": {
     "name": "cloudbrid-agent",
@@ -132,7 +130,6 @@
       "agent-tools",
       "arbiter",
       "archive",
-      "cnb-bridge",
       "mutual",
       "template-service"
     ],
@@ -168,8 +165,7 @@
       "Use-up-Plan",
       "AI_Web_School",
       "mutual",
-      "holdout",
-      "cnb-bridge"
+      "holdout"
     ]
   },
   "direct_push_exemptions": {
@@ -285,9 +281,6 @@
       "c1d31e10e7798e82f1d0de022f58ae15382af1fe",
       "be94906f09b8e810449be11be63aff8ecf1bdf0f"
     ],
-    "cnb-bridge": [
-      "6a43a24ba859a64ca9770c18fb1254050917984b"
-    ],
     "holdout": [
       "63360c581524510ef37150dd7540cb333d283014"
     ],
@@ -319,6 +312,6 @@
     ]
   },
   "notes": {
-    "adr_0085": "ADR-0085：agent-registry/agent-platform/agent-tools 退役（GitHub 归档只读）；CNB 双账号 secret 登记（EX-1 三接缝）；cnb-bridge 入 verifier 挂载面"
+    "adr_0085": "ADR-0085：agent-registry/agent-platform/agent-tools 退役（GitHub 归档只读）；EX-1 三接缝已随 ADR-0119 拆除（2026-09-10）；cnb-bridge 退役归档"
   }
 }
