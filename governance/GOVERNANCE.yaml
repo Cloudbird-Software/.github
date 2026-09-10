@@ -169,17 +169,6 @@ domains:
         platform: {github: {mechanism: ruleset-required-status, context: "adversary", workflow: "CI-Workflows/.github/workflows/adversary*.yml"}}
         verify: {method: adversary-run, on: PR}
 
-  external_compute:
-    # ADR-0085 / IR-0004 D 组（cnb-bridge-design 三平面）：发散与执行侧可外置免费算力；
-    # 判定与裁决永不外置。CNB=当前唯一实例（cnb-bridge 仓，可删除层）。
-    measures:
-      - id: EX-1
-        intent: "外部免费算力（当前=CNB CodeBuddy NPC 沙箱池）仅用于生成与执行侧（默认实现引擎：常规卡优先派发，强模型 PM 处理 gate 红/语义敏感）；判定锚点全部在 GitHub CI（沙箱自报数字不采信，INV-01/02 语义）"
-        strength: enforced
-        platform: {external: {bridge: cnb-bridge, removable: true,
-           removal_drill: "cnb-bridge/REMOVAL.md 单页清单；删除后 gate/org-gate/conductor 语义不变（ADR-0085 决策 6 断言）",
-           seams: "GOVERNANCE 本条目 + org secrets CNB_TOKEN_<ALIAS> + .github cnb-dispatch/cnb-audit 两工作流（隔离审计=cnb-audit 周扫，操作性引用越界即红）"}}
-
   evidence_ledger:
     # IR-0006 / ADR-0103：证据账本统一（判定/轨迹/丢弃三层）+ 保留策略。
     # 声明先行——enforcement 载体（evidence/ 目录、checkpoint 复算脚本）随

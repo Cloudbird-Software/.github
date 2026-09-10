@@ -9,6 +9,7 @@ org: Cloudbird-Software
 #   - status: active 的仓必须存在且 visibility 一致（drift-check §7a）
 #   - status: planned = 尚未建仓（不参与检测）；exempt = 申报但不治理（仅豁免治理基线，不豁免可见性）
 #   - 全仓公开政策（ADR-0020）：一切仓 visibility 必须 public（drift-check §7a 申报侧 + §7c 线上全量侧，含未申报仓）
+#   - CNB 私有阵地（stronghold）visibility=private 属三阵地结构例外（ADR-0108），不计入 ADR-0020 公开政策
 #   - 新仓初始化后必须申报入图（flows.new_repo step 4）
 # ============================================================================
 layers:
@@ -23,8 +24,16 @@ repos:
     visibility: public
     status: active
     role: 治理总仓——GOVERNANCE/rulesets/expected-state/policies/agent 标准 schema/初始化与漂移脚本
-    key_paths: [governance/, standards/agent/, scripts/, specs/]
+    key_paths: [governance/, scripts/, specs/]
     entry_protocol: true   # AGENTS.md 携带统一入口协议块（宪法 §11；drift §17 对账，ADR-0055）
+
+  - name: github-mirror
+    layer: L0
+    visibility: public
+    status: active
+    role: CNB 公开镜像——.github 仓的 CNB 侧映射（CNB 命名规则：前导点仓去点，.github→github-mirror）；内容由 cnb-public-mirror 工作流同步，不单独治理
+    key_paths: [governance/, scripts/, specs/]
+    entry_protocol: false   # 镜像仓，非治理主源（drift §17 不适用）
 
   - name: CI-Workflows
     layer: L0
@@ -169,15 +178,14 @@ repos:
     key_paths: [entries/, schema/, canary/]
     entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
 
-  - name: cnb-bridge
-    layer: L2
-    visibility: public
+  - name: stronghold
+    layer: L1
+    visibility: private
     status: active
-    role: CNB 免费算力桥接仓（可删除层，EX-1/ADR-0085/IR-0004 D 组）——多账号池
-      accounts.yaml（无明文 token）+派单协议 cnb_pool.py+work-inbox PM 自起协议+
-      REMOVAL.md 单页删除清单；判定永不外置（INV-02）
-    key_paths: [accounts.yaml, cnb_pool.py, work-inbox.yaml, REMOVAL.md]
-    entry_protocol: true   # ADR-0095：协议块 v2 全仓下发（drift §17 逐字节对账）
+    role: CNB 私有阵地（真值区，ADR-0108/S-7）——holdout 答案层+evalsets 答案域+判分 rubric+私有 spec；写权=P11（INV-04）；引用纪律 sealed_sha256 指针（id@sha8）
+    key_paths: [answers/, ledger/stronghold.jsonl]
+    entry_protocol: false   # CNB 私有仓，无 GitHub 协议块（drift §17 不适用）；visibility=private 属三阵地结构例外，不计入 ADR-0020 公开政策
+    note: 阵地丢失=台账+Gitee 密文 bundle 重建（ADR-0108 失效语义节）
 
   - name: env-defs
     layer: L0
