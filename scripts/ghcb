@@ -13,8 +13,7 @@
 #   —— PM 子命令（ADR-0085）——
 #   ghcb board [repo]                     # PM 全流水线视图：全部 state:* 的 IR/卡（不只 ready）
 #   ghcb dispatch <n> [repo] [--tier light|std] [--account <alias>]
-#                                         # 派 CNB：触发 .github 仓 cnb-dispatch 工作流（EX-1 经纪人，
-#                                         # key 永不入 PM 上下文）；<n>=卡 issue 号
+#                                         # 【已退役（ADR-0119）】CNB 免费算力桥接已撤销，此命令不再可用
 #   ghcb accept <IR#> [repo]              # 生成 IR 验收报告骨架（specs/IR-XXXX/acceptance.md）到 stdout
 #                                         # （ADR-0095：feature IR 开在产品仓，repo=IR 所在仓，缺省 .github）
 #   ghcb report [周号]                    # 生成运行报告骨架（archive/runs/YYYY-WNN.md 追加段）到 stdout
@@ -105,22 +104,9 @@ case "$CMD" in
     gh issue list --repo "$R" --label type:intent --state open --json number,title,labels       --jq '.[] | select([.labels[].name | startswith("state:")] | any | not) | "#\(.number) \(.title)"' 2>/dev/null || true
     ;;
   dispatch)
-    # CNB 派单（EX-1 三接缝的 PM 面）：key 留在 org secret，本命令只发 workflow_dispatch
-    N="${2:?用法: ghcb dispatch <issue#> [repo] [--tier light|std] [--account <alias>]}"
-    REPO_ARG="${3:-$(origin_repo)}"; shift 3 2>/dev/null || shift $#
-    TIER="light"; ACCOUNT=""
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --tier) TIER="$2"; shift 2 ;;
-        --account) ACCOUNT="$2"; shift 2 ;;
-        *) shift ;;
-      esac
-    done
-    CARD_REPO="$(norm_repo "$REPO_ARG")"
-    TITLE=$(gh issue view "$N" --repo "$CARD_REPO" --json title --jq .title 2>/dev/null)       || { echo "错误：卡 #$N 读取失败" >&2; exit 2; }
-    echo "派单 → CNB（卡 #$N「${TITLE}」｜档位 $TIER${ACCOUNT:+｜账号 $ACCOUNT}）"
-    echo "任务文本=卡正文+本提示；经 .github 仓 cnb-dispatch 经纪人执行（key 永不出 org secret）"
-    MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 gh workflow run cnb-dispatch.yml       -R "$ORG/.github" -f card="$CARD_REPO#$N" -f tier="$TIER" ${ACCOUNT:+-f account="$ACCOUNT"}       -f task="@card"       && echo "已触发（几分钟后在 .github 仓 Actions→cnb-dispatch 看 run；回收=gh workflow run cnb-dispatch.yml -f ... 或 cnb-audit 周扫）"       || { echo "错误：workflow 触发失败（检查 gh 凭据对 $ORG/.github 的写权）" >&2; exit 2; }
+    echo "错误：ghcb dispatch 已退役（ADR-0119：EX-1 CNB 免费算力桥接已于 2026-09-10 撤销）" >&2
+    echo "回退方案：常规开发卡默认执行者需回退付费 API 或申请新常驻机器。" >&2
+    exit 3
     ;;
   accept)
     # IR 验收报告骨架（T9 谓词消费 specs/<IR>/acceptance.md）——PM 填证据后 PR 入仓

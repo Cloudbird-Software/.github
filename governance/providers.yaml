@@ -5,20 +5,9 @@ version: 1
 #       永不进 agent/PM 上下文。调用一律借道 dispatch 经纪人工作流（工作流内取
 #       org secret → 调用 → 产物写回 run 日志/issue/artifact）。
 # 加工具 = owner 加一条 org secret + 本目录一条登记，零代码。
-# CNB 池的账号级配置在 cnb-bridge/accounts.yaml（可删除层，EX-1 隔离）；本目录
-# 只登记入口（三接缝口径：目录条目属导航性提及，不计入操作性引用）。
+# 本目录只登记入口（三接缝口径：目录条目属导航性提及，不计入操作性引用）。
 # ============================================================================
 entries:
-  - name: cnb-pool
-    kind: compute           # 免费沙箱算力池（默认实现引擎）
-    entry: cnb-dispatch（.github 仓 workflow）/ ghcb dispatch <卡#>
-    broker: .github/workflows/cnb-dispatch.yml
-    secrets: [CNB_TOKEN_XUEMEI, CNB_TOKEN_P11]
-    catalog: Cloudbird-Software/cnb-bridge accounts.yaml
-    limits: automation-limits.yaml#cnb（档位 light/std/heavy、并发、配额告警线）
-    removal: cnb-bridge/REMOVAL.md（可删除层，删除后核心治理语义不变）
-    trust_level: E3          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
-    data_classes_allowed: [D-公开]
   - name: llm-verifier
     kind: model             # 红队/verifier 判定模型（kimi k2.7）
     entry: adversary 工作流（repository_dispatch / workflow_dispatch）
@@ -46,9 +35,9 @@ entries:
     trust_level: E2          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
     data_classes_allowed: [D-公开]
   - name: self-cloud-pool
-    kind: compute           # 自有云内网算力池（公网服务器+云电脑池）
-    entry: 服务器调度器 v0=cnb-bridge 仓 selfcloud/（W2-C1 已落地：Job Contract
-           消费+短票据签发+egress allowlist+无状态约束执法；RUNBOOK §5）
+    kind: compute           # 自有云内网算力池（公网服务器+云电脑池）——已退役（2026-09-10）
+    entry: 服务器调度器 v0（W2-C1 已落地：Job Contract
+           消费+短票据签发+egress allowlist+无状态约束执法；RUNBOOK §5；源码见 archive/retired/ex-1-cnb-bridge-20260910/cnb-bridge/selfcloud/）
     placement: server-anchored（池化以服务器为锚，ADR-0103 决策 4）
     secrets: []             # 凭据一律走内网域 Vault（本条目零 org secret——分域边界）
     catalog: governance/assets-register.yaml（资产归属/额度/license 边界）
@@ -56,6 +45,7 @@ entries:
     note: 执行面基础设施≠harness（自建判据 ≥3 次妥协不变）；worker egress allowlist+W2-C1 起执法
     trust_level: E2          # FR-08 修订裁决（ADJUDICATION §9）/ IR-0010 卡 B1
     data_classes_allowed: [D-公开]
+    retired: true           # ADR-0119：cnb-bridge 退役后 selfcloud 调度器同步退役（2026-09-10）
   - name: vault
     kind: secret            # 内网 Vault（执行面凭据面）
     entry: 内网 Vault 实例（物理在内网域；org 不持有其副本）
@@ -66,9 +56,9 @@ entries:
 
   # ---- IR-0010 卡 B1/B8b：新增登记 -------------------------------------------
   - name: cnb-private
-    kind: repo-private     # CNB 私有阵地（stronghold，真值区——ADR-0108 proposed）
-    entry: 待卡 B1 实测核验通过后启用（创建+API 权限+配额+不可枚举四项）
-    secrets: []            # 专用分域 token（INV-04 延伸）——B1 核验后经 owner 面注入
+    kind: repo-private     # CNB 私有阵地（stronghold，真值区——ADR-0108 accepted）
+    entry: stronghold 已建成并启用（P11 建仓 201，run 34027551317；XUEMEI 403/P11 201 权限矩阵实测；API/配额/不可枚举四项已核验通过）
+    secrets: [CNB_TOKEN_P11]            # 专用分域 token（INV-04 延伸）——stronghold 写权账号=P11
     removal: ADR-0108 失效语义节（阵地丢失=台账+Gitee 密文 bundle 重建）
     trust_level: E1
     data_classes_allowed: [D-公开, D-内部]   # 注意：不含 D-客户敏感（宪法触发器，test-providers-schema 执法）

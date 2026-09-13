@@ -11,6 +11,7 @@
 #   源 5  tickets    Cloudbird-Software/cnb-bridge   @ tickets-ledger  tickets.jsonl
 #   （W2-C1 内网调度器短票据 grant/revoke——AC-5b 统一账本；Go 发射器产出，
 #    链形态与 evidence_shadow.py 逐字节兼容，金向量锚定）
+#   【已退役（ADR-0119）】cnb-bridge 仓与 selfcloud 调度器已退役，tickets-ledger 源永久关闭。
 #   源 6  feishu     Cloudbird-Software/.github      @ feishu-ledger   governance/feishu/shadow-evidence.jsonl
 #   （W3-F1 飞书多维表格投影同步/对账/重建演练事件——payload 带每轮 api_calls
 #    计数=AC-7a 调用账本可查询锚点；日常 15min 轮影子随 runner 销毁=丢弃层，
@@ -87,7 +88,7 @@ fi
 DRILL_OK=0; fetch_file "Cloudbird-Software/.github" "drill-ledger" "governance/drill/shadow-evidence.jsonl" "$TMP/drill.jsonl" && DRILL_OK=1 || [[ $? -eq 1 ]] || exit 2
 BUTLER_OK=0; fetch_file "Cloudbird-Software/.github" "butler-ledger" "governance/butler/shadow-evidence.jsonl" "$TMP/butler.jsonl" && BUTLER_OK=1 || [[ $? -eq 1 ]] || exit 2
 ELEV_OK=0; fetch_file "Cloudbird-Software/.github" "elevation-ledger" "governance/elevation/shadow-evidence.jsonl" "$TMP/elev.jsonl" && ELEV_OK=1 || [[ $? -eq 1 ]] || exit 2
-TICKET_OK=0; fetch_file "Cloudbird-Software/cnb-bridge" "tickets-ledger" "tickets.jsonl" "$TMP/tickets.jsonl" && TICKET_OK=1 || [[ $? -eq 1 ]] || exit 2
+TICKET_OK=0  # cnb-bridge 已退役（ADR-0119），tickets-ledger 源永久关闭
 FEISHU_OK=0; fetch_file "Cloudbird-Software/.github" "feishu-ledger" "governance/feishu/shadow-evidence.jsonl" "$TMP/feishu.jsonl" && FEISHU_OK=1 || [[ $? -eq 1 ]] || exit 2
 ENVD_OK=0; fetch_file "Cloudbird-Software/.github" "env-ledger" "governance/env/shadow-evidence.jsonl" "$TMP/envd.jsonl" && ENVD_OK=1 || [[ $? -eq 1 ]] || exit 2
 
