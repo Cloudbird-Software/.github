@@ -224,5 +224,13 @@ repos:
     key_paths: [README.md, VOCABULARY.md, absorption-map/, patches/]
     entry_protocol: false   # 文档仓无协议块（drift §17 不适用）；AGENTS.md 索引块待补（下批 PR）
 
+  - name: governance-kernel
+    layer: L0
+    visibility: public
+    status: active
+    role: 治理内核主仓——DGA dogfood 实例+自举 speceval+运行报告+红队闭环（runtime/bin 38+ 脚本/state/specs/kernel/ 24 speceval/plans/ 建设方案）
+    key_paths: [runtime/, state/specs/kernel/, plans/, decisions/, reports/]
+    entry_protocol: true   # 治理内核仓自带 AGENTS.md 入口协议块
+
 
 external_upstreams: []
