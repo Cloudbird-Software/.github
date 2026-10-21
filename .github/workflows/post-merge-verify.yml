@@ -79,7 +79,7 @@ jobs:
       - name: App 令牌（AG-1 身份——revert PR 的 gate 须能被触发；GITHUB_TOKEN 造的 PR 不触发工作流）
         id: app
         continue-on-error: true   # App 未安装本仓时降级为仅告警（不静默——下方有判定）
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: 4632704
           private-key: ${{ secrets.AGENT_APP_SECRET }}
